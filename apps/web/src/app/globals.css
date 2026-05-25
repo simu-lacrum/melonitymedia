@@ -53,12 +53,15 @@
 
 /* ── Tailwind v4 Theme Tokens ───────────────────────────── */
 @theme {
-  /* Colors — from design.md */
+  /* Colors — from design.md + logo gradient */
   --color-night-base: #1c2026;
   --color-header-glass: #1c202666;
   --color-surface-dark: #262a30;
+  --color-surface-elevated: #2d3139;
   --color-melon-pink: #ff1469;
   --color-pink-alpha: #ff146940;
+  --color-ice-cyan: #40D3F5;
+  --color-cyan-alpha: #40D3F540;
   --color-pure-white: #ffffff;
   --color-success-green: #00d287;
   --color-alert-red: #f43f5e;
@@ -191,4 +194,114 @@ h2 {
 :focus-visible {
   outline: 2px solid var(--color-melon-pink);
   outline-offset: 2px;
+}
+
+/* ── Landing Page Animations ───────────────────────────── */
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-20px); }
+}
+
+@keyframes float-slow {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-12px) rotate(2deg); }
+}
+
+@keyframes gradient-shift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(40px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { filter: drop-shadow(0 0 20px rgba(255, 20, 105, 0.4)) drop-shadow(0 0 60px rgba(64, 211, 245, 0.15)); }
+  50% { filter: drop-shadow(0 0 40px rgba(255, 20, 105, 0.6)) drop-shadow(0 0 80px rgba(64, 211, 245, 0.25)); }
+}
+
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+/* ── Landing Utility Classes ───────────────────────────── */
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.animate-float-slow {
+  animation: float-slow 8s ease-in-out infinite;
+}
+
+.animate-gradient {
+  background-size: 200% 200%;
+  animation: gradient-shift 4s ease infinite;
+}
+
+.animate-fade-up {
+  animation: fade-up 0.8s ease-out forwards;
+  opacity: 0;
+}
+
+.animate-glow-pulse {
+  animation: glow-pulse 3s ease-in-out infinite;
+}
+
+.animate-spin-slow {
+  animation: spin-slow 20s linear infinite;
+}
+
+.animate-shimmer {
+  background-size: 200% 100%;
+  animation: shimmer 2s linear infinite;
+}
+
+/* Stagger delays for sequential fade-in */
+.stagger-1 { animation-delay: 0.1s; }
+.stagger-2 { animation-delay: 0.2s; }
+.stagger-3 { animation-delay: 0.3s; }
+.stagger-4 { animation-delay: 0.4s; }
+.stagger-5 { animation-delay: 0.5s; }
+.stagger-6 { animation-delay: 0.6s; }
+
+/* Gradient text utility */
+.text-gradient-brand {
+  background: linear-gradient(135deg, #ff1469 0%, #40D3F5 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Glass card for landing */
+.glass-card {
+  background: rgba(38, 42, 48, 0.6);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 16px;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .animate-float,
+  .animate-float-slow,
+  .animate-gradient,
+  .animate-fade-up,
+  .animate-glow-pulse,
+  .animate-spin-slow,
+  .animate-shimmer {
+    animation: none !important;
+  }
+  .animate-fade-up { opacity: 1; }
 }

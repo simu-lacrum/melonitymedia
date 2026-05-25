@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  LayoutDashboard, Users, Briefcase,
+  LayoutDashboard, Users, Briefcase, Wifi,
   Server, UserCog, Shield, X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -18,6 +18,7 @@ const accountNav = [
   { href: '/account/dashboard', label: 'Дашборд', icon: LayoutDashboard },
   { href: '/account/profiles', label: 'Аккаунты', icon: Users },
   { href: '/account/workspace', label: 'Рабочая область', icon: Briefcase },
+  { href: '/account/proxies', label: 'Прокси', icon: Wifi },
 ];
 
 const adminNav = [
