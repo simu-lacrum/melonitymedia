@@ -199,4 +199,76 @@ router.post('/bulk-proxy', async (req: Request, res: Response) => {
   }
 });
 
+// ── DELETE /bulk — mass delete accounts ─────────────────────
+router.delete('/bulk', async (req: Request, res: Response) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      res.status(400).json({ error: 'Выберите хотя бы один аккаунт' });
+      return;
+    }
+
+    const result = await prisma.socialAccount.deleteMany({
+      where: {
+        id: { in: ids },
+        userId: req.user!.id,
+      },
+    });
+
+    res.json({ deleted: result.count });
+  } catch (err) {
+    console.error('[Accounts] Bulk delete error:', err);
+    res.status(500).json({ error: 'Ошибка при массовом удалении' });
+  }
+});
+
+// ── POST /warmup — quick-launch warmup from profiles page ───
+router.post('/warmup', async (req: Request, res: Response) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      res.status(400).json({ error: 'Выберите хотя бы один аккаунт' });
+      return;
+    }
+
+    // Create task + dispatch to BullMQ
+    const task = await prisma.task.create({
+      data: {
+        userId: req.user!.id,
+        type: 'WARMUP',
+        config: { accountIds: ids, threads: 3 },
+      },
+    });
+
+    res.status(201).json({ task });
+  } catch (err) {
+    console.error('[Accounts] Quick warmup error:', err);
+    res.status(500).json({ error: 'Ошибка при запуске прогрева' });
+  }
+});
+
+// ── POST /cookies — quick-launch cookies farming from profiles ─
+router.post('/cookies', async (req: Request, res: Response) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      res.status(400).json({ error: 'Выберите хотя бы один аккаунт' });
+      return;
+    }
+
+    const task = await prisma.task.create({
+      data: {
+        userId: req.user!.id,
+        type: 'COOKIES',
+        config: { accountIds: ids, threads: 3 },
+      },
+    });
+
+    res.status(201).json({ task });
+  } catch (err) {
+    console.error('[Accounts] Quick cookies error:', err);
+    res.status(500).json({ error: 'Ошибка при запуске фарминга cookies' });
+  }
+});
+
 export default router;
