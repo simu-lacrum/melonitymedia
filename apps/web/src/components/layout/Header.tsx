@@ -8,7 +8,7 @@ import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 interface HeaderProps {
-  user?: { name?: string; email: string; role: string } | null;
+  user?: { name?: string | null; email: string; role: string } | null;
   onMenuToggle?: () => void;
 }
 

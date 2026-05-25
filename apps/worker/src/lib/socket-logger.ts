@@ -3,17 +3,37 @@
 //
 // Each log message is sent to the user's Socket.io room,
 // so they see a live terminal of what the worker is doing.
+//
+// Two usage modes:
+// 1. Singleton: socketLogger.connect(...) → socketLogger.log(...)
+// 2. Per-job:   new SocketLogger(userId) — auto-connects
 // ─────────────────────────────────────────────────────────────
 
 import { io, Socket } from 'socket.io-client';
 
 const API_URL = process.env.CORS_ORIGIN || 'http://localhost:4000';
 
-class SocketLogger {
+export class SocketLogger {
   private socket: Socket | null = null;
   private userId: string | null = null;
 
-  /** Connect to the API server's /logs namespace */
+  /**
+   * Create a per-job logger that auto-connects.
+   * Used by handlers: new SocketLogger(userId)
+   */
+  constructor(userId?: string) {
+    if (userId) {
+      this.userId = userId;
+      this.socket = io(`${API_URL}/logs`, {
+        auth: { userId },
+        transports: ['websocket'],
+        reconnection: true,
+        reconnectionDelay: 1000,
+      });
+    }
+  }
+
+  /** Connect to the API server's /logs namespace (singleton mode) */
   connect(token: string, userId: string): void {
     this.userId = userId;
     this.socket = io(`${API_URL}/logs`, {
@@ -49,6 +69,23 @@ class SocketLogger {
     console.log(`${prefix} ${message}`);
   }
 
+  // ── Convenience methods (used by handlers) ────────────────
+
+  /** Send info-level log */
+  info(message: string, taskId?: string): void {
+    this.log('INFO', message, taskId);
+  }
+
+  /** Send warning-level log */
+  warn(message: string, taskId?: string): void {
+    this.log('WARN', message, taskId);
+  }
+
+  /** Send error-level log */
+  error(message: string, taskId?: string): void {
+    this.log('ERROR', message, taskId);
+  }
+
   /** Notify task progress update */
   progress(taskId: string, progress: number): void {
     if (!this.socket) return;
@@ -78,4 +115,5 @@ class SocketLogger {
   }
 }
 
+/** Singleton instance for global worker logging */
 export const socketLogger = new SocketLogger();

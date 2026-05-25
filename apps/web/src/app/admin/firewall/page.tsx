@@ -156,17 +156,7 @@ export default function FirewallPage() {
         }
       />
 
-      {/* Add IP Modal */}
-      <Modal
-        open={showAddModal}
-        onClose={() => setShowAddModal(false)}
-        title="Заблокировать IP-адрес"
-        confirmLabel="Заблокировать"
-        onConfirm={handleAdd}
-        loading={addLoading}
-      >
-        {/* Note: Modal doesn't support children yet, but IP/reason are in state */}
-      </Modal>
+      {/* Add IP — custom overlay since Modal doesn't support children */}
 
       {/* We need inline form since Modal doesn't have children slot - use a custom overlay */}
       {showAddModal && (

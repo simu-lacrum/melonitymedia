@@ -4,18 +4,35 @@
 // This process runs inside a Docker container with:
 // - Xvfb (virtual display at :99)
 // - Google Chrome (real browser, not Chromium)
-// - Stealth plugin (anti-detection)
+// - UndetectedChrome (anti-detection ChromeDriver patches)
 //
 // It consumes jobs from 6 BullMQ queues and dispatches them
 // to the appropriate handler. Each handler gets a fresh
 // BrowserAutomation instance per job.
 //
+// Queue → Handler mapping:
+//   upload        → uploadHandler     (video upload to TikTok/YT)
+//   warmup        → warmupHandler     (profile warmup via browsing)
+//   cookies       → cookiesHandler    (refresh session cookies)
+//   edit-profile  → editProfileHandler(update profile bio/name)
+//   analytics-cron→ analyticsHandler  (scrape profile stats)
+//   cleanup       → cleanupHandler    (delete videos after upload)
+//
 // Lifecycle: connect → consume → process → report → wait
 // ─────────────────────────────────────────────────────────────
 
 import 'dotenv/config';
-import { Worker } from 'bullmq';
+import { Worker, Job } from 'bullmq';
 import Redis from 'ioredis';
+
+import {
+  uploadHandler,
+  warmupHandler,
+  cookiesHandler,
+  analyticsHandler,
+  editProfileHandler,
+  cleanupHandler,
+} from './handlers/index.js';
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
@@ -23,53 +40,69 @@ const connection = new Redis(REDIS_URL, {
   maxRetriesPerRequest: null,
 });
 
-// ── Queue Handlers ──────────────────────────────────────────
-// Each queue gets its own BullMQ Worker instance.
-// Handlers are imported from the handlers/ directory.
-// For now, we register placeholder handlers that log the job data.
+// ── Queue → Handler Mapping ─────────────────────────────────
+// Each queue has a dedicated handler function and concurrency limit.
+// Upload/warmup run 3 concurrent (limited by proxy count),
+// cleanup runs 1 (filesystem operations, no race conditions).
 
-const QUEUES = ['upload', 'warmup', 'cookies', 'edit-profile', 'analytics-cron', 'cleanup'] as const;
+interface QueueConfig {
+  name: string;
+  handler: (job: Job) => Promise<unknown>;
+  concurrency: number;
+}
+
+const QUEUE_CONFIGS: QueueConfig[] = [
+  { name: 'upload',         handler: uploadHandler as (job: Job) => Promise<unknown>,       concurrency: 3 },
+  { name: 'warmup',         handler: warmupHandler as (job: Job) => Promise<unknown>,       concurrency: 3 },
+  { name: 'cookies',        handler: cookiesHandler as (job: Job) => Promise<unknown>,      concurrency: 3 },
+  { name: 'edit-profile',   handler: editProfileHandler as (job: Job) => Promise<unknown>,  concurrency: 3 },
+  { name: 'analytics-cron', handler: analyticsHandler as (job: Job) => Promise<unknown>,    concurrency: 2 },
+  { name: 'cleanup',        handler: cleanupHandler as (job: Job) => Promise<unknown>,      concurrency: 1 },
+];
 
 const workers: Worker[] = [];
 
-for (const queueName of QUEUES) {
+for (const config of QUEUE_CONFIGS) {
   const worker = new Worker(
-    queueName,
+    config.name,
     async (job) => {
-      console.log(`[Worker:${queueName}] Processing job ${job.id}`);
-      console.log(`[Worker:${queueName}] Data:`, JSON.stringify(job.data, null, 2));
+      console.log(`\n[Worker:${config.name}] ▶ Job ${job.id} started`);
+      console.log(`[Worker:${config.name}] Data: userId=${job.data.userId}`);
 
-      // TODO: Import and call actual handlers
-      // Example for upload queue:
-      // if (queueName === 'upload') await uploadHandler(job);
-
-      // Simulate work for now
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      console.log(`[Worker:${queueName}] Job ${job.id} completed`);
+      try {
+        const result = await config.handler(job);
+        console.log(`[Worker:${config.name}] ✅ Job ${job.id} completed`);
+        return result;
+      } catch (err) {
+        console.error(`[Worker:${config.name}] ❌ Job ${job.id} failed:`, err);
+        throw err;
+      }
     },
     {
       connection,
-      concurrency: queueName === 'cleanup' ? 1 : 3,
+      concurrency: config.concurrency,
     },
   );
 
   worker.on('failed', (job, err) => {
-    console.error(`[Worker:${queueName}] Job ${job?.id} failed:`, err.message);
+    console.error(`[Worker:${config.name}] Job ${job?.id} FAILED:`, err.message);
   });
 
   worker.on('completed', (job) => {
-    console.log(`[Worker:${queueName}] Job ${job.id} completed successfully`);
+    console.log(`[Worker:${config.name}] Job ${job.id} COMPLETED`);
   });
 
   workers.push(worker);
 }
 
 console.log(`
-╔══════════════════════════════════════════════╗
-║     MelonityMedia Worker                     ║
-║     Listening on ${QUEUES.length} queues                     ║
-║     Display: ${process.env.DISPLAY || 'N/A'}                           ║
-╚══════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════╗
+║     MelonityMedia Worker v2.0                        ║
+║     Browser: UndetectedChrome (Selenium)             ║
+║     Parser:  cheerio (bs4 equivalent)                ║
+║     Queues:  ${QUEUE_CONFIGS.length} active                                  ║
+║     Display: ${process.env.DISPLAY || 'N/A'}                                     ║
+╚══════════════════════════════════════════════════════╝
 `);
 
 // ── Graceful Shutdown ───────────────────────────────────────
