@@ -29,8 +29,8 @@
 | Cache/Queue Broker | Redis | 7 |
 | Task Queue | BullMQ | 5.x |
 | Realtime | Socket.io | 4.x |
-| Browser Automation | puppeteer-extra + stealth | latest |
-| HTML Parser | cheerio | latest |
+| Browser Automation | undetected-chromedriver-js + selenium-webdriver | latest |
+| HTML Parser | cheerio (Node.js bs4) | latest |
 | Runtime | Node.js | ≥ 20 |
 | Language | TypeScript | 5.7+ |
 

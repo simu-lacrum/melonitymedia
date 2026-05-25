@@ -1,30 +1,31 @@
 // ─────────────────────────────────────────────────────────────
-// BrowserAutomation — Core Puppeteer Wrapper
+// BrowserAutomation — Undetected ChromeDriver + Selenium Wrapper
 //
-// This is the beating heart of the worker. It handles:
-// 1. Proxy rotation (mobile modems: GET link → wait 12s)
-// 2. Proxy auth via dynamic Chrome extension (Manifest V2)
-// 3. Stealth mode (puppeteer-extra-plugin-stealth)
-// 4. DOM parsing via cheerio (no extra browser overhead)
-// 5. Clean browser shutdown (no zombie processes)
+// Replaces Puppeteer with undetected-chromedriver-js for superior
+// anti-detection. Platforms like TikTok and YouTube aggressively
+// detect automated browsers — UC patches the ChromeDriver binary
+// to remove all Selenium/WebDriver fingerprints.
 //
-// Anti-fraud strategy:
-// - headless:false inside Xvfb = undetectable by platforms
-// - Stealth plugin patches navigator, webdriver, plugins
-// - Real Chrome (not Chromium) for genuine fingerprint
-// - Random viewport + timezone matching proxy geo
+// Key architecture decisions:
+// 1. undetected-chromedriver-js handles driver patching automatically
+// 2. Proxy injection via Chrome launch args (--proxy-server)
+// 3. Proxy auth via background.js extension (Manifest V2)
+// 4. Page parsing via cheerio (Node.js equivalent of Python's bs4)
+// 5. Mobile proxy IP rotation via HTTP GET to modem API
+// 6. Headless mode configurable (default: false for Xvfb)
+//
+// Python equivalent (for reference):
+//   import undetected_chromedriver as uc
+//   driver = uc.Chrome(headless=True, use_subprocess=False)
+//   driver.get('https://nowsecure.nl')
 // ─────────────────────────────────────────────────────────────
 
-import puppeteer from 'puppeteer-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import { type Browser, type Page } from 'puppeteer-extra/dist/puppeteer';
+import UndetectedChrome from 'undetected-chromedriver-js';
+import { WebDriver, By, until } from 'selenium-webdriver';
 import * as cheerio from 'cheerio';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-
-// Apply stealth patches — must be done before launch
-puppeteer.use(StealthPlugin());
 
 // ── Constants ───────────────────────────────────────────────
 
@@ -33,8 +34,8 @@ puppeteer.use(StealthPlugin());
 // 12s is a safe middle ground based on real-world testing.
 const PROXY_ROTATION_DELAY_MS = 12_000;
 
-// Chrome launch arguments optimized for automation + stealth
-const CHROME_ARGS = [
+// Default Chrome arguments for stealth + stability
+const DEFAULT_CHROME_ARGS = [
   '--no-sandbox',                     // Required in Docker
   '--disable-setuid-sandbox',         // Required in Docker
   '--disable-dev-shm-usage',          // Prevent /dev/shm issues in Docker
@@ -48,26 +49,32 @@ const CHROME_ARGS = [
 
 // ── Types ───────────────────────────────────────────────────
 
-interface ProxyConfig {
+export interface ProxyConfig {
   host: string;
   port: number;
   username?: string;
   password?: string;
+  /** If true, IP will be rotated before each session via rotationLink */
   isRotating?: boolean;
+  /** HTTP endpoint that triggers modem IP rotation (e.g., proxys.io API) */
   rotationLink?: string;
 }
 
-interface BrowserAutomationOptions {
+export interface BrowserAutomationOptions {
   proxy?: ProxyConfig;
+  /** Custom user agent string (default: Chrome mobile UA) */
   userAgent?: string;
+  /** Run in headless mode. Default false — we use Xvfb for stealth */
   headless?: boolean;
+  /** Page load timeout in milliseconds */
   timeout?: number;
 }
 
 // ── BrowserAutomation Class ─────────────────────────────────
 
 export class BrowserAutomation {
-  private browser: Browser | null = null;
+  private ucInstance: UndetectedChrome | null = null;
+  private driver: WebDriver | null = null;
   private proxy?: ProxyConfig;
   private tempExtDir?: string;
 
@@ -75,36 +82,46 @@ export class BrowserAutomation {
     this.proxy = options.proxy;
   }
 
+  // ── Proxy IP Rotation ────────────────────────────────────
+
   /**
    * Rotate mobile proxy IP by calling the modem's API.
    * The modem physically disconnects and reconnects to the cell tower,
    * getting a new IP from the carrier's DHCP pool.
+   *
+   * Flow: GET rotationLink → wait 12s → new IP assigned
    */
   private async _rotateMobileProxyIP(): Promise<void> {
     if (!this.proxy?.isRotating || !this.proxy.rotationLink) return;
 
-    console.log('[Browser] Rotating mobile proxy IP...');
+    console.log('[UC] Rotating mobile proxy IP...');
 
     try {
       const response = await fetch(this.proxy.rotationLink);
       if (!response.ok) {
-        console.warn(`[Browser] Rotation link returned ${response.status}`);
+        console.warn(`[UC] Rotation link returned ${response.status}`);
       }
     } catch (err) {
-      console.warn('[Browser] Rotation request failed:', err);
+      console.warn('[UC] Rotation request failed:', err);
       // Don't throw — rotation failure shouldn't block the entire job
     }
 
     // Wait for modem to restart and get new IP
-    console.log(`[Browser] Waiting ${PROXY_ROTATION_DELAY_MS / 1000}s for modem restart...`);
+    console.log(`[UC] Waiting ${PROXY_ROTATION_DELAY_MS / 1000}s for modem restart...`);
     await new Promise(resolve => setTimeout(resolve, PROXY_ROTATION_DELAY_MS));
   }
 
+  // ── Proxy Auth Extension ─────────────────────────────────
+
   /**
    * Create a temporary Chrome extension for proxy authentication.
+   *
    * Why an extension? Chrome's `--proxy-server` flag doesn't support
    * username:password auth. The only way to inject credentials is
    * via a Manifest V2 extension using webRequest.onAuthRequired.
+   *
+   * This is the same technique used by the Python undetected-chromedriver
+   * when handling authenticated proxies.
    */
   private _createProxyExtension(): string {
     if (!this.proxy?.username || !this.proxy?.password) {
@@ -112,15 +129,17 @@ export class BrowserAutomation {
     }
 
     // Create temp directory for the extension files
-    const extDir = fs.mkdtempSync(path.join(os.tmpdir(), 'proxy-ext-'));
+    const extDir = fs.mkdtempSync(path.join(os.tmpdir(), 'uc-proxy-ext-'));
 
     // Manifest V2 (V3 doesn't support webRequest.onAuthRequired blocking)
     const manifest = {
       version: '1.0.0',
       manifest_version: 2,
-      name: 'Proxy Auth',
-      permissions: ['proxy', 'tabs', 'unlimitedStorage', 'storage',
-        '<all_urls>', 'webRequest', 'webRequestBlocking'],
+      name: 'Proxy Auth Helper',
+      permissions: [
+        'proxy', 'tabs', 'unlimitedStorage', 'storage',
+        '<all_urls>', 'webRequest', 'webRequestBlocking',
+      ],
       background: { scripts: ['background.js'] },
     };
 
@@ -163,16 +182,21 @@ export class BrowserAutomation {
     return extDir;
   }
 
+  // ── Driver Initialization ────────────────────────────────
+
   /**
-   * Initialize the browser with all stealth + proxy settings.
-   * Returns a fresh Page ready for automation.
+   * Initialize the Undetected ChromeDriver with all settings.
+   * Returns the Selenium WebDriver ready for automation.
+   *
+   * Equivalent Python:
+   *   driver = uc.Chrome(headless=True, use_subprocess=False)
    */
-  async initDriver(): Promise<Page> {
+  async initDriver(): Promise<WebDriver> {
     // Step 1: Rotate proxy IP if using mobile modem
     await this._rotateMobileProxyIP();
 
-    // Step 2: Build launch arguments
-    const args = [...CHROME_ARGS];
+    // Step 2: Build Chrome arguments
+    const args = [...DEFAULT_CHROME_ARGS];
 
     if (this.proxy) {
       if (this.proxy.username && this.proxy.password) {
@@ -180,67 +204,163 @@ export class BrowserAutomation {
         const extDir = this._createProxyExtension();
         args.push(`--disable-extensions-except=${extDir}`);
         args.push(`--load-extension=${extDir}`);
-      } else {
-        // Simple proxy without auth
-        args.push(`--proxy-server=http://${this.proxy.host}:${this.proxy.port}`);
       }
+      // Always set the proxy server
+      args.push(`--proxy-server=http://${this.proxy.host}:${this.proxy.port}`);
     }
 
-    // Step 3: Launch browser
+    // Step 3: Build UndetectedChrome instance
     // headless:false + Xvfb = real browser behavior, undetectable
-    this.browser = await puppeteer.launch({
+    this.ucInstance = new UndetectedChrome({
       headless: this.options.headless ?? false,
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-      args,
-      defaultViewport: { width: 412, height: 915, isMobile: true },
-      timeout: this.options.timeout || 30_000,
+      arguments: args,
     });
 
-    const page = await this.browser.newPage();
+    // Step 4: Build the Selenium WebDriver
+    const driver = await this.ucInstance.build();
+    this.driver = driver;
 
-    // Set custom user agent if provided
-    if (this.options.userAgent) {
-      await page.setUserAgent(this.options.userAgent);
-    }
-
-    // Block unnecessary resource types for faster page loads
-    await page.setRequestInterception(true);
-    page.on('request', (req) => {
-      const blocked = ['font', 'image', 'stylesheet'];
-      // Only block in headless mode; in visual mode we need full rendering
-      if (this.options.headless && blocked.includes(req.resourceType())) {
-        req.abort();
-      } else {
-        req.continue();
-      }
+    // Step 5: Configure timeouts
+    const timeout = this.options.timeout || 30_000;
+    await driver.manage().setTimeouts({
+      implicit: timeout,
+      pageLoad: timeout,
+      script: timeout,
     });
 
-    return page;
+    console.log('[UC] Browser initialized successfully');
+    return driver;
+  }
+
+  // ── Navigation Helpers ───────────────────────────────────
+
+  /**
+   * Navigate to a URL and wait for the page to load.
+   *
+   * Equivalent Python:
+   *   driver.get('https://example.com')
+   */
+  async navigateTo(url: string): Promise<void> {
+    if (!this.driver) throw new Error('Driver not initialized. Call initDriver() first.');
+    console.log(`[UC] Navigating to: ${url}`);
+    await this.driver.get(url);
   }
 
   /**
    * Get a cheerio instance from the current page HTML.
-   * Use this for data extraction instead of page.$eval —
-   * cheerio is faster and doesn't require the browser context.
+   * cheerio is the Node.js equivalent of Python's BeautifulSoup (bs4).
+   *
+   * Equivalent Python:
+   *   from bs4 import BeautifulSoup
+   *   soup = BeautifulSoup(driver.page_source, 'html.parser')
+   *
+   * Usage:
+   *   const $ = await automation.getSoup();
+   *   const title = $('h1').text();
+   *   const links = $('a').map((i, el) => $(el).attr('href')).get();
    */
-  async getSoup(page: Page): Promise<cheerio.CheerioAPI> {
-    const html = await page.content();
+  async getSoup(): Promise<cheerio.CheerioAPI> {
+    if (!this.driver) throw new Error('Driver not initialized. Call initDriver() first.');
+    const html = await this.driver.getPageSource();
     return cheerio.load(html);
   }
+
+  /**
+   * Get the raw page HTML source.
+   *
+   * Equivalent Python:
+   *   html = driver.page_source
+   */
+  async getPageSource(): Promise<string> {
+    if (!this.driver) throw new Error('Driver not initialized.');
+    return this.driver.getPageSource();
+  }
+
+  /**
+   * Take a screenshot and save to a file.
+   *
+   * Equivalent Python:
+   *   driver.save_screenshot('screenshot.png')
+   */
+  async saveScreenshot(filepath: string): Promise<void> {
+    if (!this.driver) throw new Error('Driver not initialized.');
+    const data = await this.driver.takeScreenshot();
+    fs.writeFileSync(filepath, data, 'base64');
+    console.log(`[UC] Screenshot saved: ${filepath}`);
+  }
+
+  /**
+   * Wait for an element to appear on the page.
+   *
+   * Equivalent Python:
+   *   WebDriverWait(driver, 10).until(
+   *     EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+   *   )
+   */
+  async waitForElement(cssSelector: string, timeoutMs: number = 10_000): Promise<void> {
+    if (!this.driver) throw new Error('Driver not initialized.');
+    await this.driver.wait(until.elementLocated(By.css(cssSelector)), timeoutMs);
+  }
+
+  /**
+   * Execute JavaScript in the browser context.
+   *
+   * Equivalent Python:
+   *   driver.execute_script("return document.title")
+   */
+  async executeScript<T>(script: string, ...args: unknown[]): Promise<T> {
+    if (!this.driver) throw new Error('Driver not initialized.');
+    return this.driver.executeScript(script, ...args) as Promise<T>;
+  }
+
+  /**
+   * Add a random delay to simulate human behavior.
+   * Anti-fraud systems track timing patterns — consistent delays
+   * are a strong signal of automation.
+   */
+  async humanDelay(minMs: number = 1000, maxMs: number = 3000): Promise<void> {
+    const delay = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
+    await new Promise(resolve => setTimeout(resolve, delay));
+  }
+
+  /**
+   * Get the underlying Selenium WebDriver for advanced operations.
+   * Use sparingly — prefer the wrapped methods above.
+   */
+  getDriver(): WebDriver {
+    if (!this.driver) throw new Error('Driver not initialized.');
+    return this.driver;
+  }
+
+  // ── Cleanup ──────────────────────────────────────────────
 
   /**
    * Close browser and clean up temp files.
    * CRITICAL: Always call this, even on error. Zombie Chrome
    * processes will eat all server RAM.
+   *
+   * Equivalent Python:
+   *   driver.quit()
    */
   async close(): Promise<void> {
     try {
-      if (this.browser) {
-        await this.browser.close();
-        this.browser = null;
+      if (this.ucInstance) {
+        await this.ucInstance.quit();
+        this.ucInstance = null;
+        this.driver = null;
+        console.log('[UC] Browser closed');
       }
     } catch (err) {
-      console.error('[Browser] Error closing browser:', err);
+      console.error('[UC] Error closing browser:', err);
+      // Try force-killing via driver if ucInstance.quit() failed
+      try {
+        if (this.driver) {
+          await this.driver.quit();
+          this.driver = null;
+        }
+      } catch {
+        // Last resort — process will be orphaned
+      }
     }
 
     // Clean up temp proxy extension directory
