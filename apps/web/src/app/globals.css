@@ -6,6 +6,7 @@
 /* ─────────────────────────────────────────────────────────── */
 
 @import "tailwindcss";
+@source "../";
 
 /* ── Web Font: Roboto Flex (Variable) ───────────────────── */
 @font-face {
@@ -148,6 +149,7 @@ h1 {
     width: 100%;
     max-width: 1408px;
     margin: 0 auto;
+    padding: 0 1.5rem;
 }
 
 /* ── Strict Spatial Aesthetics (No Neon) ────────────────── */
