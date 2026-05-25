@@ -1,13 +1,16 @@
 // ─────────────────────────────────────────────────────────────
-// MelonityMedia — Prisma Schema
+// MelonityMedia — Prisma Schema v3.0
 // Source of truth for all database models.
 //
-// Key design decisions:
-// 1. Every user-facing model has userId FK — strict tenant isolation
-// 2. Video has shouldDelete flag — auto-cleanup after platform upload
-// 3. Passwords stored as bcrypt hashes (never plaintext)
-// 4. SocialAccount passwords encrypted at app layer
-// 5. AuditLog for admin tracking (who did what)
+// Key changes in v3:
+// 1. SocialAccount: cookie-based auth (encrypted cookies in DB)
+// 2. SocialAccount: per-account fingerprint stored as JSON
+// 3. SocialAccount: warmup tracking fields
+// 4. Proxy: type classification (LTE_MOBILE, STATIC_RESIDENTIAL, DATACENTER)
+// 5. Proxy: carrier/ASN validation fields
+// 6. Proxy: rotation cooldown and last rotated timestamp
+// 7. AccountStatus: new states (EXPIRED_COOKIES, SHADOWBAN_SUSPECTED, WARMING_UP)
+// 8. TaskType: new SHADOWBAN_CHECK type
 // ─────────────────────────────────────────────────────────────
 
 generator client {
@@ -20,7 +23,7 @@ datasource db {
 }
 
 // ── User ────────────────────────────────────────────────────
-// The webmaster (traffic arbitrageur) who owns accounts, 
+// The webmaster (traffic arbitrageur) who owns accounts,
 // proxies, and tasks. First registered user gets ADMIN role.
 model User {
   id           String    @id @default(cuid())
@@ -50,23 +53,45 @@ enum Role {
 
 // ── Social Account ──────────────────────────────────────────
 // TikTok or YouTube account managed by the webmaster.
-// Password is encrypted at application layer (not by Prisma).
+// Auth: cookie-only. Cookies encrypted with AES-256-GCM.
+// Fingerprint generated once and never changed.
 model SocialAccount {
   id          String        @id @default(cuid())
   userId      String
   platform    Platform
-  username    String
-  password    String        // encrypted at app layer
+  username    String?       // optional — display name, not used for auth
+  password    String?       // deprecated — kept for migration, not used in v3
+
+  // Cookie-based auth (AES-256-GCM encrypted)
+  cookiesEncrypted  Bytes?       // AES-256-GCM ciphertext
+  cookiesIv         Bytes?       // 12-byte IV for GCM
+  cookiesAuthTag    Bytes?       // 16-byte authentication tag
+  cookiesUpdatedAt  DateTime?    // last time cookies were refreshed
+
+  // Per-account fingerprint — generated once, NEVER changes
+  fingerprint       Json?        // AccountFingerprint JSON
+
   status      AccountStatus @default(ALIVE)
-  proxyId     String?       // manually assigned by user
-  cookiesPath String?       // path to cookies file
-  avatarUrl   String?
-  bannerUrl   String?
-  bio         String?
-  views       Int           @default(0)
-  followers   Int           @default(0)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+
+  // Proxy pinning — one proxy per account, stable for 14+ days
+  proxyId         String?       // currently pinned proxy
+  proxyPinnedAt   DateTime?     // when proxy was pinned (14-day rule)
+
+  // Warmup tracking
+  warmupStartedAt   DateTime?   // when warmup began (null = not started)
+  warmupCompletedAt DateTime?   // when warmup finished (null = in progress)
+
+  // Profile metadata
+  cookiesPath   String?       // legacy path to cookies file (deprecated)
+  avatarUrl     String?
+  bannerUrl     String?
+  bio           String?
+  nickname      String?       // TikTok @handle
+  secUid        String?       // TikTok secUid for API queries
+  views         Int           @default(0)
+  followers     Int           @default(0)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   proxy Proxy? @relation(fields: [proxyId], references: [id], onDelete: SetNull)
@@ -84,18 +109,42 @@ enum AccountStatus {
   ALIVE
   AUTH_NEEDED
   BANNED
+  EXPIRED_COOKIES
+  SHADOWBAN_SUSPECTED
+  WARMING_UP
 }
 
 // ── Proxy ───────────────────────────────────────────────────
-// Mobile or static proxy. If isRotating=true and rotationLink
-// is set, worker will GET that URL before each session to
-// rotate the modem IP (wait 12s for physical modem restart).
+// Mobile, residential, or datacenter proxy.
+// LTE mobile proxies with IP rotation are preferred for TikTok.
 model Proxy {
   id           String      @id @default(cuid())
   userId       String
-  address      String      // format: ip:port:login:pass or ip:port
-  isRotating   Boolean     @default(false)
-  rotationLink String?     // API URL to trigger IP rotation
+
+  // Connection details (parsed from address string)
+  host         String
+  port         Int
+  username     String?
+  password     String?
+  address      String      // legacy format: ip:port:login:pass (kept for display)
+
+  // Proxy classification
+  type         ProxyType   @default(LTE_MOBILE)
+
+  // IP rotation (for LTE mobile proxies)
+  isRotating       Boolean     @default(false)
+  rotationLink     String?     // API URL to trigger IP rotation
+  rotationCooldown Int         @default(900) // seconds between rotations (15 min)
+  lastRotatedAt    DateTime?   // last IP rotation timestamp
+
+  // Carrier/ASN validation
+  carrier       String?        // e.g., "T-Mobile", "MTS", "Vodafone"
+  country       String         @default("US")
+  dma           String?        // Designated Market Area (US only)
+  asn           Int?           // Autonomous System Number
+  bgpPathValid  Boolean        @default(false) // carrier ASN matches expected
+  lastValidatedAt DateTime?    // last BGP validation timestamp
+
   label        String?     // user-friendly name
   status       ProxyStatus @default(ACTIVE)
   createdAt    DateTime    @default(now())
@@ -107,21 +156,25 @@ model Proxy {
   @@index([userId])
 }
 
+enum ProxyType {
+  LTE_MOBILE
+  STATIC_RESIDENTIAL
+  DATACENTER_DEPRECATED
+}
+
 enum ProxyStatus {
   ACTIVE
   DEAD
 }
 
 // ── Video ───────────────────────────────────────────────────
-// Uploaded video file. The lifecycle:
+// Uploaded video file lifecycle:
 // 1. User uploads via DnD → saved to uploads/ dir
-// 2. Worker picks up upload job → posts to TikTok/YouTube
-// 3. On success → isUploaded=true, uploadedAt=now()
-// 4. Cleanup cron → deletes physical file from disk
-// 5. DB record stays for analytics (filepath cleared)
-//
-// shouldDelete=true (default) means auto-cleanup after upload.
-// User can set shouldDelete=false to keep originals.
+// 2. Worker uniquifies video per-account (FFmpeg)
+// 3. Worker uploads uniquified version to TikTok/YouTube
+// 4. On success → isUploaded=true, uploadedAt=now()
+// 5. Cleanup cron → deletes physical file from disk
+// 6. DB record stays for analytics (filepath cleared)
 model Video {
   id           String    @id @default(cuid())
   userId       String
@@ -134,6 +187,8 @@ model Video {
   isUploaded   Boolean   @default(false)
   uploadedAt   DateTime?
   shouldDelete Boolean   @default(true) // auto-delete after upload?
+  accountId    String?   // which account this video was uploaded to
+  views        Int       @default(0) // views count from analytics
   createdAt    DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -144,8 +199,6 @@ model Video {
 
 // ── Task ────────────────────────────────────────────────────
 // A BullMQ job wrapper. Tracks status, progress, errors.
-// The config JSON holds mode-specific settings (titles pool,
-// hashtags, warmup probabilities, etc.)
 model Task {
   id          String     @id @default(cuid())
   userId      String
@@ -172,6 +225,7 @@ enum TaskType {
   COOKIES
   EDIT_PROFILE
   ANALYTICS_CRON
+  SHADOWBAN_CHECK
 }
 
 enum TaskStatus {
@@ -183,8 +237,7 @@ enum TaskStatus {
 }
 
 // ── Preset ──────────────────────────────────────────────────
-// Saved workspace configuration (threads, delays, mode settings).
-// User can save and load presets to quickly switch configs.
+// Saved workspace configuration.
 model Preset {
   id        String   @id @default(cuid())
   userId    String
@@ -199,12 +252,11 @@ model Preset {
 }
 
 // ── Audit Log ───────────────────────────────────────────────
-// Admin action tracking. Records who did what and when.
-// Used for security auditing and debugging.
+// Admin action tracking.
 model AuditLog {
   id        String   @id @default(cuid())
   userId    String?  // null for system actions
-  action    String   // e.g., "user.ban", "firewall.block"
+  action    String   // e.g., "user.ban", "shadowban.detected"
   details   Json?    // action-specific data
   ip        String?  // requester IP
   createdAt DateTime @default(now())

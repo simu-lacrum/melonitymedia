@@ -1,6 +1,17 @@
 // ─────────────────────────────────────────────────────────────
-// Social Accounts Routes
-// CRUD + import + bulk operations for TikTok/YouTube accounts.
+// Social Accounts Routes v3
+// CRUD + cookie import + bulk operations + warmup tracking
+//
+// CHANGES in v3:
+// 1. POST /import: accepts cookies (Netscape .txt or JSON)
+//    instead of login:pass format (cookie-only auth)
+// 2. POST /import now encrypts cookies with AES-256-GCM
+//    before storing in DB (MASTER_KEY required)
+// 3. Per-account fingerprint auto-generated on import
+// 4. New status values: EXPIRED_COOKIES, SHADOWBAN_SUSPECTED, WARMING_UP
+// 5. POST /warmup calculates warmupDay from warmupStartedAt
+// 6. POST /:id/cookies for single account cookie re-import
+//
 // ALL queries are userId-scoped — strict tenant isolation.
 // ─────────────────────────────────────────────────────────────
 
@@ -8,30 +19,112 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { authMiddleware } from '../middleware/auth.js';
+import crypto from 'crypto';
 
 const router = Router();
 router.use(authMiddleware);
+
+// ── Cookie Encryption ───────────────────────────────────────
+// Same AES-256-GCM scheme as cookie-store.ts in worker.
+// Key comes from env — validated at startup.
+
+function encryptCookies(jsonStr: string): { encrypted: Buffer; iv: Buffer; authTag: Buffer } {
+  const keyBuf = Buffer.from(process.env.MASTER_KEY ?? '', 'base64');
+  if (keyBuf.length !== 32) {
+    throw new Error('MASTER_KEY invalid — cannot encrypt cookies');
+  }
+
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', keyBuf, iv);
+  const encrypted = Buffer.concat([
+    cipher.update(jsonStr, 'utf8'),
+    cipher.final(),
+  ]);
+  const authTag = cipher.getAuthTag();
+  return { encrypted, iv, authTag };
+}
+
+// ── Fingerprint Generator ───────────────────────────────────
+// Lightweight version of worker's fingerprint-manager.ts.
+// Generates a deterministic fingerprint from accountId seed.
+
+function generateFingerprint(accountId: string) {
+  const hash = crypto.createHash('sha256').update(accountId).digest();
+
+  const screenSizes = [
+    { width: 1920, height: 1080 }, { width: 1366, height: 768 },
+    { width: 1536, height: 864 }, { width: 1440, height: 900 },
+    { width: 1280, height: 720 },
+  ];
+
+  const locales = ['en-US', 'en-GB', 'pt-BR', 'es-ES', 'fr-FR', 'de-DE', 'ru-RU', 'ja-JP'];
+  const webglVendors = ['Google Inc. (NVIDIA)', 'Google Inc. (AMD)', 'Google Inc. (Intel)'];
+  const webglRenderers = [
+    'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    'ANGLE (AMD, AMD Radeon RX 6700 XT Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    'ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+  ];
+
+  const screenIdx = hash[0] % screenSizes.length;
+  const screen = screenSizes[screenIdx];
+
+  return {
+    userAgent: `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/1${30 + (hash[1] % 10)}.0.0.0 Safari/537.36`,
+    screen,
+    devicePixelRatio: [1, 1.25, 1.5, 2][hash[2] % 4],
+    locale: locales[hash[3] % locales.length],
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    platform: 'Win32',
+    hardwareConcurrency: [4, 8, 12, 16][hash[4] % 4],
+    deviceMemory: [4, 8, 16][hash[5] % 3],
+    maxTouchPoints: 0,
+    webgl: {
+      vendor: webglVendors[hash[6] % webglVendors.length],
+      renderer: webglRenderers[hash[6] % webglRenderers.length],
+    },
+    canvas: {
+      seed: hash.subarray(7, 11).toString('hex'),
+    },
+    fonts: ['Arial', 'Verdana', 'Times New Roman', 'Georgia', 'Trebuchet MS', 'Courier New'],
+  };
+}
 
 // ── GET / — list all accounts for current user ──────────────
 router.get('/', async (req: Request, res: Response) => {
   try {
     const accounts = await prisma.socialAccount.findMany({
       where: { userId: req.user!.id },
-      include: { proxy: { select: { id: true, address: true, label: true } } },
+      include: { proxy: { select: { id: true, address: true, label: true, type: true } } },
       orderBy: { createdAt: 'desc' },
     });
-    res.json({ accounts });
+
+    // Strip encrypted cookie data from response (never send to frontend)
+    const sanitized = accounts.map(a => ({
+      ...a,
+      cookiesEncrypted: undefined,
+      cookiesIv: undefined,
+      cookiesAuthTag: undefined,
+      hasCookies: !!a.cookiesEncrypted,
+      warmupDay: a.warmupStartedAt
+        ? Math.min(11, Math.ceil((Date.now() - new Date(a.warmupStartedAt).getTime()) / 86400000))
+        : null,
+    }));
+
+    res.json({ accounts: sanitized });
   } catch (err) {
     console.error('[Accounts] List error:', err);
     res.status(500).json({ error: 'Ошибка при загрузке аккаунтов' });
   }
 });
 
-// ── POST /import — bulk import from log:pass format ─────────
+// ── POST /import — import with cookies (Netscape .txt or JSON)
 const importSchema = z.object({
   platform: z.enum(['TIKTOK', 'YOUTUBE']),
-  // Each line: "username:password" or "login:password"
-  data: z.string().min(1, 'Данные для импорта обязательны'),
+  // Each account block: "username\n<cookies>" separated by blank lines
+  // Or just cookies (one account per import)
+  cookies: z.string().min(10, 'Cookies обязательны'),
+  username: z.string().optional(),
+  nickname: z.string().optional(),
 });
 
 router.post('/import', async (req: Request, res: Response) => {
@@ -42,40 +135,83 @@ router.post('/import', async (req: Request, res: Response) => {
       return;
     }
 
-    const { platform, data } = parsed.data;
-    const lines = data.split('\n').map(l => l.trim()).filter(Boolean);
-    const accounts = [];
+    const { platform, cookies, username, nickname } = parsed.data;
 
-    for (const line of lines) {
-      const [username, password] = line.split(':');
-      if (username && password) {
-        accounts.push({
-          userId: req.user!.id,
-          platform: platform as 'TIKTOK' | 'YOUTUBE',
-          username: username.trim(),
-          password: password.trim(),
-        });
+    // Generate account ID early for fingerprint seed
+    const accountId = crypto.randomUUID().replace(/-/g, '').substring(0, 25);
+
+    // Parse and validate cookies (Netscape or JSON format)
+    let cookieJson: string;
+    try {
+      // Try JSON first
+      JSON.parse(cookies);
+      cookieJson = cookies;
+    } catch {
+      // Try Netscape format: domain\tTRUE\t/\tTRUE\texpiry\tname\tvalue
+      const lines = cookies.split('\n').filter(l => l.trim() && !l.startsWith('#'));
+      const parsed = lines.map(line => {
+        const parts = line.split('\t');
+        if (parts.length >= 7) {
+          return {
+            domain: parts[0],
+            path: parts[2],
+            secure: parts[3] === 'TRUE',
+            expires: parseInt(parts[4]) || 0,
+            name: parts[5],
+            value: parts[6],
+          };
+        }
+        return null;
+      }).filter(Boolean);
+
+      if (parsed.length === 0) {
+        res.status(400).json({ error: 'Невалидный формат cookies (ожидается Netscape .txt или JSON)' });
+        return;
       }
+      cookieJson = JSON.stringify(parsed);
     }
 
-    if (accounts.length === 0) {
-      res.status(400).json({ error: 'Не найдено валидных аккаунтов' });
-      return;
-    }
+    // Encrypt cookies with AES-256-GCM
+    const { encrypted, iv, authTag } = encryptCookies(cookieJson);
 
-    const result = await prisma.socialAccount.createMany({ data: accounts });
+    // Generate per-account fingerprint
+    const fingerprint = generateFingerprint(accountId);
 
-    res.status(201).json({ imported: result.count });
+    const account = await prisma.socialAccount.create({
+      data: {
+        id: accountId,
+        userId: req.user!.id,
+        platform: platform as 'TIKTOK' | 'YOUTUBE',
+        username: username?.trim() || null,
+        nickname: nickname?.trim() || null,
+        cookiesEncrypted: encrypted,
+        cookiesIv: iv,
+        cookiesAuthTag: authTag,
+        cookiesUpdatedAt: new Date(),
+        fingerprint: fingerprint as any,
+        status: 'ALIVE',
+      },
+    });
+
+    res.status(201).json({
+      account: {
+        id: account.id,
+        platform: account.platform,
+        username: account.username,
+        nickname: account.nickname,
+        hasCookies: true,
+        status: account.status,
+      },
+    });
   } catch (err) {
     console.error('[Accounts] Import error:', err);
-    res.status(500).json({ error: 'Ошибка при импорте аккаунтов' });
+    res.status(500).json({ error: 'Ошибка при импорте аккаунта' });
   }
 });
 
-// ── PATCH /:id — update single account ──────────────────────
-router.patch('/:id', async (req: Request, res: Response) => {
+// ── POST /:id/cookies — re-import cookies for existing account
+router.post('/:id/cookies', async (req: Request, res: Response) => {
   try {
-    // Verify ownership before update
     const existing = await prisma.socialAccount.findFirst({
       where: { id: req.params.id, userId: req.user!.id },
     });
@@ -85,12 +221,86 @@ router.patch('/:id', async (req: Request, res: Response) => {
       return;
     }
 
-    const account = await prisma.socialAccount.update({
+    const { cookies } = req.body;
+    if (!cookies || typeof cookies !== 'string') {
+      res.status(400).json({ error: 'Cookies обязательны' });
+      return;
+    }
+
+    // Parse cookies (Netscape or JSON)
+    let cookieJson: string;
+    try {
+      JSON.parse(cookies);
+      cookieJson = cookies;
+    } catch {
+      const lines = cookies.split('\n').filter((l: string) => l.trim() && !l.startsWith('#'));
+      const parsed = lines.map((line: string) => {
+        const parts = line.split('\t');
+        if (parts.length >= 7) {
+          return { domain: parts[0], path: parts[2], secure: parts[3] === 'TRUE', expires: parseInt(parts[4]) || 0, name: parts[5], value: parts[6] };
+        }
+        return null;
+      }).filter(Boolean);
+
+      if (parsed.length === 0) {
+        res.status(400).json({ error: 'Невалидный формат cookies' });
+        return;
+      }
+      cookieJson = JSON.stringify(parsed);
+    }
+
+    const { encrypted, iv, authTag } = encryptCookies(cookieJson);
+
+    await prisma.socialAccount.update({
       where: { id: req.params.id },
-      data: req.body,
+      data: {
+        cookiesEncrypted: encrypted,
+        cookiesIv: iv,
+        cookiesAuthTag: authTag,
+        cookiesUpdatedAt: new Date(),
+        status: 'ALIVE', // reset from EXPIRED_COOKIES
+      },
     });
 
-    res.json({ account });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Accounts] Cookie update error:', err);
+    res.status(500).json({ error: 'Ошибка при обновлении cookies' });
+  }
+});
+
+// ── PATCH /:id — update single account ──────────────────────
+router.patch('/:id', async (req: Request, res: Response) => {
+  try {
+    const existing = await prisma.socialAccount.findFirst({
+      where: { id: req.params.id, userId: req.user!.id },
+    });
+
+    if (!existing) {
+      res.status(404).json({ error: 'Аккаунт не найден' });
+      return;
+    }
+
+    // Whitelist allowed update fields
+    const allowedFields = ['username', 'nickname', 'bio', 'avatarUrl', 'bannerUrl', 'proxyId', 'status', 'secUid'];
+    const updateData: Record<string, unknown> = {};
+    for (const field of allowedFields) {
+      if (req.body[field] !== undefined) {
+        updateData[field] = req.body[field];
+      }
+    }
+
+    // If pinning a new proxy, record the timestamp
+    if (updateData.proxyId && updateData.proxyId !== existing.proxyId) {
+      updateData.proxyPinnedAt = new Date();
+    }
+
+    const account = await prisma.socialAccount.update({
+      where: { id: req.params.id },
+      data: updateData,
+    });
+
+    res.json({ account: { ...account, cookiesEncrypted: undefined, cookiesIv: undefined, cookiesAuthTag: undefined } });
   } catch (err) {
     console.error('[Accounts] Update error:', err);
     res.status(500).json({ error: 'Ошибка при обновлении аккаунта' });
@@ -117,7 +327,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
   }
 });
 
-// ── POST /bulk-update — mass assign proxy, avatar, etc. ─────
+// ── POST /bulk-update — mass assign proxy, status, etc. ─────
 const bulkUpdateSchema = z.object({
   accountIds: z.array(z.string()).min(1),
   update: z.object({
@@ -125,7 +335,7 @@ const bulkUpdateSchema = z.object({
     avatarUrl: z.string().optional(),
     bannerUrl: z.string().optional(),
     bio: z.string().optional(),
-    status: z.enum(['ALIVE', 'AUTH_NEEDED', 'BANNED']).optional(),
+    status: z.enum(['ALIVE', 'AUTH_NEEDED', 'BANNED', 'EXPIRED_COOKIES', 'SHADOWBAN_SUSPECTED', 'WARMING_UP']).optional(),
   }),
 });
 
@@ -139,7 +349,6 @@ router.post('/bulk-update', async (req: Request, res: Response) => {
 
     const { accountIds, update } = parsed.data;
 
-    // Only update accounts owned by this user
     const result = await prisma.socialAccount.updateMany({
       where: {
         id: { in: accountIds },
@@ -156,8 +365,6 @@ router.post('/bulk-update', async (req: Request, res: Response) => {
 });
 
 // ── POST /bulk-proxy — dedicated bulk proxy binding ─────────
-// instructions.md §3.2: "Пользователь сам вручную привязывает
-// конкретный прокси к своему аккаунту (или пачке аккаунтов)."
 const bulkProxySchema = z.object({
   accountIds: z.array(z.string()).min(1, 'Выберите хотя бы один аккаунт'),
   proxyId: z.string().min(1, 'Выберите прокси'),
@@ -173,7 +380,6 @@ router.post('/bulk-proxy', async (req: Request, res: Response) => {
 
     const { accountIds, proxyId } = parsed.data;
 
-    // Verify proxy belongs to user
     const proxy = await prisma.proxy.findFirst({
       where: { id: proxyId, userId: req.user!.id },
     });
@@ -183,13 +389,12 @@ router.post('/bulk-proxy', async (req: Request, res: Response) => {
       return;
     }
 
-    // Bulk update — only accounts owned by this user
     const result = await prisma.socialAccount.updateMany({
       where: {
         id: { in: accountIds },
         userId: req.user!.id,
       },
-      data: { proxyId },
+      data: { proxyId, proxyPinnedAt: new Date() },
     });
 
     res.json({ updated: result.count });
@@ -222,7 +427,7 @@ router.delete('/bulk', async (req: Request, res: Response) => {
   }
 });
 
-// ── POST /warmup — quick-launch warmup from profiles page ───
+// ── POST /warmup — start warmup for accounts ────────────────
 router.post('/warmup', async (req: Request, res: Response) => {
   try {
     const { ids } = req.body;
@@ -231,7 +436,20 @@ router.post('/warmup', async (req: Request, res: Response) => {
       return;
     }
 
-    // Create task + dispatch to BullMQ
+    // Mark accounts as WARMING_UP and set warmupStartedAt
+    await prisma.socialAccount.updateMany({
+      where: {
+        id: { in: ids },
+        userId: req.user!.id,
+        warmupStartedAt: null, // don't restart already warming accounts
+      },
+      data: {
+        status: 'WARMING_UP',
+        warmupStartedAt: new Date(),
+      },
+    });
+
+    // Create task for BullMQ
     const task = await prisma.task.create({
       data: {
         userId: req.user!.id,
@@ -247,7 +465,7 @@ router.post('/warmup', async (req: Request, res: Response) => {
   }
 });
 
-// ── POST /cookies — quick-launch cookies farming from profiles ─
+// ── POST /cookies — refresh cookies for accounts ────────────
 router.post('/cookies', async (req: Request, res: Response) => {
   try {
     const { ids } = req.body;
@@ -267,7 +485,7 @@ router.post('/cookies', async (req: Request, res: Response) => {
     res.status(201).json({ task });
   } catch (err) {
     console.error('[Accounts] Quick cookies error:', err);
-    res.status(500).json({ error: 'Ошибка при запуске фарминга cookies' });
+    res.status(500).json({ error: 'Ошибка при запуске обновления cookies' });
   }
 });
 

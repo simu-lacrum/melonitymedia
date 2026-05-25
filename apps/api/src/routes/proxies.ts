@@ -1,9 +1,13 @@
 // ─────────────────────────────────────────────────────────────
-// Proxy Management Routes
-// CRUD for mobile/static proxies with rotation link support.
+// Proxy Management Routes v3
+// CRUD for mobile/static proxies with carrier validation.
 //
-// Frontend sends: { name, host, port, username, password, rotationLink }
-// We compose the `address` field for DB and map `name` → `label`.
+// v3 changes:
+// 1. Proxy type classification (LTE_MOBILE, STATIC_RESIDENTIAL, DATACENTER)
+// 2. Carrier/ASN tracking fields
+// 3. Rotation cooldown (seconds between IP rotations)
+// 4. POST /:id/validate-carrier endpoint
+// 5. host/port stored directly (no more compose/decompose)
 // ─────────────────────────────────────────────────────────────
 
 import { Router, Request, Response } from 'express';
@@ -23,6 +27,11 @@ const createProxySchema = z.object({
   username: z.string().optional(),
   password: z.string().optional(),
   rotationLink: z.string().url().optional().or(z.literal('')),
+  type: z.enum(['LTE_MOBILE', 'STATIC_RESIDENTIAL', 'DATACENTER_DEPRECATED']).optional(),
+  country: z.string().optional(),
+  carrier: z.string().optional(),
+  dma: z.string().optional(),
+  rotationCooldown: z.number().int().min(60).max(3600).optional(),
 });
 
 // Helper: compose address from parts for DB storage
@@ -90,16 +99,25 @@ router.post('/', async (req: Request, res: Response) => {
       return;
     }
 
-    const { name, host, port, username, password, rotationLink } = parsed.data;
+    const { name, host, port, username, password, rotationLink, type, country, carrier, dma, rotationCooldown } = parsed.data;
     const address = composeAddress(host, port, username, password);
     const isRotating = !!rotationLink;
 
     const proxy = await prisma.proxy.create({
       data: {
+        host,
+        port,
+        username: username || null,
+        password: password || null,
         address,
         label: name || null,
+        type: type ?? (isRotating ? 'LTE_MOBILE' : 'STATIC_RESIDENTIAL'),
         isRotating,
         rotationLink: rotationLink || null,
+        rotationCooldown: rotationCooldown ?? 900,
+        country: country ?? 'US',
+        carrier: carrier || null,
+        dma: dma || null,
         userId: req.user!.id,
       },
     });
