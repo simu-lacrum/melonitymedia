@@ -6,6 +6,10 @@ import {
   ArrowUpRight, ArrowDownRight, Clock,
   BarChart3, Activity,
 } from 'lucide-react';
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer,
+} from 'recharts';
 import { Card, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Tabs } from '@/components/ui/Tabs';
@@ -13,14 +17,12 @@ import { api } from '@/lib/api';
 import { formatNumber } from '@/lib/utils';
 
 // ─────────────────────────────────────────────────────────────
-// Dashboard Page — Analytics Overview
+// Dashboard Page — Analytics Overview (Recharts)
 //
-// From instructions.md §2.1: "Дашборд"
-// Displays aggregated stats: total views, followers, alive
-// accounts, uploaded videos. Plus 30-day views chart.
-//
-// Data flows: API → /api/analytics/summary → this page
-// Charts: Recharts (lazy-loaded to avoid SSR issues)
+// From instructions.md §3.2 ЭКРАН 1: Дашборд Аналитики
+// - Блок 1: 4 KPI-карточки
+// - Блок 2: Recharts interactive chart (7/30/all days)
+// - Блок 3: Live-статус задач BullMQ
 // ─────────────────────────────────────────────────────────────
 
 interface DashboardMetrics {
@@ -28,7 +30,7 @@ interface DashboardMetrics {
   totalFollowers: number;
   aliveAccounts: number;
   totalVideos: number;
-  viewsDelta: number; // % change from previous period
+  viewsDelta: number;
   followersDelta: number;
 }
 
@@ -38,7 +40,14 @@ interface ChartDataPoint {
   followers: number;
 }
 
-// Placeholder data for initial state
+interface QueueStatus {
+  name: string;
+  active: number;
+  waiting: number;
+  completed: number;
+  failed: number;
+}
+
 const EMPTY_METRICS: DashboardMetrics = {
   totalViews: 0,
   totalFollowers: 0,
@@ -53,40 +62,65 @@ const chartTabs = [
   { id: 'followers', label: 'Подписчики' },
 ];
 
+const periodTabs = [
+  { id: '7', label: '7 дней' },
+  { id: '30', label: '30 дней' },
+  { id: 'all', label: 'Всё время' },
+];
+
+// Custom Recharts tooltip matching dark theme
+function CustomTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="bg-surface-dark border border-pure-white/[0.08] rounded-lg px-3 py-2 shadow-xl">
+      <p className="text-xs text-muted-gray mb-1">
+        {new Date(label).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}
+      </p>
+      {payload.map((entry: any, i: number) => (
+        <p key={i} className="text-sm font-semibold" style={{ color: entry.color }}>
+          {formatNumber(entry.value)}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const [metrics, setMetrics] = useState<DashboardMetrics>(EMPTY_METRICS);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
-  const [chartTab, setChartTab] = useState('views');
+  const [chartMetric, setChartMetric] = useState('views');
+  const [chartPeriod, setChartPeriod] = useState('30');
+  const [queues, setQueues] = useState<QueueStatus[]>([]);
   const [recentJobs, setRecentJobs] = useState<any[]>([]);
 
   const fetchData = useCallback(async () => {
     try {
-      const [summaryRes, chartRes] = await Promise.allSettled([
+      const days = chartPeriod === 'all' ? 365 : parseInt(chartPeriod);
+      const [summaryRes, chartRes, queuesRes] = await Promise.allSettled([
         api.get<{ metrics: DashboardMetrics }>('/api/analytics/summary'),
-        api.get<{ data: ChartDataPoint[] }>('/api/analytics/chart?days=30'),
+        api.get<{ data: ChartDataPoint[] }>(`/api/analytics/chart?days=${days}`),
+        api.get<{ queues: QueueStatus[] }>('/api/workspace/jobs'),
       ]);
 
-      if (summaryRes.status === 'fulfilled') {
-        setMetrics(summaryRes.value.metrics);
-      }
-      if (chartRes.status === 'fulfilled') {
-        setChartData(chartRes.value.data);
+      if (summaryRes.status === 'fulfilled') setMetrics(summaryRes.value.metrics);
+      if (chartRes.status === 'fulfilled') setChartData(chartRes.value.data);
+      if (queuesRes.status === 'fulfilled' && 'queues' in queuesRes.value) {
+        setQueues(queuesRes.value.queues);
       }
     } catch {
-      // API not ready yet — show zeros
+      // API not ready — show empty state
     }
-  }, []);
+  }, [chartPeriod]);
 
   useEffect(() => {
     fetchData();
-    // Refresh every 60 seconds for near real-time dashboard
     const interval = setInterval(fetchData, 60_000);
     return () => clearInterval(interval);
   }, [fetchData]);
 
   const metricCards = [
     {
-      label: 'Общие просмотры',
+      label: 'Суммарные просмотры',
       value: formatNumber(metrics.totalViews),
       delta: metrics.viewsDelta,
       icon: Eye,
@@ -94,7 +128,7 @@ export default function DashboardPage() {
       bgColor: 'bg-melon-pink/10',
     },
     {
-      label: 'Живые аккаунты',
+      label: 'Живых аккаунтов',
       value: formatNumber(metrics.aliveAccounts),
       delta: null,
       icon: Users,
@@ -102,28 +136,31 @@ export default function DashboardPage() {
       bgColor: 'bg-success-green/10',
     },
     {
-      label: 'Подписчики',
+      label: 'Прирост подписчиков',
       value: formatNumber(metrics.totalFollowers),
       delta: metrics.followersDelta,
       icon: TrendingUp,
-      color: 'text-warning-amber',
-      bgColor: 'bg-warning-amber/10',
+      color: 'text-ice-cyan',
+      bgColor: 'bg-ice-cyan/10',
     },
     {
-      label: 'Загружено видео',
+      label: 'Опубликовано',
       value: formatNumber(metrics.totalVideos),
       delta: null,
       icon: Video,
-      color: 'text-pure-white',
-      bgColor: 'bg-pure-white/10',
+      color: 'text-warning-amber',
+      bgColor: 'bg-warning-amber/10',
     },
   ];
+
+  const chartColor = chartMetric === 'views' ? '#ff1469' : '#40D3F5';
+  const chartColorAlpha = chartMetric === 'views' ? 'rgba(255,20,105,0.1)' : 'rgba(64,211,245,0.1)';
 
   return (
     <div className="flex flex-col gap-6">
       <h1 className="text-4xl text-display-wide">Дашборд</h1>
 
-      {/* ── Analytics Cards ────────────────────────────── */}
+      {/* ── KPI Cards (Блок 1) ───────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         {metricCards.map(({ label, value, delta, icon: Icon, color, bgColor }) => (
           <Card key={label} variant="interactive" className="group">
@@ -156,20 +193,71 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {/* ── Chart Section ──────────────────────────────── */}
+      {/* ── Recharts Chart (Блок 2) ──────────────────────── */}
       <Card>
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
           <div>
-            <CardTitle>Аналитика за 30 дней</CardTitle>
-            <CardDescription>Динамика показателей</CardDescription>
+            <CardTitle>Динамика показателей</CardTitle>
+            <CardDescription>Интерактивный график аналитики</CardDescription>
           </div>
-          <Tabs tabs={chartTabs} activeTab={chartTab} onTabChange={setChartTab} />
+          <div className="flex items-center gap-3">
+            <Tabs tabs={chartTabs} activeTab={chartMetric} onTabChange={setChartMetric} />
+            <div className="flex items-center gap-1 bg-surface-dark rounded-lg p-1">
+              {periodTabs.map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => setChartPeriod(t.id)}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                    chartPeriod === t.id
+                      ? 'bg-melon-pink/20 text-melon-pink'
+                      : 'text-muted-gray hover:text-pure-white'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {chartData.length > 0 ? (
           <div className="h-72">
-            {/* SVG Chart — custom lightweight chart to avoid Recharts SSR issues */}
-            <ChartCanvas data={chartData} metric={chartTab as 'views' | 'followers'} />
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                <defs>
+                  <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={chartColor} stopOpacity={0.2} />
+                    <stop offset="100%" stopColor={chartColor} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#262a30" vertical={false} />
+                <XAxis
+                  dataKey="date"
+                  stroke="#9ca3af"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(v) => new Date(v).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}
+                />
+                <YAxis
+                  stroke="#9ca3af"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(v) => v > 1000 ? `${(v / 1000).toFixed(0)}k` : v}
+                />
+                <Tooltip content={<CustomTooltip />} />
+                <Area
+                  type="monotone"
+                  dataKey={chartMetric}
+                  stroke={chartColor}
+                  strokeWidth={2}
+                  fill="url(#chartGradient)"
+                  dot={false}
+                  activeDot={{ r: 5, fill: chartColor, stroke: '#1c2026', strokeWidth: 2 }}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
           </div>
         ) : (
           <div className="h-72 flex flex-col items-center justify-center text-muted-gray/30 gap-3">
@@ -181,7 +269,47 @@ export default function DashboardPage() {
         )}
       </Card>
 
-      {/* ── Recent Activity ────────────────────────────── */}
+      {/* ── Live Queue Status (Блок 3) ───────────────────── */}
+      <Card>
+        <CardTitle>Live-статус задач</CardTitle>
+        <CardDescription>Текущее состояние очередей BullMQ</CardDescription>
+        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {(queues.length > 0 ? queues : [
+            { name: 'upload', active: 0, waiting: 0, completed: 0, failed: 0 },
+            { name: 'warmup', active: 0, waiting: 0, completed: 0, failed: 0 },
+            { name: 'cookies', active: 0, waiting: 0, completed: 0, failed: 0 },
+            { name: 'edit-profile', active: 0, waiting: 0, completed: 0, failed: 0 },
+            { name: 'analytics', active: 0, waiting: 0, completed: 0, failed: 0 },
+            { name: 'cleanup', active: 0, waiting: 0, completed: 0, failed: 0 },
+          ]).map((q) => (
+            <div
+              key={q.name}
+              className="flex items-center gap-3 p-3 rounded-lg bg-night-base border border-pure-white/[0.04] hover:border-pure-white/[0.08] transition-colors"
+            >
+              <div className={`w-2 h-2 rounded-full shrink-0 ${q.active > 0 ? 'bg-success-green animate-pulse' : 'bg-muted-gray/30'}`} />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-pure-white capitalize">{q.name}</p>
+                <div className="flex items-center gap-2 mt-0.5">
+                  {q.active > 0 && (
+                    <span className="text-xs text-success-green">{q.active} активных</span>
+                  )}
+                  {q.waiting > 0 && (
+                    <span className="text-xs text-warning-amber">{q.waiting} в ожидании</span>
+                  )}
+                  {q.active === 0 && q.waiting === 0 && (
+                    <span className="text-xs text-muted-gray/50">Простаивает</span>
+                  )}
+                </div>
+              </div>
+              <div className="text-right shrink-0">
+                <span className="text-xs text-muted-gray">{q.completed + q.failed}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {/* ── Recent Activity ──────────────────────────────── */}
       <Card>
         <CardTitle>Последние задачи</CardTitle>
         <CardDescription>Недавно выполненные операции</CardDescription>
@@ -207,68 +335,5 @@ export default function DashboardPage() {
         </div>
       </Card>
     </div>
-  );
-}
-
-// ── Inline SVG Chart Component ────────────────────────────
-// Lightweight area chart — no external deps required.
-// If Recharts causes issues with SSR, this always works.
-
-function ChartCanvas({ data, metric }: { data: ChartDataPoint[]; metric: 'views' | 'followers' }) {
-  const W = 800;
-  const H = 250;
-  const PAD = 40;
-
-  const values = data.map(d => d[metric]);
-  const maxVal = Math.max(...values, 1);
-  const minVal = 0;
-
-  const points = data.map((d, i) => ({
-    x: PAD + (i / (data.length - 1)) * (W - PAD * 2),
-    y: H - PAD - ((d[metric] - minVal) / (maxVal - minVal)) * (H - PAD * 2),
-  }));
-
-  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
-  const areaPath = `${linePath} L ${points[points.length - 1].x} ${H - PAD} L ${points[0].x} ${H - PAD} Z`;
-
-  const color = metric === 'views' ? '#ff1469' : '#f59e0b';
-  const colorAlpha = metric === 'views' ? '#ff146920' : '#f59e0b20';
-
-  // Y-axis labels
-  const yLabels = [0, 0.25, 0.5, 0.75, 1].map(pct => ({
-    value: Math.round(minVal + (maxVal - minVal) * pct),
-    y: H - PAD - pct * (H - PAD * 2),
-  }));
-
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-full" preserveAspectRatio="xMidYMid meet">
-      {/* Grid lines */}
-      {yLabels.map((l, i) => (
-        <g key={i}>
-          <line x1={PAD} y1={l.y} x2={W - PAD} y2={l.y} stroke="#262a30" strokeWidth="1" />
-          <text x={PAD - 8} y={l.y + 4} textAnchor="end" fill="#9ca3af" fontSize="10">
-            {l.value > 1000 ? `${(l.value / 1000).toFixed(0)}k` : l.value}
-          </text>
-        </g>
-      ))}
-
-      {/* Area fill */}
-      <path d={areaPath} fill={colorAlpha} />
-
-      {/* Line */}
-      <path d={linePath} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-
-      {/* Data points */}
-      {points.map((p, i) => (
-        <circle key={i} cx={p.x} cy={p.y} r="3" fill={color} />
-      ))}
-
-      {/* X-axis labels (every 5th) */}
-      {data.map((d, i) => i % 5 === 0 && (
-        <text key={i} x={points[i].x} y={H - 10} textAnchor="middle" fill="#9ca3af" fontSize="10">
-          {new Date(d.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}
-        </text>
-      ))}
-    </svg>
   );
 }

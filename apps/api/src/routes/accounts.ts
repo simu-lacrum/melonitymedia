@@ -155,4 +155,48 @@ router.post('/bulk-update', async (req: Request, res: Response) => {
   }
 });
 
+// ── POST /bulk-proxy — dedicated bulk proxy binding ─────────
+// instructions.md §3.2: "Пользователь сам вручную привязывает
+// конкретный прокси к своему аккаунту (или пачке аккаунтов)."
+const bulkProxySchema = z.object({
+  accountIds: z.array(z.string()).min(1, 'Выберите хотя бы один аккаунт'),
+  proxyId: z.string().min(1, 'Выберите прокси'),
+});
+
+router.post('/bulk-proxy', async (req: Request, res: Response) => {
+  try {
+    const parsed = bulkProxySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.errors[0].message });
+      return;
+    }
+
+    const { accountIds, proxyId } = parsed.data;
+
+    // Verify proxy belongs to user
+    const proxy = await prisma.proxy.findFirst({
+      where: { id: proxyId, userId: req.user!.id },
+    });
+
+    if (!proxy) {
+      res.status(404).json({ error: 'Прокси не найден' });
+      return;
+    }
+
+    // Bulk update — only accounts owned by this user
+    const result = await prisma.socialAccount.updateMany({
+      where: {
+        id: { in: accountIds },
+        userId: req.user!.id,
+      },
+      data: { proxyId },
+    });
+
+    res.json({ updated: result.count });
+  } catch (err) {
+    console.error('[Accounts] Bulk proxy bind error:', err);
+    res.status(500).json({ error: 'Ошибка при привязке прокси' });
+  }
+});
+
 export default router;

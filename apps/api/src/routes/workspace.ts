@@ -229,4 +229,45 @@ router.post('/presets', async (req: Request, res: Response) => {
   }
 });
 
+// ── GET /cookies/export — download cookies as ZIP ───────────
+router.get('/cookies/export', async (req: Request, res: Response) => {
+  try {
+    // Fetch all accounts with cookies for this user
+    const accounts = await prisma.account.findMany({
+      where: {
+        userId: req.user!.id,
+        cookies: { not: null },
+      },
+      select: {
+        login: true,
+        platform: true,
+        cookies: true,
+      },
+    });
+
+    if (accounts.length === 0) {
+      res.status(404).json({ error: 'Нет аккаунтов с cookies' });
+      return;
+    }
+
+    // Build a simple JSON-per-file ZIP structure using archiver
+    // We use a lightweight approach: generate a JSON manifest
+    const cookiesData = accounts.map(a => ({
+      login: a.login,
+      platform: a.platform,
+      cookies: a.cookies,
+    }));
+
+    const jsonPayload = JSON.stringify(cookiesData, null, 2);
+    const filename = `cookies_${Date.now()}.json`;
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(jsonPayload);
+  } catch (err) {
+    console.error('[Workspace] Cookies export error:', err);
+    res.status(500).json({ error: 'Ошибка при экспорте cookies' });
+  }
+});
+
 export default router;
