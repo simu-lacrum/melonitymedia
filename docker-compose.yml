@@ -72,7 +72,7 @@ services:
   worker:
     build:
       context: .
-      dockerfile: apps/worker/docker/Dockerfile
+      dockerfile: apps/worker/Dockerfile
     restart: unless-stopped
     env_file: .env
     depends_on:

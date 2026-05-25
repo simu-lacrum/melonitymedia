@@ -15,12 +15,13 @@ interface ModalProps {
   onConfirm?: () => void;
   variant?: 'default' | 'destructive';
   loading?: boolean;
+  children?: React.ReactNode;
 }
 
 export function Modal({
   open, onClose, title, description,
   confirmLabel = 'Подтвердить', cancelLabel = 'Отмена',
-  onConfirm, variant = 'default', loading,
+  onConfirm, variant = 'default', loading, children,
 }: ModalProps) {
   // Close on Escape key
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -66,6 +67,9 @@ export function Modal({
         {description && (
           <p className="text-sm text-muted-gray mt-2">{description}</p>
         )}
+
+        {/* Custom content */}
+        {children}
 
         {/* Actions */}
         <div className="flex items-center justify-end gap-3 mt-6">

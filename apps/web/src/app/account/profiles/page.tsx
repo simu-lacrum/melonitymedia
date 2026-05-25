@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Users, Upload, Search, Trash2, RefreshCw,
   CheckCircle, XCircle, AlertTriangle, Shield,
-  MoreHorizontal, Eye, Settings, Zap,
+  MoreHorizontal, Eye, Settings, Zap, Link,
 } from 'lucide-react';
 import { Card, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -56,6 +56,13 @@ const platformTabs = [
   { id: 'YOUTUBE', label: 'YouTube' },
 ];
 
+interface AvailableProxy {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+}
+
 export default function ProfilesPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [search, setSearch] = useState('');
@@ -68,6 +75,10 @@ export default function ProfilesPage() {
   const [importText, setImportText] = useState('');
   const [importPlatform, setImportPlatform] = useState<'TIKTOK' | 'YOUTUBE'>('TIKTOK');
   const [importLoading, setImportLoading] = useState(false);
+  const [showProxyModal, setShowProxyModal] = useState(false);
+  const [availableProxies, setAvailableProxies] = useState<AvailableProxy[]>([]);
+  const [selectedProxyId, setSelectedProxyId] = useState<string>('');
+  const [proxyBindLoading, setProxyBindLoading] = useState(false);
 
   const fetchAccounts = useCallback(async () => {
     try {
@@ -78,9 +89,17 @@ export default function ProfilesPage() {
     }
   }, []);
 
+  const fetchProxies = useCallback(async () => {
+    try {
+      const data = await api.get<{ proxies: AvailableProxy[] }>('/api/proxies');
+      setAvailableProxies(data.proxies);
+    } catch { /* */ }
+  }, []);
+
   useEffect(() => {
     fetchAccounts();
-  }, [fetchAccounts]);
+    fetchProxies();
+  }, [fetchAccounts, fetchProxies]);
 
   // Filter accounts
   const filtered = accounts.filter(a => {
@@ -138,6 +157,30 @@ export default function ProfilesPage() {
       fetchAccounts();
     } catch (err) {
       console.error('Cookies refresh failed:', err);
+    }
+  };
+
+  // Bulk proxy binding — instructions.md §3.2 ЭКРАН 2
+  const openProxyBindModal = () => {
+    setSelectedProxyId(availableProxies[0]?.id || '');
+    setShowProxyModal(true);
+  };
+
+  const handleBulkProxyBind = async () => {
+    if (!selectedProxyId) return;
+    setProxyBindLoading(true);
+    try {
+      await api.post('/api/accounts/bulk-proxy', {
+        accountIds: selectedIds,
+        proxyId: selectedProxyId,
+      });
+      setSelectedIds([]);
+      setShowProxyModal(false);
+      fetchAccounts();
+    } catch (err) {
+      console.error('Proxy bind failed:', err);
+    } finally {
+      setProxyBindLoading(false);
     }
   };
 
@@ -287,6 +330,9 @@ export default function ProfilesPage() {
         onSelectionChange={setSelectedIds}
         bulkActions={
           <>
+            <Button variant="secondary" size="sm" icon={<Link className="w-4 h-4" />} onClick={openProxyBindModal}>
+              Привязать прокси
+            </Button>
             <Button variant="secondary" size="sm" icon={<Zap className="w-4 h-4" />} onClick={handleBulkWarmup}>
               Прогрев
             </Button>
@@ -453,6 +499,39 @@ export default function ProfilesPage() {
         variant="destructive"
         onConfirm={handleBulkDelete}
       />
+
+      {/* Bulk Proxy Bind Modal */}
+      <Modal
+        open={showProxyModal}
+        onClose={() => setShowProxyModal(false)}
+        title="Привязать прокси к аккаунтам"
+        description={`Выберите прокси для ${selectedIds.length} выбранных аккаунтов`}
+        confirmLabel={proxyBindLoading ? 'Привязка...' : 'Привязать'}
+        onConfirm={handleBulkProxyBind}
+      >
+        <div className="flex flex-col gap-3 mt-4">
+          {availableProxies.length === 0 ? (
+            <p className="text-sm text-muted-gray text-center py-4">
+              Нет доступных прокси. Добавьте прокси на странице управления.
+            </p>
+          ) : (
+            <>
+              <label className="text-sm text-muted-gray font-medium">Прокси</label>
+              <select
+                value={selectedProxyId}
+                onChange={e => setSelectedProxyId(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl bg-surface-dark text-pure-white text-sm border border-transparent focus:border-melon-pink focus:outline-none focus:ring-1 focus:ring-melon-pink/30 appearance-none cursor-pointer"
+              >
+                {availableProxies.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.name || p.host} — {p.host}:{p.port}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }
