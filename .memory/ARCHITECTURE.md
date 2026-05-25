@@ -62,7 +62,7 @@ MelonityMedia/
 │   │       ├── routes/       # REST endpoints
 │   │       ├── middleware/   # auth, admin, firewall
 │   │       └── lib/          # prisma, redis, bullmq, socket
-│   └── worker/               # Puppeteer automation
+│   └── worker/               # UndetectedChrome automation (selenium-webdriver)
 │       ├── docker/           # Dockerfile + entrypoint.sh
 │       └── src/
 │           ├── core/         # BrowserAutomation class
