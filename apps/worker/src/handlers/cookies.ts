@@ -1,91 +1,108 @@
 // ─────────────────────────────────────────────────────────────
-// Cookies Handler — Fetch & Update Account Cookies
+// Cookies Handler v2 — Export cookies from existing sessions
 //
-// Logs into the platform using saved credentials, extracts
-// all cookies, and saves them to the database for future use.
-// This ensures cookies stay fresh and sessions don't expire.
+// In v2, this handler's role is EXPORT only:
+// 1. Launch browser with current cookies
+// 2. Navigate to platform to refresh session
+// 3. Export updated cookies back to encrypted store
 //
-// From instructions.md: cookies are essential for all operations
+// It does NOT do "cookie warmup" (visiting donor sites).
+// That practice was a myth from 2020 that never worked.
+//
+// Cookie IMPORT is handled by the API (accounts.ts POST endpoint).
 // ─────────────────────────────────────────────────────────────
 
 import { Job } from 'bullmq';
-import { BrowserAutomation, ProxyConfig } from '../core/browser-automation.js';
+import { launchStealthContext, closeBrowser } from '../core/browser/patchright-launcher.js';
+import { saveCookiesToDiskCache, type BrowserCookie } from '../core/auth/cookie-store.js';
 import { SocketLogger } from '../lib/socket-logger.js';
+import type { AccountFingerprint } from '../core/browser/fingerprint-manager.js';
+import type { Browser } from 'patchright';
+
+// ── Types ───────────────────────────────────────────────────
 
 interface CookiesJobData {
   userId: string;
-  profileId: string;
-  platform: 'TIKTOK' | 'YOUTUBE_SHORTS';
-  cookies: string; // current cookies to try first
-  proxy?: ProxyConfig;
+  accountId: string;
+  platform: 'TIKTOK' | 'YOUTUBE';
+  fingerprint: AccountFingerprint;
+  proxyUrl?: string;
+  cookiesDir?: string;
 }
 
+// ── Main ────────────────────────────────────────────────────
+
 export async function cookiesHandler(job: Job<CookiesJobData>): Promise<string> {
-  const { userId, profileId, platform, cookies, proxy } = job.data;
-  const logger = new SocketLogger(userId);
-  const automation = new BrowserAutomation({ proxy, headless: false });
+  const data = job.data;
+  const logger = new SocketLogger(data.userId);
+  let browser: Browser | null = null;
 
   try {
-    logger.info(`Обновление cookies для профиля ${profileId}...`);
-    const driver = await automation.initDriver();
+    logger.info(`Обновление cookies для ${data.accountId}...`);
 
-    // Navigate to platform
-    const baseUrl = platform === 'TIKTOK'
+    // Launch browser with existing cookies
+    const ctx = await launchStealthContext({
+      accountId: data.accountId,
+      proxyUrl: data.proxyUrl,
+      cookiesPath: data.cookiesDir ?? '/data/cookies',
+      fingerprint: data.fingerprint,
+    });
+    browser = ctx.browser;
+    const page = ctx.page;
+
+    // Navigate to platform to refresh session
+    const baseUrl = data.platform === 'TIKTOK'
       ? 'https://www.tiktok.com'
       : 'https://www.youtube.com';
-    await automation.navigateTo(baseUrl);
-    await automation.humanDelay(2000, 3000);
 
-    // Inject existing cookies
-    if (cookies) {
-      const parsedCookies = JSON.parse(cookies);
-      for (const cookie of parsedCookies) {
-        try {
-          await driver.manage().addCookie({
-            name: cookie.name,
-            value: cookie.value,
-            domain: cookie.domain,
-            path: cookie.path || '/',
-            secure: cookie.secure || false,
-            httpOnly: cookie.httpOnly || false,
-          });
-        } catch { /* skip */ }
-      }
-    }
+    await page.goto(baseUrl, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(_randomDelay(3000, 5000));
 
-    // Refresh to apply cookies
-    await automation.navigateTo(baseUrl);
-    await automation.humanDelay(3000, 5000);
-
-    // Parse page to verify login status
-    const $ = await automation.getSoup();
-    const bodyText = $('body').text();
-
+    // Check auth status
+    const bodyText = await page.textContent('body');
     const isLoggedOut =
-      bodyText.includes('Log in') ||
-      bodyText.includes('Sign in') ||
-      bodyText.includes('Войти');
+      bodyText?.includes('Log in') ||
+      bodyText?.includes('Sign in') ||
+      bodyText?.includes('Войти');
 
     if (isLoggedOut) {
-      logger.warn('Cookies истекли — требуется повторная авторизация');
+      logger.warn('Cookies истекли — требуется импорт новых cookies через UI');
       throw new Error('COOKIES_EXPIRED');
     }
 
-    // Extract updated cookies from the browser
-    const updatedCookies = await driver.manage().getCookies();
-    const cookiesJson = JSON.stringify(updatedCookies);
+    // Export updated cookies from browser session
+    const cookies = await ctx.context.cookies();
+    const browserCookies: BrowserCookie[] = cookies.map(c => ({
+      name: c.name,
+      value: c.value,
+      domain: c.domain,
+      path: c.path,
+      expires: c.expires,
+      httpOnly: c.httpOnly,
+      secure: c.secure,
+      sameSite: c.sameSite === 'Strict' ? 'Strict' : c.sameSite === 'None' ? 'None' : 'Lax',
+    }));
 
-    logger.info(`✅ Cookies обновлены (${updatedCookies.length} шт)`);
+    // Save updated cookies to encrypted store
+    await saveCookiesToDiskCache(data.accountId, browserCookies, data.cookiesDir);
+
+    logger.info(`✅ Cookies обновлены (${browserCookies.length} шт)`);
     await job.updateProgress(100);
 
-    return cookiesJson;
+    return JSON.stringify({ count: browserCookies.length, updatedAt: new Date().toISOString() });
 
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     logger.error(`❌ Ошибка обновления cookies: ${message}`);
     throw err;
   } finally {
-    await automation.close();
+    await closeBrowser(browser);
     logger.disconnect();
   }
+}
+
+// ── Utility ─────────────────────────────────────────────────
+
+function _randomDelay(min: number, max: number): number {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
 }

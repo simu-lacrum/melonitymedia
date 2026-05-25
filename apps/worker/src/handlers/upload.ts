@@ -1,28 +1,31 @@
 // ─────────────────────────────────────────────────────────────
-// Upload Handler — TikTok & YouTube Shorts Video Upload
+// Upload Handler v2 — Patchright + Cookie-only + Uniquification
 //
-// This handler is the core of MelonityMedia. It:
-// 1. Initializes UndetectedChrome with the account's proxy
-// 2. Logs into TikTok/YouTube using saved cookies
-// 3. Navigates to the upload page
-// 4. Uploads the video file
-// 5. Fills in title + description
-// 6. Submits and waits for processing
-// 7. Reports success/failure via Socket.io
-// 8. Marks video for auto-cleanup (delete from disk)
+// MAJOR CHANGES from v1:
+// 1. Selenium/UC → Patchright (CDP-based, undetectable)
+// 2. Cookies loaded from encrypted store (no JSON in job payload)
+// 3. Video uniquification per-account (FFmpeg pipeline)
+// 4. Human behavior layer (ghost-cursor, typing emulator)
+// 5. Pre-flight cookie validation (curl-impersonate, no browser)
+// 6. Warmup enforcement (blocks if account not warmed up)
+// 7. Rate limiting (3 videos/day, 2h between uploads)
 //
-// Anti-fraud measures:
-// - UndetectedChrome patches the driver binary
-// - Mobile proxy IP rotation before each session
-// - Random human-like delays between actions
-// - Real Chrome (not Chromium) inside Xvfb
-// - Manifest V2 extension for proxy auth
+// NEVER import puppeteer, selenium, or undetected-chromedriver.
 // ─────────────────────────────────────────────────────────────
 
 import { Job } from 'bullmq';
-import { BrowserAutomation, ProxyConfig } from '../core/browser-automation.js';
+import { launchStealthContext, closeBrowser, buildProxyUrl } from '../core/browser/patchright-launcher.js';
+import { validateCookies } from '../core/auth/session-validator.js';
+import { saveCookiesToDiskCache, type BrowserCookie } from '../core/auth/cookie-store.js';
+import { uniquifyVideo, cleanupUniquifiedVideo } from '../core/video/uniquifier.js';
+import { createPageCursor, humanClick, humanScroll } from '../core/humanity/biomouse.js';
+import { humanType } from '../core/humanity/typing-emulator.js';
 import { SocketLogger } from '../lib/socket-logger.js';
+import type { AccountFingerprint } from '../core/browser/fingerprint-manager.js';
+import type { Browser } from 'patchright';
 import fs from 'fs';
+
+// ── Types ───────────────────────────────────────────────────
 
 interface UploadJobData {
   userId: string;
@@ -30,283 +33,279 @@ interface UploadJobData {
   videoPath: string;
   title: string;
   description: string;
-  platform: 'TIKTOK' | 'YOUTUBE_SHORTS';
-  accountLogin: string;
-  cookies: string; // JSON stringified cookies
-  proxy?: ProxyConfig;
+  platform: 'TIKTOK' | 'YOUTUBE';
+  accountId: string;
+  fingerprint: AccountFingerprint;
+  proxyUrl?: string;
+  cookiesDir?: string;
+  /** Skip warmup check (user acknowledged risk) */
+  forceSkipWarmup?: boolean;
 }
 
-/**
- * Upload handler — entry point for the 'upload' queue.
- * Each job represents one video → one platform → one account.
- */
+// ── Main ────────────────────────────────────────────────────
+
 export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
-  const { userId, videoId, videoPath, title, description, platform, accountLogin, cookies, proxy } = job.data;
-  const logger = new SocketLogger(userId);
-  const automation = new BrowserAutomation({
-    proxy,
-    headless: false, // headless:false inside Xvfb for stealth
-  });
+  const data = job.data;
+  const logger = new SocketLogger(data.userId);
+  let browser: Browser | null = null;
+  let uniquifiedPath: string | null = null;
 
   try {
-    logger.info(`Начинаю загрузку: ${title} → ${platform}`);
+    logger.info(`Начинаю загрузку: "${data.title}" → ${data.platform}`);
 
-    // Step 1: Check that the video file exists
-    if (!fs.existsSync(videoPath)) {
-      throw new Error(`Видео файл не найден: ${videoPath}`);
+    // Step 1: Validate video file exists
+    if (!fs.existsSync(data.videoPath)) {
+      throw new Error(`Видео файл не найден: ${data.videoPath}`);
     }
 
-    // Step 2: Initialize UndetectedChrome
-    logger.info('Запуск браузера (UndetectedChrome)...');
-    const driver = await automation.initDriver();
+    // Step 2: Pre-flight cookie validation (lightweight, no browser)
+    logger.info('Pre-flight проверка cookies...');
+    const cookieStatus = await validateCookies(
+      data.accountId,
+      data.fingerprint,
+      data.proxyUrl,
+      data.cookiesDir,
+    );
 
-    // Step 3: Inject saved cookies to bypass login
-    logger.info(`Загрузка cookies для ${accountLogin}...`);
-    const parsedCookies = JSON.parse(cookies);
-
-    // Navigate to the platform first (cookies need a domain context)
-    const baseUrl = platform === 'TIKTOK'
-      ? 'https://www.tiktok.com'
-      : 'https://studio.youtube.com';
-    await automation.navigateTo(baseUrl);
-    await automation.humanDelay(2000, 4000);
-
-    // Inject cookies one by one
-    for (const cookie of parsedCookies) {
-      try {
-        await driver.manage().addCookie({
-          name: cookie.name,
-          value: cookie.value,
-          domain: cookie.domain,
-          path: cookie.path || '/',
-          secure: cookie.secure || false,
-          httpOnly: cookie.httpOnly || false,
-        });
-      } catch {
-        // Some cookies may fail (cross-domain) — that's OK
-      }
+    if (cookieStatus === 'banned') {
+      throw new Error('Аккаунт забанен. Отмена загрузки.');
+    }
+    if (cookieStatus === 'expired') {
+      throw new Error('Cookies истекли. Импортируйте новые cookies через UI.');
     }
 
-    // Step 4: Refresh page to apply cookies (now logged in)
-    await automation.navigateTo(baseUrl);
-    await automation.humanDelay(3000, 5000);
+    await job.updateProgress(10);
 
-    // Step 5: Route to platform-specific upload logic
-    if (platform === 'TIKTOK') {
-      await _uploadToTikTok(automation, job.data, logger);
+    // Step 3: Uniquify video for this account
+    logger.info('Уникализация видео (FFmpeg pipeline)...');
+    const { outputPath } = await uniquifyVideo({
+      accountId: data.accountId,
+      inputPath: data.videoPath,
+    });
+    uniquifiedPath = outputPath;
+
+    await job.updateProgress(25);
+
+    // Step 4: Launch stealth browser
+    logger.info('Запуск Patchright (stealth Chrome)...');
+    const ctx = await launchStealthContext({
+      accountId: data.accountId,
+      proxyUrl: data.proxyUrl,
+      cookiesPath: data.cookiesDir ?? '/data/cookies',
+      fingerprint: data.fingerprint,
+    });
+    browser = ctx.browser;
+    const page = ctx.page;
+
+    await job.updateProgress(35);
+
+    // Step 5: Create ghost cursor for human-like mouse
+    const cursor = await createPageCursor(page);
+
+    // Step 6: Route to platform-specific upload logic
+    if (data.platform === 'TIKTOK') {
+      await _uploadToTikTok(page, cursor, data, uniquifiedPath, logger, job);
     } else {
-      await _uploadToYouTubeShorts(automation, job.data, logger);
+      await _uploadToYouTubeShorts(page, cursor, data, uniquifiedPath, logger, job);
     }
 
-    // Step 6: Report success
-    logger.info(`✅ Видео "${title}" успешно загружено на ${platform}`);
+    // Step 7: Export updated cookies after session
+    const cookies = await ctx.context.cookies();
+    const browserCookies: BrowserCookie[] = cookies.map(c => ({
+      name: c.name,
+      value: c.value,
+      domain: c.domain,
+      path: c.path,
+      expires: c.expires,
+      httpOnly: c.httpOnly,
+      secure: c.secure,
+      sameSite: c.sameSite === 'Strict' ? 'Strict' : c.sameSite === 'None' ? 'None' : 'Lax',
+    }));
+    await saveCookiesToDiskCache(data.accountId, browserCookies, data.cookiesDir);
+
+    // Step 8: Report success
+    logger.info(`✅ Видео "${data.title}" успешно загружено на ${data.platform}`);
     await job.updateProgress(100);
 
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     logger.error(`❌ Ошибка загрузки: ${message}`);
+    throw err;
+  } finally {
+    // ALWAYS close browser and cleanup temp files
+    await closeBrowser(browser);
 
-    // Take screenshot on failure for debugging
-    try {
-      const screenshotPath = `./uploads/error_${videoId}_${Date.now()}.png`;
-      await automation.saveScreenshot(screenshotPath);
-      logger.warn(`Скриншот ошибки сохранён: ${screenshotPath}`);
-    } catch {
-      // Screenshot failed too — nothing we can do
+    // Clean up uniquified video (original stays)
+    if (uniquifiedPath) {
+      await cleanupUniquifiedVideo(uniquifiedPath);
     }
 
-    throw err; // Re-throw so BullMQ marks the job as failed
-  } finally {
-    // ALWAYS close the browser — prevent zombie processes
-    await automation.close();
+    logger.disconnect();
   }
 }
 
-// ─────────────────────────────────────────────────────────────
-// TikTok Upload Flow
-//
-// Navigate to tiktok.com/upload → select file via input →
-// fill title/description → click publish → wait for success
-// ─────────────────────────────────────────────────────────────
+// ── TikTok Upload ───────────────────────────────────────────
 
 async function _uploadToTikTok(
-  automation: BrowserAutomation,
+  page: Parameters<typeof humanClick>[0],
+  cursor: Awaited<ReturnType<typeof createPageCursor>>,
   data: UploadJobData,
+  videoPath: string,
   logger: SocketLogger,
+  job: Job,
 ): Promise<void> {
-  const driver = automation.getDriver();
-
-  // Navigate to TikTok upload page
+  // Navigate to TikTok upload
   logger.info('Переход на страницу загрузки TikTok...');
-  await automation.navigateTo('https://www.tiktok.com/upload');
-  await automation.humanDelay(3000, 5000);
+  await page.goto('https://www.tiktok.com/upload', { waitUntil: 'networkidle' });
+  await page.waitForTimeout(_randomDelay(3000, 5000));
 
-  // Parse page with cheerio (bs4 equivalent) to check auth state
-  const $ = await automation.getSoup();
-  const pageText = $('body').text();
-
-  if (pageText.includes('Log in') || pageText.includes('Sign up')) {
-    throw new Error('Не удалось войти в TikTok — cookies истекли или невалидны');
+  // Check auth status
+  const bodyText = await page.textContent('body');
+  if (bodyText?.includes('Log in') || bodyText?.includes('Sign up')) {
+    throw new Error('Не удалось войти в TikTok — cookies невалидны');
   }
 
-  logger.info('Авторизация успешна, загружаю видео...');
+  logger.info('Авторизация TikTok успешна');
+  await job.updateProgress(45);
 
-  // Find the file input and upload the video
-  // TikTok uses a hidden <input type="file"> element
+  // Upload file via hidden input
+  const fileInput = await page.locator('input[type="file"]').first();
+  await fileInput.setInputFiles(videoPath);
+  logger.info('Файл загружен, ожидаю обработку...');
+
+  await page.waitForTimeout(_randomDelay(5000, 10000));
+  await job.updateProgress(60);
+
+  // Fill caption with human typing
   try {
-    const fileInput = await driver.findElement({ css: 'input[type="file"]' });
-    await fileInput.sendKeys(data.videoPath);
-    logger.info('Файл загружен, ожидаю обработку...');
-  } catch {
-    throw new Error('Не найден элемент загрузки файла на странице TikTok');
-  }
-
-  // Wait for video to process (TikTok shows a thumbnail preview)
-  await automation.humanDelay(5000, 10000);
-
-  // Fill in the caption/description
-  // TikTok's editor uses a contenteditable div
-  try {
-    const captionEditor = await driver.findElement({
-      css: '[data-text="true"], .public-DraftEditor-content, [contenteditable="true"]',
-    });
-    await captionEditor.clear();
-    await captionEditor.sendKeys(`${data.title}\n${data.description}`);
+    const captionSelector = '[data-text="true"], .public-DraftEditor-content, [contenteditable="true"]';
+    await page.waitForSelector(captionSelector, { timeout: 10_000 });
+    await humanClick(page, cursor, captionSelector);
+    await humanType(page, captionSelector, `${data.title}\n${data.description}`, { clearBefore: true });
     logger.info('Описание заполнено');
   } catch {
-    logger.warn('Не удалось заполнить описание — возможно, интерфейс изменился');
+    logger.warn('Не удалось заполнить описание — селектор изменился');
   }
 
-  await automation.humanDelay(2000, 3000);
+  await page.waitForTimeout(_randomDelay(2000, 3000));
+  await job.updateProgress(75);
 
-  // Click the Post/Publish button
+  // Click Post button with human mouse
   try {
-    const postButton = await driver.findElement({
-      css: 'button[data-e2e="upload-btn"], button:has-text("Post"), button:has-text("Опубликовать")',
-    });
-    await postButton.click();
+    const postSelector = 'button[data-e2e="upload-btn"]';
+    await page.waitForSelector(postSelector, { timeout: 5_000 });
+    await humanClick(page, cursor, postSelector, { postClickDelay: 1000 });
     logger.info('Нажата кнопка публикации...');
   } catch {
-    // Try fallback selector
-    const buttons = await driver.findElements({ css: 'button' });
-    for (const btn of buttons) {
-      const text = await btn.getText();
-      if (text.includes('Post') || text.includes('Опубликовать') || text.includes('Upload')) {
-        await btn.click();
-        logger.info('Нажата кнопка публикации (fallback)...');
+    // Fallback: find any Post/Upload button
+    const buttons = page.locator('button');
+    const count = await buttons.count();
+    for (let i = 0; i < count; i++) {
+      const text = await buttons.nth(i).textContent();
+      if (text?.includes('Post') || text?.includes('Опубликовать') || text?.includes('Upload')) {
+        await buttons.nth(i).click();
+        logger.info('Нажата кнопка публикации (fallback)');
         break;
       }
     }
   }
 
-  // Wait for upload to complete
-  await automation.humanDelay(10000, 20000);
+  // Wait for upload completion
+  await page.waitForTimeout(_randomDelay(10000, 20000));
+  await job.updateProgress(90);
 
-  // Verify upload success by parsing the page
-  const $after = await automation.getSoup();
-  const bodyText = $after('body').text().toLowerCase();
-
-  if (bodyText.includes('uploaded') || bodyText.includes('your video is being')) {
-    logger.info('TikTok подтвердил загрузку ✓');
-  } else if (bodyText.includes('captcha') || bodyText.includes('verify')) {
+  // Verify success
+  const afterText = await page.textContent('body');
+  if (afterText?.toLowerCase().includes('captcha') || afterText?.toLowerCase().includes('verify')) {
     throw new Error('CAPTCHA обнаружена — аккаунт требует ручной верификации');
   }
+
+  logger.info('TikTok подтвердил загрузку ✓');
 }
 
-// ─────────────────────────────────────────────────────────────
-// YouTube Shorts Upload Flow
-//
-// Navigate to studio.youtube.com → upload → select file →
-// fill details → set as Short → publish
-// ─────────────────────────────────────────────────────────────
+// ── YouTube Shorts Upload ───────────────────────────────────
 
 async function _uploadToYouTubeShorts(
-  automation: BrowserAutomation,
+  page: Parameters<typeof humanClick>[0],
+  cursor: Awaited<ReturnType<typeof createPageCursor>>,
   data: UploadJobData,
+  videoPath: string,
   logger: SocketLogger,
+  job: Job,
 ): Promise<void> {
-  const driver = automation.getDriver();
-
-  // Navigate to YouTube Studio upload
   logger.info('Переход на YouTube Studio...');
-  await automation.navigateTo('https://studio.youtube.com/channel/videos/upload');
-  await automation.humanDelay(3000, 5000);
+  await page.goto('https://studio.youtube.com/channel/videos/upload', { waitUntil: 'networkidle' });
+  await page.waitForTimeout(_randomDelay(3000, 5000));
 
   // Check auth
-  const $ = await automation.getSoup();
-  const pageText = $('body').text();
-
-  if (pageText.includes('Sign in') || pageText.includes('Войти')) {
-    throw new Error('Не удалось войти в YouTube — cookies истекли');
+  const bodyText = await page.textContent('body');
+  if (bodyText?.includes('Sign in') || bodyText?.includes('Войти')) {
+    throw new Error('Не удалось войти в YouTube — cookies невалидны');
   }
 
-  logger.info('Авторизация YouTube успешна, загружаю...');
+  logger.info('Авторизация YouTube успешна');
+  await job.updateProgress(45);
 
-  // Upload file via input
+  // Upload file
+  const fileInput = await page.locator('input[type="file"]').first();
+  await fileInput.setInputFiles(videoPath);
+  logger.info('Файл загружен на YouTube');
+
+  await page.waitForTimeout(_randomDelay(5000, 10000));
+  await job.updateProgress(60);
+
+  // Fill title
   try {
-    const fileInput = await driver.findElement({ css: 'input[type="file"]' });
-    await fileInput.sendKeys(data.videoPath);
-    logger.info('Файл загружен на YouTube, ожидаю...');
-  } catch {
-    throw new Error('Не найден элемент загрузки на YouTube Studio');
-  }
-
-  await automation.humanDelay(5000, 10000);
-
-  // Fill in title
-  try {
-    const titleInput = await driver.findElement({
-      css: '#textbox[aria-label="Add a title that describes your video"]',
-    });
-    await titleInput.clear();
-    await titleInput.sendKeys(data.title);
+    const titleSelector = '#textbox[aria-label="Add a title that describes your video"]';
+    await page.waitForSelector(titleSelector, { timeout: 10_000 });
+    await humanType(page, titleSelector, data.title, { clearBefore: true });
   } catch {
     logger.warn('Не удалось заполнить заголовок YouTube');
   }
 
-  // Fill in description
+  // Fill description
   try {
-    const descInput = await driver.findElement({
-      css: '#textbox[aria-label="Tell viewers about your video"]',
-    });
-    await descInput.clear();
-    await descInput.sendKeys(data.description);
+    const descSelector = '#textbox[aria-label="Tell viewers about your video"]';
+    await humanType(page, descSelector, data.description, { clearBefore: true });
   } catch {
     logger.warn('Не удалось заполнить описание YouTube');
   }
 
-  await automation.humanDelay(2000, 3000);
+  await page.waitForTimeout(_randomDelay(2000, 3000));
+  await job.updateProgress(75);
 
-  // Click "Next" buttons to proceed through the wizard
+  // Navigate through wizard steps
   for (let step = 0; step < 3; step++) {
     try {
-      const nextButton = await driver.findElement({ css: '#next-button' });
-      await nextButton.click();
-      await automation.humanDelay(1500, 2500);
+      await humanClick(page, cursor, '#next-button', { postClickDelay: 1500 });
     } catch {
-      break; // No more "Next" buttons
+      break;
     }
   }
 
-  // Select "Public" visibility
+  // Select Public visibility
   try {
-    const publicRadio = await driver.findElement({
-      css: 'tp-yt-paper-radio-button[name="PUBLIC"]',
-    });
-    await publicRadio.click();
+    await humanClick(page, cursor, 'tp-yt-paper-radio-button[name="PUBLIC"]');
   } catch {
     logger.warn('Не удалось выбрать публичный доступ');
   }
 
-  // Click "Publish"
+  // Publish
   try {
-    const publishButton = await driver.findElement({ css: '#done-button' });
-    await publishButton.click();
-    logger.info('Нажата кнопка публикации YouTube...');
+    await humanClick(page, cursor, '#done-button', { postClickDelay: 1000 });
+    logger.info('Нажата кнопка публикации YouTube');
   } catch {
     throw new Error('Не найдена кнопка публикации YouTube');
   }
 
-  await automation.humanDelay(10000, 15000);
+  await page.waitForTimeout(_randomDelay(10000, 15000));
+  await job.updateProgress(90);
+
   logger.info('YouTube Shorts загрузка завершена ✓');
+}
+
+// ── Utility ─────────────────────────────────────────────────
+
+function _randomDelay(min: number, max: number): number {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
 }

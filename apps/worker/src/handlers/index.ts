@@ -8,3 +8,4 @@ export { cookiesHandler } from './cookies.js';
 export { analyticsHandler } from './analytics.js';
 export { editProfileHandler } from './edit-profile.js';
 export { cleanupHandler } from './cleanup.js';
+export { shadowbanDetectorHandler } from './shadowban-detector.js';
