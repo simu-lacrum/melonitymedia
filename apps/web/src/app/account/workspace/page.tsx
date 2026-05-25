@@ -178,9 +178,17 @@ export default function WorkspacePage() {
         massApply,
       };
 
+      // Map frontend mode to API task type enum
+      const typeMap: Record<string, string> = {
+        upload: 'UPLOAD',
+        warmup: 'WARMUP',
+        cookies: 'COOKIES',
+        profile: 'EDIT_PROFILE',
+      };
+
       await api.post('/api/workspace/launch', {
-        mode,
-        accountIds: selectedIds,
+        type: typeMap[mode],
+        accountIds: selectedIds.length > 0 ? selectedIds : ['__all__'],
         config,
         threads,
         delayMin,

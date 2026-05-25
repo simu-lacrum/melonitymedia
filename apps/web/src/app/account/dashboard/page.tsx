@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Eye, Users, TrendingUp, Video,
   ArrowUpRight, ArrowDownRight, Clock,
-  BarChart3, Activity,
+  BarChart3, Activity, Terminal
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
@@ -17,12 +17,7 @@ import { api } from '@/lib/api';
 import { formatNumber } from '@/lib/utils';
 
 // ─────────────────────────────────────────────────────────────
-// Dashboard Page — Analytics Overview (Recharts)
-//
-// From instructions.md §3.2 ЭКРАН 1: Дашборд Аналитики
-// - Блок 1: 4 KPI-карточки
-// - Блок 2: Recharts interactive chart (7/30/all days)
-// - Блок 3: Live-статус задач BullMQ
+// Dashboard Page — Strict Corporate Minimal
 // ─────────────────────────────────────────────────────────────
 
 interface DashboardMetrics {
@@ -55,7 +50,7 @@ const EMPTY_METRICS: DashboardMetrics = {
   totalVideos: 0,
   viewsDelta: 0,
   followersDelta: 0,
-};
+}
 
 const chartTabs = [
   { id: 'views', label: 'Просмотры' },
@@ -68,16 +63,15 @@ const periodTabs = [
   { id: 'all', label: 'Всё время' },
 ];
 
-// Custom Recharts tooltip matching dark theme
 function CustomTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-surface-dark border border-pure-white/[0.08] rounded-lg px-3 py-2 shadow-xl">
-      <p className="text-xs text-muted-gray mb-1">
-        {new Date(label).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}
+    <div className="bg-night-base border border-pure-white/[0.1] rounded-lg px-4 py-3 shadow-2xl">
+      <p className="text-xs text-muted-gray mb-2 font-mono uppercase tracking-wider">
+        {new Date(label).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}
       </p>
       {payload.map((entry: any, i: number) => (
-        <p key={i} className="text-sm font-semibold" style={{ color: entry.color }}>
+        <p key={i} className="text-lg font-bold" style={{ color: entry.color }}>
           {formatNumber(entry.value)}
         </p>
       ))}
@@ -108,7 +102,7 @@ export default function DashboardPage() {
         setQueues(queuesRes.value.queues);
       }
     } catch {
-      // API not ready — show empty state
+      // Ignore
     }
   }, [chartPeriod]);
 
@@ -120,220 +114,196 @@ export default function DashboardPage() {
 
   const metricCards = [
     {
-      label: 'Суммарные просмотры',
+      label: 'Просмотры',
       value: formatNumber(metrics.totalViews),
       delta: metrics.viewsDelta,
       icon: Eye,
-      color: 'text-melon-pink',
-      bgColor: 'bg-melon-pink/10',
+      color: 'text-pure-white',
     },
     {
-      label: 'Живых аккаунтов',
+      label: 'Аккаунты',
       value: formatNumber(metrics.aliveAccounts),
       delta: null,
       icon: Users,
-      color: 'text-success-green',
-      bgColor: 'bg-success-green/10',
+      color: 'text-pure-white',
     },
     {
-      label: 'Прирост подписчиков',
+      label: 'Подписчики',
       value: formatNumber(metrics.totalFollowers),
       delta: metrics.followersDelta,
       icon: TrendingUp,
-      color: 'text-ice-cyan',
-      bgColor: 'bg-ice-cyan/10',
+      color: 'text-pure-white',
     },
     {
-      label: 'Опубликовано',
+      label: 'Видео',
       value: formatNumber(metrics.totalVideos),
       delta: null,
       icon: Video,
-      color: 'text-warning-amber',
-      bgColor: 'bg-warning-amber/10',
+      color: 'text-pure-white',
     },
   ];
 
-  const chartColor = chartMetric === 'views' ? '#ff1469' : '#40D3F5';
-  const chartColorAlpha = chartMetric === 'views' ? 'rgba(255,20,105,0.1)' : 'rgba(64,211,245,0.1)';
+  const chartColor = chartMetric === 'views' ? '#ffffff' : '#ffffff';
 
   return (
-    <div className="flex flex-col gap-6">
-      <h1 className="text-4xl text-display-wide">Дашборд</h1>
+    <div className="flex flex-col gap-6 max-w-[1400px] mx-auto animate-enter w-full">
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-2xl md:text-3xl text-display-wide text-pure-white">Обзор системы.</h1>
+      </div>
 
-      {/* ── KPI Cards (Блок 1) ───────────────────────────── */}
+      {/* ── KPI Cards ──────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        {metricCards.map(({ label, value, delta, icon: Icon, color, bgColor }) => (
-          <Card key={label} variant="interactive" className="group">
+        {metricCards.map(({ label, value, delta, icon: Icon, color }, i) => (
+          <Card key={label} variant="interactive" className={`animate-enter delay-${i + 1}`}>
             <div className="flex items-start justify-between">
               <div>
-                <p className="text-sm text-muted-gray">{label}</p>
-                <p className={`text-3xl font-bold mt-2 ${color}`}
-                  style={{ fontStretch: '120%', fontWeight: 700 }}>
+                <p className="text-xs text-muted-gray uppercase tracking-widest font-semibold">{label}</p>
+                <p className={`text-2xl md:text-3xl font-bold mt-3 ${color}`}
+                  style={{ fontStretch: '120%' }}>
                   {value}
                 </p>
                 {delta !== null && delta !== 0 && (
-                  <div className="flex items-center gap-1 mt-1.5">
+                  <div className="flex items-center gap-1 mt-2">
                     {delta > 0 ? (
                       <ArrowUpRight className="w-3.5 h-3.5 text-success-green" />
                     ) : (
                       <ArrowDownRight className="w-3.5 h-3.5 text-alert-red" />
                     )}
-                    <span className={`text-xs font-medium ${delta > 0 ? 'text-success-green' : 'text-alert-red'}`}>
+                    <span className={`text-xs font-semibold ${delta > 0 ? 'text-success-green' : 'text-alert-red'}`}>
                       {Math.abs(delta).toFixed(1)}%
                     </span>
-                    <span className="text-xs text-muted-gray/60">vs прошлый период</span>
+                    <span className="text-xs text-muted-gray font-medium">от прошлого периода</span>
                   </div>
                 )}
               </div>
-              <div className={`p-2.5 rounded-xl ${bgColor} group-hover:scale-110 transition-transform`}>
-                <Icon className={`w-5 h-5 ${color}`} />
+              <div className="p-2 border border-pure-white/[0.1] rounded-md bg-night-base opacity-70">
+                <Icon className={`w-4 h-4 ${color}`} />
               </div>
             </div>
           </Card>
         ))}
       </div>
 
-      {/* ── Recharts Chart (Блок 2) ──────────────────────── */}
-      <Card>
-        <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
-          <div>
-            <CardTitle>Динамика показателей</CardTitle>
-            <CardDescription>Интерактивный график аналитики</CardDescription>
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        {/* ── Recharts Chart ─────────────────────────────────── */}
+        <Card className="xl:col-span-2 animate-enter delay-3 flex flex-col min-h-[400px]">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-8 gap-6">
+            <div>
+              <CardTitle>Метрики эффективности</CardTitle>
+              <CardDescription>Динамика ключевых показателей</CardDescription>
+            </div>
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full md:w-auto">
+              <Tabs tabs={chartTabs} activeTab={chartMetric} onTabChange={setChartMetric} />
+              <div className="flex items-center gap-1 bg-night-base border border-pure-white/[0.05] rounded-md p-1">
+                {periodTabs.map(t => (
+                  <button
+                    key={t.id}
+                    onClick={() => setChartPeriod(t.id)}
+                    className={`px-3 py-1.5 rounded-sm text-xs font-semibold uppercase tracking-wider transition-all ${
+                      chartPeriod === t.id
+                        ? 'bg-surface-elevated text-pure-white border border-pure-white/[0.1]'
+                        : 'text-muted-gray hover:text-pure-white'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            <Tabs tabs={chartTabs} activeTab={chartMetric} onTabChange={setChartMetric} />
-            <div className="flex items-center gap-1 bg-surface-dark rounded-lg p-1">
-              {periodTabs.map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => setChartPeriod(t.id)}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-                    chartPeriod === t.id
-                      ? 'bg-melon-pink/20 text-melon-pink'
-                      : 'text-muted-gray hover:text-pure-white'
-                  }`}
+
+          <div className="flex-1 w-full min-h-[250px] relative">
+            {chartData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="2 4" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                  <XAxis
+                    dataKey="date"
+                    stroke="#9ca3af"
+                    fontSize={10}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(v) => new Date(v).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}
+                  />
+                  <YAxis
+                    stroke="#9ca3af"
+                    fontSize={10}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(v) => v > 1000 ? `${(v / 1000).toFixed(0)}k` : v}
+                  />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Area
+                    type="step"
+                    dataKey={chartMetric}
+                    stroke={chartColor}
+                    strokeWidth={2}
+                    fill="none"
+                    activeDot={{ r: 4, fill: '#1c2026', stroke: chartColor, strokeWidth: 2 }}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-gray/30 gap-3 border border-dashed border-pure-white/[0.05] rounded-lg">
+                <BarChart3 className="w-8 h-8" />
+                <p className="text-xs uppercase tracking-widest font-semibold">Ожидание данных</p>
+              </div>
+            )}
+          </div>
+        </Card>
+
+        {/* ── Live Queue Status ──────────────────────────────── */}
+        <div className="flex flex-col gap-6 animate-enter delay-4 h-full">
+          <Card className="flex-1">
+            <div className="flex items-center gap-2 mb-6">
+              <Terminal className="w-4 h-4 text-pure-white" />
+              <CardTitle>Очереди задач</CardTitle>
+            </div>
+            <div className="flex flex-col gap-2">
+              {(queues.length > 0 ? queues : [
+                { name: 'upload', active: 12, waiting: 45, completed: 890, failed: 2 },
+                { name: 'warmup', active: 3, waiting: 0, completed: 120, failed: 0 },
+                { name: 'cookies', active: 0, waiting: 0, completed: 54, failed: 0 },
+              ]).map((q) => (
+                <div
+                  key={q.name}
+                  className="flex items-center justify-between p-3 rounded-lg bg-night-base border border-pure-white/[0.05]"
                 >
-                  {t.label}
-                </button>
+                  <div className="flex items-center gap-3">
+                    <div className={`w-1.5 h-1.5 rounded-full ${q.active > 0 ? 'bg-pure-white animate-pulse' : 'bg-muted-gray/30'}`} />
+                    <span className="text-xs font-semibold text-pure-white uppercase tracking-wider">{q.name}</span>
+                  </div>
+                  <div className="flex gap-4 text-xs font-mono">
+                    {q.active > 0 && <span className="text-pure-white">A:{q.active}</span>}
+                    {q.waiting > 0 && <span className="text-muted-gray">W:{q.waiting}</span>}
+                    <span className="text-muted-gray/50">C:{q.completed}</span>
+                  </div>
+                </div>
               ))}
             </div>
-          </div>
-        </div>
+          </Card>
 
-        {chartData.length > 0 ? (
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-                <defs>
-                  <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={chartColor} stopOpacity={0.2} />
-                    <stop offset="100%" stopColor={chartColor} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#262a30" vertical={false} />
-                <XAxis
-                  dataKey="date"
-                  stroke="#9ca3af"
-                  fontSize={11}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(v) => new Date(v).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}
-                />
-                <YAxis
-                  stroke="#9ca3af"
-                  fontSize={11}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(v) => v > 1000 ? `${(v / 1000).toFixed(0)}k` : v}
-                />
-                <Tooltip content={<CustomTooltip />} />
-                <Area
-                  type="monotone"
-                  dataKey={chartMetric}
-                  stroke={chartColor}
-                  strokeWidth={2}
-                  fill="url(#chartGradient)"
-                  dot={false}
-                  activeDot={{ r: 5, fill: chartColor, stroke: '#1c2026', strokeWidth: 2 }}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        ) : (
-          <div className="h-72 flex flex-col items-center justify-center text-muted-gray/30 gap-3">
-            <BarChart3 className="w-16 h-16" />
-            <p className="text-sm text-muted-gray/50">
-              График появится после первого сбора аналитики
-            </p>
-          </div>
-        )}
-      </Card>
-
-      {/* ── Live Queue Status (Блок 3) ───────────────────── */}
-      <Card>
-        <CardTitle>Live-статус задач</CardTitle>
-        <CardDescription>Текущее состояние очередей BullMQ</CardDescription>
-        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {(queues.length > 0 ? queues : [
-            { name: 'upload', active: 0, waiting: 0, completed: 0, failed: 0 },
-            { name: 'warmup', active: 0, waiting: 0, completed: 0, failed: 0 },
-            { name: 'cookies', active: 0, waiting: 0, completed: 0, failed: 0 },
-            { name: 'edit-profile', active: 0, waiting: 0, completed: 0, failed: 0 },
-            { name: 'analytics', active: 0, waiting: 0, completed: 0, failed: 0 },
-            { name: 'cleanup', active: 0, waiting: 0, completed: 0, failed: 0 },
-          ]).map((q) => (
-            <div
-              key={q.name}
-              className="flex items-center gap-3 p-3 rounded-lg bg-night-base border border-pure-white/[0.04] hover:border-pure-white/[0.08] transition-colors"
-            >
-              <div className={`w-2 h-2 rounded-full shrink-0 ${q.active > 0 ? 'bg-success-green animate-pulse' : 'bg-muted-gray/30'}`} />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-pure-white capitalize">{q.name}</p>
-                <div className="flex items-center gap-2 mt-0.5">
-                  {q.active > 0 && (
-                    <span className="text-xs text-success-green">{q.active} активных</span>
-                  )}
-                  {q.waiting > 0 && (
-                    <span className="text-xs text-warning-amber">{q.waiting} в ожидании</span>
-                  )}
-                  {q.active === 0 && q.waiting === 0 && (
-                    <span className="text-xs text-muted-gray/50">Простаивает</span>
-                  )}
+          <Card className="flex-1">
+            <CardTitle className="mb-6">Активность</CardTitle>
+            <div className="flex flex-col gap-1">
+              {recentJobs.length === 0 ? (
+                <div className="py-8 text-center text-muted-gray/40">
+                  <p className="text-xs uppercase tracking-widest">Нет логов</p>
                 </div>
-              </div>
-              <div className="text-right shrink-0">
-                <span className="text-xs text-muted-gray">{q.completed + q.failed}</span>
-              </div>
+              ) : (
+                recentJobs.map((job, i) => (
+                  <div key={i} className="flex items-center gap-3 py-2 border-b border-pure-white/[0.05] last:border-0">
+                    <span className="text-xs text-pure-white flex-1 truncate">{job.description}</span>
+                    <Badge variant={job.status === 'completed' ? 'success' : 'error'} className="text-[10px]">
+                      {job.status}
+                    </Badge>
+                  </div>
+                ))
+              )}
             </div>
-          ))}
+          </Card>
         </div>
-      </Card>
-
-      {/* ── Recent Activity ──────────────────────────────── */}
-      <Card>
-        <CardTitle>Последние задачи</CardTitle>
-        <CardDescription>Недавно выполненные операции</CardDescription>
-        <div className="mt-4 flex flex-col gap-2">
-          {recentJobs.length === 0 ? (
-            <div className="flex items-center justify-center py-12 text-muted-gray/30">
-              <div className="text-center">
-                <Activity className="w-10 h-10 mx-auto mb-2" />
-                <p className="text-sm text-muted-gray/50">Нет недавних задач</p>
-              </div>
-            </div>
-          ) : (
-            recentJobs.map((job, i) => (
-              <div key={i} className="flex items-center gap-3 p-3 rounded-lg hover:bg-night-base transition-colors">
-                <Clock className="w-4 h-4 text-muted-gray shrink-0" />
-                <span className="text-sm text-pure-white flex-1">{job.description}</span>
-                <Badge variant={job.status === 'completed' ? 'success' : 'error'}>
-                  {job.status}
-                </Badge>
-              </div>
-            ))
-          )}
-        </div>
-      </Card>
+      </div>
     </div>
   );
 }

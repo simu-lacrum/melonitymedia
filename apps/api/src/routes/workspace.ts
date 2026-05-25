@@ -233,15 +233,15 @@ router.post('/presets', async (req: Request, res: Response) => {
 router.get('/cookies/export', async (req: Request, res: Response) => {
   try {
     // Fetch all accounts with cookies for this user
-    const accounts = await prisma.account.findMany({
+    const accounts = await prisma.socialAccount.findMany({
       where: {
         userId: req.user!.id,
-        cookies: { not: null },
+        cookiesPath: { not: null },
       },
       select: {
-        login: true,
+        username: true,
         platform: true,
-        cookies: true,
+        cookiesPath: true,
       },
     });
 
@@ -250,12 +250,11 @@ router.get('/cookies/export', async (req: Request, res: Response) => {
       return;
     }
 
-    // Build a simple JSON-per-file ZIP structure using archiver
-    // We use a lightweight approach: generate a JSON manifest
+    // Build JSON manifest for cookie files
     const cookiesData = accounts.map(a => ({
-      login: a.login,
+      username: a.username,
       platform: a.platform,
-      cookies: a.cookies,
+      cookiesPath: a.cookiesPath,
     }));
 
     const jsonPayload = JSON.stringify(cookiesData, null, 2);
