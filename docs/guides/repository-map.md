@@ -8,6 +8,8 @@ MelonityMedia/
 │   ├── api/                       # Express.js Backend
 │   ├── web/                       # Next.js 15 Frontend
 │   └── worker/                    # BullMQ Worker Pool
+├── scripts/                       # Утилитарные скрипты
+│   └── rotate-master-key.mjs      # Ротация AES-256-GCM ключа шифрования
 ├── docs/                          # Документация проекта
 │   ├── guides/                    # Руководства для разработчиков
 │   └── architecture/              # Архитектурные документы
@@ -15,7 +17,7 @@ MelonityMedia/
 ├── design.md                      # Дизайн-система (tokens, typography)
 ├── instructions.md                # Source of Truth (ТЗ)
 ├── tsconfig.base.json             # Общая конфигурация TypeScript
-├── .env.example                   # Шаблон переменных окружения
+├── .env.example                   # Шаблон переменных окружения (включая MASTER_KEY)
 └── package.json                   # Root monorepo (workspaces)
 ```
 
@@ -27,8 +29,8 @@ MelonityMedia/
 |------|----------|
 | `src/index.ts` | Точка входа: Express + Socket.io + middleware + маршруты |
 | `src/routes/auth.ts` | Регистрация, авторизация, JWT выдача/валидация |
-| `src/routes/accounts.ts` | CRUD аккаунтов, массовый импорт `log:pass` |
-| `src/routes/proxies.ts` | CRUD прокси, тест соединения, ротация IP |
+| `src/routes/accounts.ts` | CRUD аккаунтов, **импорт cookies** (Netscape/JSON), AES-256-GCM шифрование, auto fingerprint |
+| `src/routes/proxies.ts` | CRUD прокси, type/carrier/ASN/rotation cooldown, тест соединения |
 | `src/routes/workspace.ts` | Запуск задач BullMQ, управление очередью |
 | `src/routes/videos.ts` | Загрузка видео, метаданные, привязка к аккаунтам |
 | `src/routes/analytics.ts` | Агрегация метрик: просмотры, подписчики, графики |
@@ -39,7 +41,7 @@ MelonityMedia/
 | `src/lib/prisma.ts` | Singleton Prisma Client |
 | `src/lib/redis.ts` | Singleton Redis/ioredis |
 | `src/lib/bullmq.ts` | Фабрика BullMQ очередей |
-| `prisma/schema.prisma` | Схема БД: User, Account, Proxy, Video, AnalyticsSnapshot |
+| `prisma/schema.prisma` | Схема БД v3: User, SocialAccount (cookie-auth + fingerprint), Proxy (type/carrier/ASN), Video, Task, Preset, AuditLog |
 
 ---
 
@@ -51,9 +53,9 @@ MelonityMedia/
 | `src/app/auth/login/page.tsx` | Страница входа |
 | `src/app/auth/register/page.tsx` | Страница регистрации |
 | `src/app/account/dashboard/page.tsx` | Дашборд аналитики (Recharts) |
-| `src/app/account/profiles/page.tsx` | База аккаунтов + массовые действия |
+| `src/app/account/profiles/page.tsx` | База аккаунтов + массовые действия + cookie import |
 | `src/app/account/workspace/page.tsx` | Загрузчик + 4 вкладки + Live Terminal |
-| `src/app/account/proxies/page.tsx` | Управление прокси |
+| `src/app/account/proxies/page.tsx` | Управление прокси (type/carrier/rotation cooldown) |
 | `src/app/admin/runtime/page.tsx` | Здоровье системы |
 | `src/app/admin/users/page.tsx` | Управление пользователями |
 | `src/app/admin/firewall/page.tsx` | IP Blacklist |
@@ -67,20 +69,55 @@ MelonityMedia/
 
 ---
 
-## `apps/worker/` — Worker Pool (BullMQ + UndetectedChrome)
+## `apps/worker/` — Worker Pool (BullMQ + Patchright)
+
+> ⚠️ **Запрещены**: puppeteer, selenium-webdriver, undetected-chromedriver-js, cheerio.
+> ESLint `no-restricted-imports` блокирует их на уровне сборки.
+
+### Core — Ядро антидетект-системы
 
 | Путь | Описание |
 |------|----------|
-| `src/index.ts` | Точка входа: подключение 6 BullMQ очередей |
-| `src/core/browser-automation.ts` | `BrowserAutomation` — ядро: запуск UC, proxy-расширение, ротация IP |
-| `src/handlers/upload.ts` | Залив видео на TikTok / YouTube Shorts |
-| `src/handlers/warmup.ts` | Прогрев: скроллинг, лайки, комментарии |
-| `src/handlers/cookies.ts` | Нагул cookies на сайтах-донорах |
-| `src/handlers/edit-profile.ts` | Редактирование профиля (аватар, био) |
-| `src/handlers/analytics.ts` | Cron-парсинг метрик через Cheerio |
+| `src/core/browser/patchright-launcher.ts` | Stealth-браузер на Patchright (patched Playwright CDP) с per-account fingerprint |
+| `src/core/browser/fingerprint-manager.ts` | Deterministic `AccountFingerprint` — UA, screen, WebGL, canvas, locale, fonts |
+| `src/core/auth/cookie-store.ts` | AES-256-GCM шифрование/дешифрование cookies (MASTER_KEY) |
+| `src/core/auth/session-validator.ts` | Pre-flight cookie validation через curl-impersonate |
+| `src/core/humanity/biomouse.ts` | ghost-cursor: Bézier-кривые, фиксации, анти-паттерн прямолинейного движения |
+| `src/core/humanity/typing-emulator.ts` | Gaussian inter-key delays, 2% typo rate, word-boundary pauses |
+| `src/core/proxy/lte-rotation.ts` | LTE mobile proxy IP rotation с 15-min cooldown enforcement |
+| `src/core/proxy/carrier-validator.ts` | BGP path + ASN validation (детекция datacenter proxies: AWS, Hetzner, etc.) |
+| `src/core/tls/curl-impersonate-client.ts` | Chrome TLS fingerprint impersonation (браузерные JA3/JA4) |
+| `src/core/video/uniquifier.ts` | FFmpeg pipeline: pixel shift, hue offset, audio pitch — deterministic per account |
+
+### Handlers — Обработчики задач
+
+| Путь | Описание |
+|------|----------|
+| `src/index.ts` | Точка входа: подключение **7 BullMQ очередей**, MASTER_KEY валидация |
+| `src/handlers/upload.ts` | Залив уникализированного видео через Patchright + ghost-cursor |
+| `src/handlers/warmup.ts` | **10-day progressive curriculum**: passive → light → active engagement |
+| `src/handlers/cookies.ts` | Export/refresh cookies через Patchright session |
+| `src/handlers/edit-profile.ts` | Редактирование профиля (аватар, био) через ghost-cursor |
+| `src/handlers/analytics.ts` | **curl-impersonate JSON API** (~200ms/профиль, без браузера) |
 | `src/handlers/cleanup.ts` | Очистка временных файлов после загрузки |
+| `src/handlers/shadowban-detector.ts` | Автоматическая детекция (3+ видео <100 views = SHADOWBAN_SUSPECTED) |
+| `src/handlers/index.ts` | Barrel export всех handlers |
+
+### Инфраструктура
+
+| Путь | Описание |
+|------|----------|
+| `src/core/browser-automation.ts` | **⚠️ DEPRECATED** — старый модуль Selenium/UC. Только для reference. |
 | `src/plugins/` | Plugin registry (BasePlugin + extensible) |
 | `src/lib/socket-logger.ts` | Отправка логов в Socket.io Terminal |
-| `src/types/` | TypeScript declarations (undetected-chromedriver-js) |
-| `Dockerfile` | Chrome + Xvfb + Node.js production image |
+| `Dockerfile` | Chrome + Xvfb + **ffmpeg** + **curl-impersonate** + Node.js 20 |
 | `entrypoint.sh` | Xvfb startup + `DISPLAY=:99` + Node.js |
+| `eslint.config.mjs` | **Banned imports** (puppeteer, selenium, cheerio, UC) |
+
+---
+
+## `scripts/` — Утилитарные скрипты
+
+| Путь | Описание |
+|------|----------|
+| `rotate-master-key.mjs` | Ротация AES-256-GCM ключа: decrypt old → re-encrypt new → update DB |

@@ -29,6 +29,7 @@ cp .env.example .env
 | `DATABASE_URL` | PostgreSQL connection string | ✅ |
 | `REDIS_URL` | Redis connection string | ✅ |
 | `JWT_SECRET` | Случайная строка 64+ символов | ✅ |
+| `MASTER_KEY` | AES-256-GCM ключ (32 байта base64) для шифрования cookies | ✅ |
 | `JWT_EXPIRES_IN` | Время жизни токена (по умолчанию `7d`) | ❌ |
 | `PORT_API` | Порт API (по умолчанию `4000`) | ❌ |
 | `PORT_WEB` | Порт фронтенда (по умолчанию `3000`) | ❌ |
@@ -41,6 +42,13 @@ cp .env.example .env
 > ```bash
 > node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 > ```
+
+> [!IMPORTANT]
+> `MASTER_KEY` обязателен для работы воркера и API. Сгенерируйте ONCE:
+> ```bash
+> node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+> ```
+> Если ключ невалиден (не 32 байта), воркер завершится с `process.exit(1)`.
 
 ## 2. Запуск инфраструктуры
 
@@ -106,8 +114,10 @@ npm run dev
 ```
 
 > [!WARNING]
-> Worker требует Chrome/Chromium и Xvfb на Linux. На Windows/macOS он будет работать
-> в headless-режиме или потребует установленный Chrome.
+> Worker использует **Patchright** (patched Playwright CDP), который сам устанавливает браузер.
+> На Linux требуется Xvfb для `headless: false` режима.
+> Для видео уникализации требуется **ffmpeg** в PATH.
+> **НЕ устанавливайте** puppeteer, selenium или undetected-chromedriver.
 
 ## 6. Первый запуск
 
