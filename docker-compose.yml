@@ -1,0 +1,94 @@
+# ─────────────────────────────────────────────────────────────
+# MelonityMedia Docker Compose
+# Production-ready stack: PostgreSQL + Redis + API + Web + Worker
+# ─────────────────────────────────────────────────────────────
+
+services:
+  # ── PostgreSQL 16 ─────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: melonity
+      POSTGRES_PASSWORD: melonity
+      POSTGRES_DB: melonitymedia
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U melonity"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis 7 (BullMQ broker + Cache + Firewall) ───────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── API Server (Express.js) ──────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${PORT_API:-4000}:4000"
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - uploads:/app/uploads
+
+  # ── Web Frontend (Next.js 15) ────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${PORT_WEB:-3000}:3000"
+    env_file: .env
+    depends_on:
+      - api
+
+  # ── Worker (Puppeteer + Xvfb + Chrome) ───────────────────
+  # CRITICAL: This container runs headless Chrome inside a
+  # virtual display (Xvfb) to avoid antifraud detection.
+  # headless: false + Xvfb = undetectable browser sessions.
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/docker/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - uploads:/app/uploads
+    # Worker needs more resources for Chrome instances
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads:

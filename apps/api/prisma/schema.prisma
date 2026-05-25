@@ -1,0 +1,217 @@
+// ─────────────────────────────────────────────────────────────
+// MelonityMedia — Prisma Schema
+// Source of truth for all database models.
+//
+// Key design decisions:
+// 1. Every user-facing model has userId FK — strict tenant isolation
+// 2. Video has shouldDelete flag — auto-cleanup after platform upload
+// 3. Passwords stored as bcrypt hashes (never plaintext)
+// 4. SocialAccount passwords encrypted at app layer
+// 5. AuditLog for admin tracking (who did what)
+// ─────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── User ────────────────────────────────────────────────────
+// The webmaster (traffic arbitrageur) who owns accounts, 
+// proxies, and tasks. First registered user gets ADMIN role.
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  name         String?
+  role         Role      @default(USER)
+  maxThreads   Int       @default(3)    // concurrent browser sessions limit
+  isBanned     Boolean   @default(false)
+  bannedAt     DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  // Relations — everything a webmaster owns
+  accounts     SocialAccount[]
+  proxies      Proxy[]
+  tasks        Task[]
+  videos       Video[]
+  presets      Preset[]
+  auditLogs    AuditLog[]
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+// ── Social Account ──────────────────────────────────────────
+// TikTok or YouTube account managed by the webmaster.
+// Password is encrypted at application layer (not by Prisma).
+model SocialAccount {
+  id          String        @id @default(cuid())
+  userId      String
+  platform    Platform
+  username    String
+  password    String        // encrypted at app layer
+  status      AccountStatus @default(ALIVE)
+  proxyId     String?       // manually assigned by user
+  cookiesPath String?       // path to cookies file
+  avatarUrl   String?
+  bannerUrl   String?
+  bio         String?
+  views       Int           @default(0)
+  followers   Int           @default(0)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  proxy Proxy? @relation(fields: [proxyId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([userId, platform])
+}
+
+enum Platform {
+  TIKTOK
+  YOUTUBE
+}
+
+enum AccountStatus {
+  ALIVE
+  AUTH_NEEDED
+  BANNED
+}
+
+// ── Proxy ───────────────────────────────────────────────────
+// Mobile or static proxy. If isRotating=true and rotationLink
+// is set, worker will GET that URL before each session to
+// rotate the modem IP (wait 12s for physical modem restart).
+model Proxy {
+  id           String      @id @default(cuid())
+  userId       String
+  address      String      // format: ip:port:login:pass or ip:port
+  isRotating   Boolean     @default(false)
+  rotationLink String?     // API URL to trigger IP rotation
+  label        String?     // user-friendly name
+  status       ProxyStatus @default(ACTIVE)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accounts SocialAccount[]
+
+  @@index([userId])
+}
+
+enum ProxyStatus {
+  ACTIVE
+  DEAD
+}
+
+// ── Video ───────────────────────────────────────────────────
+// Uploaded video file. The lifecycle:
+// 1. User uploads via DnD → saved to uploads/ dir
+// 2. Worker picks up upload job → posts to TikTok/YouTube
+// 3. On success → isUploaded=true, uploadedAt=now()
+// 4. Cleanup cron → deletes physical file from disk
+// 5. DB record stays for analytics (filepath cleared)
+//
+// shouldDelete=true (default) means auto-cleanup after upload.
+// User can set shouldDelete=false to keep originals.
+model Video {
+  id           String    @id @default(cuid())
+  userId       String
+  filename     String    // sanitized filename on disk
+  originalName String    // original upload filename
+  filepath     String    // full path on disk (cleared after cleanup)
+  mimeType     String
+  size         Int       // bytes
+  order        Int       @default(0) // drag-n-drop sort order
+  isUploaded   Boolean   @default(false)
+  uploadedAt   DateTime?
+  shouldDelete Boolean   @default(true) // auto-delete after upload?
+  createdAt    DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, isUploaded])
+}
+
+// ── Task ────────────────────────────────────────────────────
+// A BullMQ job wrapper. Tracks status, progress, errors.
+// The config JSON holds mode-specific settings (titles pool,
+// hashtags, warmup probabilities, etc.)
+model Task {
+  id          String     @id @default(cuid())
+  userId      String
+  type        TaskType
+  status      TaskStatus @default(PENDING)
+  config      Json       // mode-specific settings
+  bullmqJobId String?    // BullMQ job ID for tracking
+  progress    Int        @default(0)  // 0-100
+  error       String?
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime   @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, status])
+  @@index([status])
+}
+
+enum TaskType {
+  UPLOAD
+  WARMUP
+  COOKIES
+  EDIT_PROFILE
+  ANALYTICS_CRON
+}
+
+enum TaskStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+// ── Preset ──────────────────────────────────────────────────
+// Saved workspace configuration (threads, delays, mode settings).
+// User can save and load presets to quickly switch configs.
+model Preset {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  config    Json     // full workspace state snapshot
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ── Audit Log ───────────────────────────────────────────────
+// Admin action tracking. Records who did what and when.
+// Used for security auditing and debugging.
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?  // null for system actions
+  action    String   // e.g., "user.ban", "firewall.block"
+  details   Json?    // action-specific data
+  ip        String?  // requester IP
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
