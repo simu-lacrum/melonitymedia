@@ -9,7 +9,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 // We only check if the cookie EXISTS to avoid unnecessary redirects.
 // ─────────────────────────────────────────────────────────────
 
-const PUBLIC_PATHS = ['/auth/login', '/auth/register'];
+const PUBLIC_PATHS = ['/', '/auth/login', '/auth/register'];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -20,21 +20,18 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Public paths are always accessible
+  if (PUBLIC_PATHS.includes(pathname)) {
+    // If authenticated and on auth pages → dashboard (but NOT from landing)
+    if (token && (pathname === '/auth/login' || pathname === '/auth/register')) {
+      return NextResponse.redirect(new URL('/account/dashboard', request.url));
+    }
+    return NextResponse.next();
+  }
+
   // If not authenticated and accessing protected route → login
-  if (!token && !PUBLIC_PATHS.includes(pathname)) {
+  if (!token) {
     return NextResponse.redirect(new URL('/auth/login', request.url));
-  }
-
-  // If authenticated and accessing auth pages → dashboard
-  if (token && PUBLIC_PATHS.includes(pathname)) {
-    return NextResponse.redirect(new URL('/account/dashboard', request.url));
-  }
-
-  // Root redirect
-  if (pathname === '/') {
-    return NextResponse.redirect(
-      new URL(token ? '/account/dashboard' : '/auth/login', request.url),
-    );
   }
 
   return NextResponse.next();

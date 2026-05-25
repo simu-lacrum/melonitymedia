@@ -174,7 +174,7 @@ MelonityMedia/
 │   │   │   │   ├── ui/         # 11 reusable UI components
 │   │   │   │   └── layout/     # Header, Sidebar
 │   │   │   └── lib/            # utils, api client
-│   │   └── public/             # Logo SVG, dashboard preview
+│   │   └── public/             # Logo SVG, favicon
 │   │
 │   └── worker/                 # BullMQ worker pool
 │       ├── src/
@@ -183,9 +183,19 @@ MelonityMedia/
 │       │   ├── handlers/       # upload, warmup, cookies, edit-profile, analytics, cleanup
 │       │   ├── plugins/        # Plugin system (BasePlugin + Registry)
 │       │   └── lib/            # Socket logger
+│       ├── Dockerfile          # Chrome + Xvfb + Node.js 20
+│       ├── entrypoint.sh       # Xvfb :99 virtual display startup
 │       └── package.json
 │
-├── docker-compose.yml          # PostgreSQL + Redis + Worker
+├── docs/                       # Project documentation
+│   ├── guides/
+│   │   ├── local-development.md
+│   │   ├── repository-map.md
+│   │   └── interface-map.md
+│   └── architecture/
+│       └── backend-contracts.md
+│
+├── docker-compose.yml          # PostgreSQL + Redis + API + Web + Worker
 ├── design.md                   # Design system reference
 ├── instructions.md             # Source of Truth (ТЗ)
 ├── tsconfig.base.json          # Shared TypeScript config
@@ -319,9 +329,9 @@ graph TD
 | `/` | Лендинг с hero-секцией, фичами, статистикой | Публичный |
 | `/auth/login` | JWT-авторизация через HttpOnly Cookie | Публичный |
 | `/auth/register` | Регистрация нового вебмастера | Публичный |
-| `/account/dashboard` | KPI-карточки, графики просмотров, статус очередей | Авторизованный |
-| `/account/profiles` | DataGrid аккаунтов, импорт `log:pass`, привязка прокси | Авторизованный |
-| `/account/workspace` | Drag-n-Drop медиатека, 4 режима работы, Live Terminal | Авторизованный |
+| `/account/dashboard` | KPI-карточки, **Recharts AreaChart**, статус BullMQ очередей | Авторизованный |
+| `/account/profiles` | DataGrid аккаунтов, импорт `log:pass`, **массовая привязка прокси** | Авторизованный |
+| `/account/workspace` | **4 вкладки** (Залив/Прогрев/Cookies/Профиль), DropZone, Terminal | Авторизованный |
 | `/account/proxies` | CRUD прокси, тест коннекта, ротация IP | Авторизованный |
 | `/admin/runtime` | PostgreSQL, Redis, BullMQ, CPU/RAM мониторинг | Администратор |
 | `/admin/users` | Таблица вебмастеров, лимиты потоков, soft-ban | Администратор |
@@ -444,6 +454,8 @@ background: linear-gradient(135deg, #ff1469 0%, #40D3F5 100%);
 | `GET` | `/api/accounts` | Список аккаунтов пользователя |
 | `POST` | `/api/accounts` | Добавить аккаунт (login:pass) |
 | `POST` | `/api/accounts/import` | Массовый импорт из файла |
+| `POST` | `/api/accounts/bulk-proxy` | **Массовая привязка прокси к аккаунтам** |
+| `POST` | `/api/accounts/bulk-update` | Массовое обновление полей |
 | `PATCH` | `/api/accounts/:id` | Обновить (привязать прокси) |
 | `DELETE` | `/api/accounts/:id` | Удалить аккаунт |
 
@@ -462,6 +474,11 @@ background: linear-gradient(135deg, #ff1469 0%, #40D3F5 100%);
 | Метод | Эндпоинт | Описание |
 |-------|----------|----------|
 | `POST` | `/api/workspace/launch` | Запуск задачи (dispatch в BullMQ) |
+| `POST` | `/api/workspace/upload` | Загрузка видео (multipart/form-data) |
+| `POST` | `/api/workspace/queue/add` | Добавление видео к работающей задаче |
+| `GET` | `/api/workspace/presets` | Список пресетов пользователя |
+| `POST` | `/api/workspace/presets` | Сохранить пресет |
+| `GET` | `/api/workspace/cookies/export` | **Скачать cookies аккаунтов (JSON)** |
 | `GET` | `/api/workspace/jobs` | Список задач |
 | `DELETE` | `/api/workspace/jobs/:id` | Отмена задачи |
 
@@ -536,6 +553,8 @@ gitGraph
     commit id: "full pages"
     commit id: "worker handlers"
     commit id: "landing + proxies"
+    commit id: "Recharts + workspace tabs"
+    commit id: "docs + Docker + proxy bind"
     checkout main
     merge feat/phase2-features id: "merge phase2"
 ```
@@ -561,7 +580,11 @@ gitGraph
 | [`docs/guides/local-development.md`](docs/guides/local-development.md) | Инструкция по локальному запуску |
 | [`docs/guides/repository-map.md`](docs/guides/repository-map.md) | «Что где лежит» — архитектура папок |
 | [`docs/guides/interface-map.md`](docs/guides/interface-map.md) | Карта экранов и роутов |
-| [`docs/architecture/backend-contracts.md`](docs/architecture/backend-contracts.md) | API-контракты и BullMQ payloads |
+| [`docs/architecture/backend-contracts.md`](docs/architecture/backend-contracts.md) | API-контракты, BullMQ payloads, Socket.io events |
+
+> 📂 Все документы из `/docs/` доступны на GitHub:  
+> [`docs/guides/`](https://github.com/simu-lacrum/melonitymedia/tree/main/docs/guides) ·
+> [`docs/architecture/`](https://github.com/simu-lacrum/melonitymedia/tree/main/docs/architecture)
 
 ---
 
