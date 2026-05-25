@@ -3,24 +3,24 @@
 // ─────────────────────────────────────────────────────────────
 // MelonityMedia — Landing Page
 //
-// Design philosophy: "Neon Gravitas"
-// A premium, dark-mode landing with the dual-tone brand gradient
-// (melon pink #FF1469 ↔ ice cyan #40D3F5). Floating elements,
-// glassmorphism cards, and bold Roboto Flex stretched headings
-// create an elite automation-tool aesthetic.
+// Aesthetic: "Corporate Neon" — luxury-minimal meets industrial
+// Color story: Night base (#1c2026) dominant, melon pink accent,
+// ice cyan secondary. Brand gradient used sparingly.
 //
-// From design.md: Roboto Flex 150% stretch for H1, night-base
-// background, melon-pink CTAs with outer glow.
-// From antigravity-design-expert: weightless floating cards,
-// staggered entrances, parallax depth, spatial layering.
+// Differentiation anchor: The angular logo floats at the
+// intersection of two gradient planes — recognizable without text.
+//
+// DFII Score: Impact 5 + Fit 5 + Feasibility 5 + Performance 4
+//             − Consistency Risk 1 = 18 (Excellent)
 // ─────────────────────────────────────────────────────────────
 
 import Link from 'next/link';
 import Image from 'next/image';
 import {
-  Upload, Shield, BarChart3, Zap, Globe, Clock,
-  ChevronRight, ArrowRight, Play, Smartphone,
+  Upload, Shield, BarChart3, Zap, Globe,
+  ChevronRight, ArrowRight, Smartphone,
   TrendingUp, Lock, Cpu, RefreshCw,
+  Activity, Layers,
 } from 'lucide-react';
 
 export default function LandingPage() {
@@ -33,23 +33,23 @@ export default function LandingPage() {
             <Image
               src="/logo.svg"
               alt="MelonityMedia"
-              width={40}
-              height={40}
-              className="animate-glow-pulse"
+              width={36}
+              height={36}
+              className="transition-transform duration-500 group-hover:rotate-12"
             />
-            <span className="text-xl font-bold tracking-tight text-pure-white group-hover:text-melon-pink transition-colors duration-300">
+            <span className="text-lg font-semibold tracking-tight text-pure-white">
               Melonity<span className="text-melon-pink">Media</span>
             </span>
           </Link>
           <div className="hidden md:flex items-center gap-8">
-            <a href="#features" className="text-muted-gray hover:text-pure-white transition-colors text-sm">
-              Возможности
+            <a href="#capabilities" className="text-muted-gray hover:text-pure-white transition-colors text-sm">
+              Платформа
             </a>
-            <a href="#platforms" className="text-muted-gray hover:text-pure-white transition-colors text-sm">
-              Платформы
+            <a href="#workflow" className="text-muted-gray hover:text-pure-white transition-colors text-sm">
+              Как работает
             </a>
-            <a href="#stats" className="text-muted-gray hover:text-pure-white transition-colors text-sm">
-              Статистика
+            <a href="#infrastructure" className="text-muted-gray hover:text-pure-white transition-colors text-sm">
+              Инфраструктура
             </a>
             <Link
               href="/auth/login"
@@ -61,7 +61,7 @@ export default function LandingPage() {
               href="/auth/register"
               className="px-5 py-2.5 rounded-xl bg-melon-pink text-pure-white text-sm font-semibold hover:brightness-110 transition-all duration-300 shadow-[0_0_20px_rgba(255,20,105,0.3)] hover:shadow-[0_0_30px_rgba(255,20,105,0.5)]"
             >
-              Начать бесплатно
+              Запросить доступ
             </Link>
           </div>
         </div>
@@ -69,195 +69,195 @@ export default function LandingPage() {
 
       {/* ── Hero Section ───────────────────────────────────── */}
       <section className="relative pt-40 pb-32 px-6" id="hero">
-        {/* Background gradient orbs — spatial depth effect */}
+        {/* Background — gradient planes */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          {/* Pink orb — top right */}
           <div
-            className="absolute -top-32 -right-32 w-[600px] h-[600px] rounded-full opacity-20 blur-[120px] animate-float-slow"
+            className="absolute -top-40 -right-40 w-[700px] h-[700px] rounded-full opacity-[0.12] blur-[140px]"
             style={{ background: 'radial-gradient(circle, #ff1469 0%, transparent 70%)' }}
           />
-          {/* Cyan orb — bottom left */}
           <div
-            className="absolute -bottom-40 -left-40 w-[500px] h-[500px] rounded-full opacity-15 blur-[100px] animate-float"
+            className="absolute -bottom-60 -left-40 w-[600px] h-[600px] rounded-full opacity-[0.08] blur-[120px]"
             style={{ background: 'radial-gradient(circle, #40D3F5 0%, transparent 70%)' }}
           />
-          {/* Grid lines */}
+          {/* Subtle grid */}
           <div
-            className="absolute inset-0 opacity-[0.03]"
+            className="absolute inset-0 opacity-[0.025]"
             style={{
               backgroundImage: `
                 linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px),
                 linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)
               `,
-              backgroundSize: '60px 60px',
+              backgroundSize: '80px 80px',
             }}
           />
         </div>
 
         <div className="max-w-wrapper relative z-[1]">
-          <div className="max-w-4xl mx-auto text-center">
-            {/* Badge */}
-            <div className="animate-fade-up inline-flex items-center gap-2 px-4 py-2 rounded-full bg-surface-dark border border-melon-pink/20 mb-8">
-              <span className="w-2 h-2 rounded-full bg-success-green animate-pulse" />
-              <span className="text-xs text-muted-gray font-medium tracking-wider uppercase">
-                Панель автоматизации v2.0
-              </span>
-            </div>
-
-            {/* Main heading — ultra-wide Roboto Flex */}
-            <h1 className="animate-fade-up stagger-1 text-5xl md:text-7xl lg:text-[5.5rem] leading-[1.05] mb-6">
-              Загружай видео{' '}
-              <span className="text-gradient-brand">
-                без фрода
-              </span>
-            </h1>
-
-            <p className="animate-fade-up stagger-2 text-lg md:text-xl text-muted-gray max-w-2xl mx-auto mb-10 leading-relaxed">
-              Автоматическая загрузка вертикального видео на TikTok и YouTube Shorts.
-              Антидетект-браузер, ротация мобильных прокси, прогрев аккаунтов —
-              <span className="text-pure-white font-medium"> всё из одной панели</span>.
-            </p>
-
-            {/* CTA buttons */}
-            <div className="animate-fade-up stagger-3 flex flex-col sm:flex-row items-center justify-center gap-4">
-              <Link
-                href="/auth/register"
-                className="group flex items-center gap-2 px-8 py-4 rounded-2xl bg-melon-pink text-pure-white font-semibold text-lg hover:brightness-110 transition-all duration-300 shadow-[0_0_30px_rgba(255,20,105,0.35)] hover:shadow-[0_0_50px_rgba(255,20,105,0.55)] hover:translate-y-[-2px]"
-              >
-                Начать работу
-                <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-              </Link>
-              <a
-                href="#features"
-                className="flex items-center gap-2 px-8 py-4 rounded-2xl border border-muted-gray/20 text-muted-gray hover:text-pure-white hover:border-ice-cyan/40 transition-all duration-300"
-              >
-                <Play className="w-4 h-4" />
-                Как это работает
-              </a>
-            </div>
-          </div>
-
-          {/* Dashboard preview with perspective tilt */}
-          <div className="relative mt-20 max-w-5xl mx-auto">
-            {/* Glow backdrop */}
-            <div
-              className="absolute inset-0 -inset-x-20 -top-10 -bottom-10 blur-[80px] opacity-20 rounded-3xl"
-              style={{ background: 'linear-gradient(135deg, #ff1469 0%, #40D3F5 100%)' }}
-            />
-            {/* Dashboard screenshot with perspective */}
-            <div
-              className="animate-fade-up stagger-4 relative rounded-2xl overflow-hidden border border-pure-white/[0.06] shadow-2xl"
-              style={{
-                perspective: '1200px',
-              }}
-            >
-              <div
-                style={{
-                  transform: 'rotateX(2deg)',
-                  transformOrigin: 'center bottom',
-                }}
-              >
-                <Image
-                  src="/dashboard-preview.png"
-                  alt="MelonityMedia Dashboard"
-                  width={1200}
-                  height={675}
-                  className="w-full h-auto"
-                  priority
-                />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
+            {/* Left — Copy */}
+            <div>
+              {/* Status pill */}
+              <div className="animate-fade-up inline-flex items-center gap-2 px-4 py-2 rounded-full bg-surface-dark/80 border border-pure-white/[0.06] mb-8">
+                <span className="w-1.5 h-1.5 rounded-full bg-success-green" />
+                <span className="text-xs text-muted-gray tracking-wider uppercase">
+                  Enterprise Platform
+                </span>
               </div>
-              {/* Gradient overlay at top */}
-              <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-night-base/60 to-transparent pointer-events-none" />
-              {/* Gradient overlay at bottom */}
-              <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-night-base to-transparent pointer-events-none" />
+
+              <h1 className="animate-fade-up stagger-1 text-display-wide text-4xl md:text-6xl lg:text-[4.5rem] leading-[1.05] mb-6">
+                Дистрибуция контента{' '}
+                <span className="text-gradient-brand">
+                  без компромиссов
+                </span>
+              </h1>
+
+              <p className="animate-fade-up stagger-2 text-lg text-muted-gray max-w-lg mb-10 leading-relaxed">
+                Melonity — корпоративная платформа для автоматизации публикации
+                вертикального видео. Антидетект-среда, управление аккаунтами
+                и аналитика —{' '}
+                <span className="text-pure-white font-medium">
+                  единый центр управления
+                </span>.
+              </p>
+
+              {/* CTA */}
+              <div className="animate-fade-up stagger-3 flex flex-wrap items-center gap-4">
+                <Link
+                  href="/auth/register"
+                  className="group flex items-center gap-2.5 px-7 py-3.5 rounded-xl bg-melon-pink text-pure-white font-semibold hover:brightness-110 transition-all duration-300 shadow-[0_0_24px_rgba(255,20,105,0.3)] hover:shadow-[0_0_40px_rgba(255,20,105,0.5)] hover:translate-y-[-2px]"
+                >
+                  Запросить доступ
+                  <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                </Link>
+                <a
+                  href="#workflow"
+                  className="flex items-center gap-2 px-7 py-3.5 rounded-xl border border-pure-white/[0.08] text-muted-gray hover:text-pure-white hover:border-pure-white/20 transition-all duration-300"
+                >
+                  Узнать подробнее
+                </a>
+              </div>
+
+              {/* Metric pills */}
+              <div className="animate-fade-up stagger-4 flex flex-wrap gap-6 mt-12">
+                {[
+                  { value: '6', label: 'Параллельных очередей' },
+                  { value: '24/7', label: 'Автоматизация' },
+                  { value: '0', label: 'Фрод-детекций' },
+                ].map((m, i) => (
+                  <div key={i} className="flex items-baseline gap-2">
+                    <span className="text-2xl font-bold text-display-wide text-gradient-brand">{m.value}</span>
+                    <span className="text-xs text-muted-gray">{m.label}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            {/* Decorative floating elements */}
-            <div className="absolute top-8 -left-8 w-3 h-3 rounded-full bg-ice-cyan/50 animate-float-slow" />
-            <div className="absolute top-24 -right-12 w-2 h-2 rounded-full bg-melon-pink/60 animate-float" style={{ animationDelay: '1s' }} />
-            <div className="absolute -bottom-4 left-1/4 w-4 h-4 rounded-full bg-ice-cyan/30 animate-float" style={{ animationDelay: '2s' }} />
+
+            {/* Right — Logo visual */}
+            <div className="relative flex justify-center lg:justify-end">
+              {/* Glow planes behind logo */}
+              <div className="relative w-[340px] h-[340px] md:w-[420px] md:h-[420px]">
+                {/* Gradient ring */}
+                <div
+                  className="absolute inset-8 rounded-full blur-[60px] opacity-25 animate-float-slow"
+                  style={{ background: 'conic-gradient(from 135deg, #ff1469, #40D3F5, #ff1469)' }}
+                />
+                {/* Inner glass circle */}
+                <div className="absolute inset-12 rounded-full bg-surface-dark/30 backdrop-blur-xl border border-pure-white/[0.04]" />
+                {/* The logo */}
+                <div className="absolute inset-0 flex items-center justify-center animate-float">
+                  <Image
+                    src="/logo.svg"
+                    alt="Melonity"
+                    width={160}
+                    height={160}
+                    priority
+                    className="drop-shadow-[0_0_40px_rgba(255,20,105,0.3)]"
+                  />
+                </div>
+                {/* Orbiting accents */}
+                <div className="absolute top-6 right-12 w-2.5 h-2.5 rounded-full bg-ice-cyan/40 animate-float" style={{ animationDelay: '0.5s' }} />
+                <div className="absolute bottom-16 left-8 w-2 h-2 rounded-full bg-melon-pink/40 animate-float-slow" style={{ animationDelay: '1s' }} />
+                <div className="absolute top-1/2 right-4 w-1.5 h-1.5 rounded-full bg-pure-white/20 animate-float" style={{ animationDelay: '2s' }} />
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* ── Features Grid ──────────────────────────────────── */}
-      <section className="py-24 px-6 relative" id="features">
+      {/* ── Capabilities Grid ─────────────────────────────── */}
+      <section className="py-28 px-6 relative" id="capabilities">
         <div className="max-w-wrapper">
-          <div className="text-center mb-16">
-            <h2 className="animate-fade-up text-3xl md:text-5xl text-display-wide mb-4">
-              Всё для{' '}
-              <span className="text-gradient-brand">арбитража</span>
+          <div className="max-w-2xl mb-16">
+            <p className="animate-fade-up text-xs text-melon-pink font-semibold tracking-[0.2em] uppercase mb-3">
+              Платформа
+            </p>
+            <h2 className="animate-fade-up stagger-1 text-3xl md:text-5xl text-display-wide mb-4">
+              Полный контроль над{' '}
+              <span className="text-gradient-brand">каждым этапом</span>
             </h2>
-            <p className="animate-fade-up stagger-1 text-muted-gray text-lg max-w-xl mx-auto">
-              Полный набор инструментов для работы с вертикальным видеоконтентом
+            <p className="animate-fade-up stagger-2 text-muted-gray text-base leading-relaxed">
+              Шесть ключевых модулей покрывают весь жизненный цикл аккаунта — от создания
+              до масштабирования. Каждый работает автономно через систему очередей.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {[
               {
                 icon: Shield,
-                title: 'Антидетект',
-                desc: 'UndetectedChrome с патченным драйвером. Обходим все проверки TikTok и YouTube',
+                title: 'Антидетект-среда',
+                desc: 'Патченный UndetectedChrome с динамической генерацией proxy-расширений. Нулевой фрод-рейтинг.',
                 color: '#ff1469',
-                delay: '1',
               },
               {
                 icon: Upload,
-                title: 'Авто-загрузка',
-                desc: 'Массовая загрузка видео на TikTok и YouTube Shorts из единой очереди',
+                title: 'Публикация контента',
+                desc: 'Параллельная загрузка видео на TikTok и YouTube Shorts. Описания, хештеги, расписание — из единой очереди.',
                 color: '#40D3F5',
-                delay: '2',
               },
               {
                 icon: Globe,
-                title: 'Мобильные прокси',
-                desc: 'Ротация IP через мобильные модемы. Каждый аккаунт = уникальный IP',
+                title: 'Управление прокси',
+                desc: 'Ротация IP через мобильные модемы с автоматическим перезапуском. Один аккаунт — один изолированный IP.',
                 color: '#ff1469',
-                delay: '3',
               },
               {
                 icon: RefreshCw,
                 title: 'Прогрев аккаунтов',
-                desc: 'Автоматическая имитация активности: скроллинг, лайки, просмотры',
+                desc: 'Программируемые сценарии: скроллинг, лайки, комментарии. Гибкие ползунки вероятности каждого действия.',
                 color: '#40D3F5',
-                delay: '4',
               },
               {
                 icon: BarChart3,
                 title: 'Аналитика',
-                desc: 'Сбор статистики аккаунтов: подписчики, просмотры, лайки — в реальном времени',
+                desc: 'Ночной cron-сбор метрик: подписчики, просмотры, вовлечённость. Данные парсятся через Cheerio без нагрузки на аккаунт.',
                 color: '#ff1469',
-                delay: '5',
               },
               {
                 icon: Lock,
-                title: 'Cookie-фарминг',
-                desc: 'Автоматическое обновление cookies для поддержания живых сессий',
+                title: 'Сессии и cookies',
+                desc: 'Автоматический фарминг и обновление cookies для поддержания авторизованных сессий.',
                 color: '#40D3F5',
-                delay: '6',
               },
             ].map((feature, i) => (
               <div
                 key={i}
-                className={`animate-fade-up stagger-${feature.delay} glass-card p-6 group hover:border-[${feature.color}]/20 transition-all duration-500 hover:translate-y-[-4px]`}
-                style={{
-                  boxShadow: 'none',
-                  transition: 'all 0.5s cubic-bezier(0.22, 1, 0.36, 1)',
-                }}
+                className={`animate-fade-up stagger-${Math.min(i + 1, 6)} glass-card p-6 group transition-all duration-500 hover:translate-y-[-4px]`}
+                style={{ transition: 'all 0.5s cubic-bezier(0.22, 1, 0.36, 1)' }}
                 onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLElement).style.boxShadow = `0 20px 60px ${feature.color}15, 0 0 0 1px ${feature.color}25`;
+                  (e.currentTarget as HTMLElement).style.boxShadow = `0 20px 60px ${feature.color}10, 0 0 0 1px ${feature.color}18`;
                 }}
                 onMouseLeave={(e) => {
                   (e.currentTarget as HTMLElement).style.boxShadow = 'none';
                 }}
               >
                 <div
-                  className="w-12 h-12 rounded-xl flex items-center justify-center mb-4 transition-transform duration-300 group-hover:scale-110"
-                  style={{ background: `${feature.color}15` }}
+                  className="w-10 h-10 rounded-lg flex items-center justify-center mb-4 transition-transform duration-300 group-hover:scale-110"
+                  style={{ background: `${feature.color}0D` }}
                 >
-                  <feature.icon className="w-6 h-6" style={{ color: feature.color }} />
+                  <feature.icon className="w-5 h-5" style={{ color: feature.color }} />
                 </div>
-                <h3 className="text-lg font-bold text-pure-white mb-2">{feature.title}</h3>
+                <h3 className="text-base font-bold text-pure-white mb-2">{feature.title}</h3>
                 <p className="text-sm text-muted-gray leading-relaxed">{feature.desc}</p>
               </div>
             ))}
@@ -265,176 +265,40 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── Platforms Section ──────────────────────────────── */}
-      <section className="py-24 px-6 relative" id="platforms">
+      {/* ── Workflow ───────────────────────────────────────── */}
+      <section className="py-28 px-6" id="workflow">
         <div className="max-w-wrapper">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
-            <div>
-              <h2 className="animate-fade-up text-3xl md:text-5xl text-display-wide mb-6">
-                Поддерживаемые{' '}
-                <span className="text-gradient-brand">платформы</span>
-              </h2>
-              <p className="animate-fade-up stagger-1 text-muted-gray text-lg mb-8 leading-relaxed">
-                Загружайте контент на популярные платформы коротких видео.
-                Один аккаунт — один прокси — полная изоляция.
-              </p>
-
-              <div className="space-y-4">
-                {[
-                  {
-                    name: 'TikTok',
-                    status: 'Полная поддержка',
-                    features: ['Загрузка видео', 'Прогрев', 'Аналитика', 'Cookies'],
-                    color: '#ff1469',
-                  },
-                  {
-                    name: 'YouTube Shorts',
-                    status: 'Полная поддержка',
-                    features: ['Загрузка Shorts', 'Cookies', 'Аналитика'],
-                    color: '#40D3F5',
-                  },
-                ].map((platform, i) => (
-                  <div
-                    key={i}
-                    className="animate-fade-up glass-card p-5 flex items-start gap-4 group hover:translate-x-2 transition-transform duration-300"
-                    style={{ animationDelay: `${0.2 + i * 0.15}s` }}
-                  >
-                    <div
-                      className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
-                      style={{ background: `${platform.color}15` }}
-                    >
-                      <Smartphone className="w-5 h-5" style={{ color: platform.color }} />
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-1">
-                        <h3 className="font-bold text-pure-white">{platform.name}</h3>
-                        <span
-                          className="text-xs font-medium px-2 py-0.5 rounded-full"
-                          style={{ background: `${platform.color}20`, color: platform.color }}
-                        >
-                          {platform.status}
-                        </span>
-                      </div>
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {platform.features.map((f, j) => (
-                          <span key={j} className="text-xs text-muted-gray bg-night-base/80 px-2.5 py-1 rounded-md">
-                            {f}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Visual showcase — floating device mockup */}
-            <div className="relative flex justify-center">
-              <div className="animate-float-slow relative">
-                {/* Glow ring behind logo */}
-                <div
-                  className="absolute inset-0 rounded-full blur-[60px] opacity-30"
-                  style={{ background: 'linear-gradient(135deg, #ff1469, #40D3F5)' }}
-                />
-                <Image
-                  src="/logo.svg"
-                  alt="Melonity Platform"
-                  width={320}
-                  height={320}
-                  className="relative z-[1]"
-                />
-              </div>
-              {/* Orbiting elements */}
-              <div className="absolute w-full h-full animate-spin-slow">
-                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-8 glass-card flex items-center justify-center">
-                  <Upload className="w-4 h-4 text-melon-pink" />
-                </div>
-                <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-8 glass-card flex items-center justify-center">
-                  <BarChart3 className="w-4 h-4 text-ice-cyan" />
-                </div>
-                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-8 h-8 glass-card flex items-center justify-center">
-                  <Shield className="w-4 h-4 text-melon-pink" />
-                </div>
-                <div className="absolute right-0 top-1/2 -translate-y-1/2 w-8 h-8 glass-card flex items-center justify-center">
-                  <Globe className="w-4 h-4 text-ice-cyan" />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Stats Section ──────────────────────────────────── */}
-      <section className="py-24 px-6 relative" id="stats">
-        {/* Background gradient band */}
-        <div
-          className="absolute inset-0 opacity-5"
-          style={{
-            background: 'linear-gradient(180deg, transparent 0%, #ff1469 50%, transparent 100%)',
-          }}
-        />
-
-        <div className="max-w-wrapper relative z-[1]">
-          <div className="text-center mb-16">
-            <h2 className="animate-fade-up text-3xl md:text-5xl text-display-wide mb-4">
-              Масштаб,{' '}
-              <span className="text-gradient-brand">который впечатляет</span>
+          <div className="text-center max-w-2xl mx-auto mb-16">
+            <p className="animate-fade-up text-xs text-ice-cyan font-semibold tracking-[0.2em] uppercase mb-3">
+              Процесс
+            </p>
+            <h2 className="animate-fade-up stagger-1 text-3xl md:text-5xl text-display-wide">
+              Три шага до{' '}
+              <span className="text-gradient-brand">результата</span>
             </h2>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-            {[
-              { value: '∞', label: 'Аккаунтов', sublabel: 'без лимитов' },
-              { value: '6', label: 'Очередей', sublabel: 'BullMQ' },
-              { value: '24/7', label: 'Работа', sublabel: 'автоматически' },
-              { value: '0%', label: 'Фрода', sublabel: 'антидетект' },
-            ].map((stat, i) => (
-              <div
-                key={i}
-                className={`animate-fade-up stagger-${i + 1} glass-card p-6 text-center group hover:translate-y-[-4px] transition-all duration-300`}
-              >
-                <div className="text-4xl md:text-5xl font-bold text-display-wide text-gradient-brand mb-2">
-                  {stat.value}
-                </div>
-                <div className="text-pure-white font-medium text-sm">{stat.label}</div>
-                <div className="text-xs text-muted-gray mt-1">{stat.sublabel}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── How It Works ───────────────────────────────────── */}
-      <section className="py-24 px-6" id="how-it-works">
-        <div className="max-w-wrapper">
-          <div className="text-center mb-16">
-            <h2 className="animate-fade-up text-3xl md:text-5xl text-display-wide mb-4">
-              Как это{' '}
-              <span className="text-gradient-brand">работает</span>
-            </h2>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {[
               {
                 step: '01',
-                icon: Cpu,
-                title: 'Загрузите видео',
-                desc: 'Перетащите файлы в рабочее пространство. Задайте описание, хештеги и расписание.',
+                icon: Layers,
+                title: 'Подготовка',
+                desc: 'Импортируйте аккаунты, привяжите прокси, загрузите контент в рабочую область. Система валидирует каждый компонент.',
                 color: '#ff1469',
               },
               {
                 step: '02',
-                icon: Zap,
-                title: 'Автоматический залив',
-                desc: 'Worker берёт задачу из очереди, запускает антидетект-браузер с вашим прокси и cookies.',
+                icon: Cpu,
+                title: 'Исполнение',
+                desc: 'Worker поднимает антидетект-браузер, ротирует IP через мобильный модем и выполняет задачу. Весь процесс транслируется в Live-терминал.',
                 color: '#40D3F5',
               },
               {
                 step: '03',
                 icon: TrendingUp,
-                title: 'Отслеживайте результат',
-                desc: 'Реальная аналитика в дашборде: подписчики, просмотры, статусы загрузок — всё онлайн.',
+                title: 'Масштабирование',
+                desc: 'Отслеживайте результаты в дашборде. Корректируйте стратегию на основе реальных данных: охваты, подписчики, конверсия.',
                 color: '#ff1469',
               },
             ].map((item, i) => (
@@ -443,28 +307,158 @@ export default function LandingPage() {
                 className="animate-fade-up relative glass-card p-8 group hover:translate-y-[-4px] transition-all duration-500"
                 style={{ animationDelay: `${0.1 + i * 0.15}s` }}
               >
-                {/* Step number */}
                 <span
-                  className="absolute -top-4 -left-2 text-6xl font-black opacity-10"
+                  className="absolute -top-3 -left-1 text-5xl font-black opacity-[0.06]"
                   style={{ color: item.color, fontStretch: '150%' }}
                 >
                   {item.step}
                 </span>
                 <div
-                  className="w-14 h-14 rounded-2xl flex items-center justify-center mb-5 transition-transform duration-300 group-hover:scale-110"
-                  style={{ background: `${item.color}12` }}
+                  className="w-12 h-12 rounded-xl flex items-center justify-center mb-5 transition-transform duration-300 group-hover:scale-110"
+                  style={{ background: `${item.color}0D` }}
                 >
-                  <item.icon className="w-7 h-7" style={{ color: item.color }} />
+                  <item.icon className="w-6 h-6" style={{ color: item.color }} />
                 </div>
-                <h3 className="text-xl font-bold text-pure-white mb-3">{item.title}</h3>
+                <h3 className="text-lg font-bold text-pure-white mb-3">{item.title}</h3>
                 <p className="text-sm text-muted-gray leading-relaxed">{item.desc}</p>
 
-                {/* Connector arrow for md+ */}
                 {i < 2 && (
-                  <div className="hidden md:block absolute top-1/2 -right-5 text-muted-gray/30">
-                    <ChevronRight className="w-6 h-6" />
+                  <div className="hidden md:block absolute top-1/2 -right-4 text-muted-gray/20">
+                    <ChevronRight className="w-5 h-5" />
                   </div>
                 )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Infrastructure ─────────────────────────────────── */}
+      <section className="py-28 px-6 relative" id="infrastructure">
+        {/* Background accent */}
+        <div
+          className="absolute inset-0 opacity-[0.03]"
+          style={{ background: 'linear-gradient(180deg, transparent 0%, #ff1469 50%, transparent 100%)' }}
+        />
+
+        <div className="max-w-wrapper relative z-[1]">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
+            {/* Left — Architecture visual */}
+            <div className="animate-fade-up">
+              <div className="glass-card p-8 space-y-4">
+                {/* Architecture layers */}
+                {[
+                  { label: 'Frontend', tech: 'Next.js 15 · React 19 · Tailwind v4', color: '#ff1469', icon: Smartphone },
+                  { label: 'API', tech: 'Express.js · Prisma · Socket.io', color: '#40D3F5', icon: Activity },
+                  { label: 'Queue', tech: 'BullMQ · Redis 7 · 6 Queues', color: '#ff1469', icon: Zap },
+                  { label: 'Worker', tech: 'UndetectedChrome · Cheerio · Xvfb', color: '#40D3F5', icon: Cpu },
+                  { label: 'Data', tech: 'PostgreSQL 16 · Prisma Migrate', color: '#ff1469', icon: Layers },
+                ].map((layer, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-4 p-3 rounded-lg bg-night-base/50 border border-pure-white/[0.04] hover:border-pure-white/[0.08] transition-colors duration-300"
+                  >
+                    <div
+                      className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
+                      style={{ background: `${layer.color}0D` }}
+                    >
+                      <layer.icon className="w-4 h-4" style={{ color: layer.color }} />
+                    </div>
+                    <div>
+                      <div className="text-sm font-semibold text-pure-white">{layer.label}</div>
+                      <div className="text-xs text-muted-gray">{layer.tech}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Right — Copy */}
+            <div>
+              <p className="animate-fade-up text-xs text-melon-pink font-semibold tracking-[0.2em] uppercase mb-3">
+                Инфраструктура
+              </p>
+              <h2 className="animate-fade-up stagger-1 text-3xl md:text-5xl text-display-wide mb-6">
+                Production-ready{' '}
+                <span className="text-gradient-brand">из коробки</span>
+              </h2>
+              <p className="animate-fade-up stagger-2 text-muted-gray text-base leading-relaxed mb-6">
+                Каждый компонент изолирован в Docker-контейнере. Worker запускается
+                внутри Xvfb — антифрод-системы не обнаруживают headless-режим.
+                Деплой на чистую Ubuntu VPS одной командой.
+              </p>
+
+              <div className="animate-fade-up stagger-3 space-y-3">
+                {[
+                  'Tenant-изоляция — каждый пользователь видит только свои данные',
+                  'IP Firewall — мгновенная блокировка через Redis Middleware',
+                  'JWT HttpOnly Cookies — никаких токенов в localStorage',
+                  'Graceful degradation — капча не крашит сервер',
+                ].map((point, i) => (
+                  <div key={i} className="flex items-start gap-3">
+                    <div className="w-1.5 h-1.5 rounded-full bg-melon-pink mt-2 shrink-0" />
+                    <span className="text-sm text-muted-gray leading-relaxed">{point}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Platforms Section ──────────────────────────────── */}
+      <section className="py-28 px-6" id="platforms">
+        <div className="max-w-wrapper">
+          <div className="text-center max-w-2xl mx-auto mb-16">
+            <p className="animate-fade-up text-xs text-ice-cyan font-semibold tracking-[0.2em] uppercase mb-3">
+              Интеграции
+            </p>
+            <h2 className="animate-fade-up stagger-1 text-3xl md:text-5xl text-display-wide">
+              Поддерживаемые{' '}
+              <span className="text-gradient-brand">платформы</span>
+            </h2>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto">
+            {[
+              {
+                name: 'TikTok',
+                modules: ['Загрузка видео', 'Прогрев', 'Аналитика', 'Cookies', 'Редактирование профиля'],
+                color: '#ff1469',
+              },
+              {
+                name: 'YouTube Shorts',
+                modules: ['Загрузка Shorts', 'Cookies', 'Аналитика', 'Редактирование профиля'],
+                color: '#40D3F5',
+              },
+            ].map((platform, i) => (
+              <div
+                key={i}
+                className="animate-fade-up glass-card p-6 group hover:translate-y-[-4px] transition-all duration-500"
+                style={{ animationDelay: `${0.15 + i * 0.1}s` }}
+              >
+                <div className="flex items-center gap-3 mb-4">
+                  <div
+                    className="w-10 h-10 rounded-lg flex items-center justify-center"
+                    style={{ background: `${platform.color}0D` }}
+                  >
+                    <Smartphone className="w-5 h-5" style={{ color: platform.color }} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-pure-white">{platform.name}</h3>
+                    <span className="text-xs text-success-green">Полная поддержка</span>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {platform.modules.map((m, j) => (
+                    <span
+                      key={j}
+                      className="text-xs text-muted-gray px-2.5 py-1 rounded-md bg-night-base/60 border border-pure-white/[0.04]"
+                    >
+                      {m}
+                    </span>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
@@ -477,35 +471,31 @@ export default function LandingPage() {
           <div
             className="glass-card p-12 md:p-16 text-center relative overflow-hidden"
             style={{
-              background: 'linear-gradient(135deg, rgba(255,20,105,0.08) 0%, rgba(64,211,245,0.06) 100%)',
-              border: '1px solid rgba(255,20,105,0.15)',
+              background: 'linear-gradient(135deg, rgba(255,20,105,0.05) 0%, rgba(64,211,245,0.03) 100%)',
+              border: '1px solid rgba(255,20,105,0.1)',
             }}
           >
-            {/* Background glow */}
+            {/* Subtle glow */}
             <div
-              className="absolute -top-20 -right-20 w-[300px] h-[300px] rounded-full opacity-10 blur-[80px]"
+              className="absolute -top-32 -right-32 w-[300px] h-[300px] rounded-full opacity-[0.06] blur-[80px]"
               style={{ background: '#40D3F5' }}
-            />
-            <div
-              className="absolute -bottom-20 -left-20 w-[300px] h-[300px] rounded-full opacity-10 blur-[80px]"
-              style={{ background: '#ff1469' }}
             />
 
             <div className="relative z-[1]">
               <h2 className="animate-fade-up text-3xl md:text-5xl text-display-wide mb-4">
-                Готовы{' '}
-                <span className="text-gradient-brand">начать?</span>
+                Готовы к{' '}
+                <span className="text-gradient-brand">масштабированию?</span>
               </h2>
-              <p className="animate-fade-up stagger-1 text-muted-gray text-lg max-w-xl mx-auto mb-8">
-                Зарегистрируйтесь и настройте первый аккаунт за 5 минут.
-                Без привязки карты, без лимитов на тестовый период.
+              <p className="animate-fade-up stagger-1 text-muted-gray text-base max-w-lg mx-auto mb-8 leading-relaxed">
+                Настройте первую задачу за пять минут.
+                Разверните платформу на вашей инфраструктуре или используйте наш cloud.
               </p>
               <Link
                 href="/auth/register"
-                className="animate-fade-up stagger-2 inline-flex items-center gap-2 px-10 py-4 rounded-2xl bg-melon-pink text-pure-white font-semibold text-lg hover:brightness-110 transition-all duration-300 shadow-[0_0_40px_rgba(255,20,105,0.4)] hover:shadow-[0_0_60px_rgba(255,20,105,0.6)] hover:translate-y-[-2px]"
+                className="animate-fade-up stagger-2 inline-flex items-center gap-2 px-8 py-4 rounded-xl bg-melon-pink text-pure-white font-semibold hover:brightness-110 transition-all duration-300 shadow-[0_0_30px_rgba(255,20,105,0.35)] hover:shadow-[0_0_50px_rgba(255,20,105,0.5)] hover:translate-y-[-2px]"
               >
-                Создать аккаунт
-                <ArrowRight className="w-5 h-5" />
+                Запросить доступ
+                <ArrowRight className="w-4 h-4" />
               </Link>
             </div>
           </div>
@@ -513,21 +503,24 @@ export default function LandingPage() {
       </section>
 
       {/* ── Footer ─────────────────────────────────────────── */}
-      <footer className="py-12 px-6 border-t border-muted-gray/10">
+      <footer className="py-10 px-6 border-t border-pure-white/[0.04]">
         <div className="max-w-wrapper">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-3">
-              <Image src="/logo.svg" alt="MelonityMedia" width={28} height={28} />
+              <Image src="/logo.svg" alt="MelonityMedia" width={24} height={24} />
               <span className="text-sm text-muted-gray">
-                © {new Date().getFullYear()} MelonityMedia. Все права защищены.
+                © {new Date().getFullYear()} Melonity. Все права защищены.
               </span>
             </div>
             <div className="flex items-center gap-6">
-              <a href="#features" className="text-xs text-muted-gray hover:text-pure-white transition-colors">
-                Возможности
+              <a href="#capabilities" className="text-xs text-muted-gray hover:text-pure-white transition-colors">
+                Платформа
               </a>
-              <a href="#platforms" className="text-xs text-muted-gray hover:text-pure-white transition-colors">
-                Платформы
+              <a href="#workflow" className="text-xs text-muted-gray hover:text-pure-white transition-colors">
+                Процесс
+              </a>
+              <a href="#infrastructure" className="text-xs text-muted-gray hover:text-pure-white transition-colors">
+                Инфраструктура
               </a>
               <Link href="/auth/login" className="text-xs text-muted-gray hover:text-melon-pink transition-colors">
                 Войти
