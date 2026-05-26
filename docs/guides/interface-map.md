@@ -49,8 +49,10 @@
 | DataTable | Чекбокс, Платформа, Никнейм, Статус (incl. SHADOWBAN_SUSPECTED, WARMING_UP), Прокси, Cookies, Warmup Day |
 | Импорт (Drawer) | Drag-and-Drop зона для **cookies** (Netscape .txt или JSON). Cookies шифруются AES-256-GCM |
 | Cookie re-import | Повторный импорт cookies для конкретного аккаунта (статус EXPIRED_COOKIES → ALIVE) |
-| Bulk Actions | Массовая привязка прокси, удаление, запуск прогрева, обновление статуса |
+| Bulk Actions | Массовая привязка прокси (с Carrier Stability Rule: 409 при нарушении 14-day window), удаление, запуск прогрева, обновление статуса |
 | Warmup Status | Индикатор прогрева: Day X/10, прогресс-бар (passive → active) |
+| Shadowban Alert | ⚠️ При `SHADOWBAN_SUSPECTED` — красный бейдж + tooltip с рекомендацией 7-day cooldown |
+| Proxy Pin Timer | Отображение оставшихся дней до окончания 14-day pin window |
 | Empty State | Красивая заглушка «Нет аккаунтов» |
 
 ---
@@ -80,7 +82,8 @@
 | Drawer | Добавление: host, port, login, pass + rotation link + type + carrier + country + DMA |
 | Тест | Проверка соединения с прокси |
 | Ротация | Ручная смена IP (cooldown enforcement: минимум 15 мин) |
-| Carrier Warning | ⚠️ Индикатор если ASN принадлежит датацентру (AWS, Hetzner, OVH) |
+| Carrier Warning | ⚠️ Жёлтый бейдж если `bgpPathValid: false` (ASN датацентра: AWS, Hetzner, OVH) |
+| Carrier Stability | При привязке прокси к аккаунту — API проверяет Carrier Stability Rule (14-day window + carrier/country match) |
 
 ---
 

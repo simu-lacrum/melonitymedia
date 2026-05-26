@@ -41,7 +41,8 @@ MelonityMedia/
 | `src/lib/prisma.ts` | Singleton Prisma Client |
 | `src/lib/redis.ts` | Singleton Redis/ioredis |
 | `src/lib/bullmq.ts` | Фабрика BullMQ очередей |
-| `prisma/schema.prisma` | Схема БД v3: User, SocialAccount (cookie-auth + fingerprint), Proxy (type/carrier/ASN), Video, Task, Preset, AuditLog |
+| `prisma/schema.prisma` | Схема БД v3: User, SocialAccount (cookie-auth + fingerprint + pinnedProxyId), Proxy (type/carrier/ASN), Video, Task, Preset, AuditLog |
+| `src/lib/proxy-pin-rules.ts` | **Carrier Stability Rule** — валидация смены прокси: 4 кода нарушений (PIN_WINDOW_ACTIVE, CARRIER_CHANGE_BLOCKED, COUNTRY_CHANGE_BLOCKED, PROXY_NOT_LTE_FOR_TIKTOK) |
 
 ---
 
@@ -79,7 +80,7 @@ MelonityMedia/
 | Путь | Описание |
 |------|----------|
 | `src/core/browser/patchright-launcher.ts` | Stealth-браузер на Patchright (patched Playwright CDP) с per-account fingerprint |
-| `src/core/browser/fingerprint-manager.ts` | Deterministic `AccountFingerprint` — UA, screen, WebGL, canvas, locale, fonts |
+| `src/core/browser/fingerprint-manager.ts` | Deterministic `AccountFingerprint` — UA, screen, WebGL, canvas, locale, fonts + **7 consistency rules** + Chrome version pinning |
 | `src/core/auth/cookie-store.ts` | AES-256-GCM шифрование/дешифрование cookies (MASTER_KEY) |
 | `src/core/auth/session-validator.ts` | Pre-flight cookie validation через curl-impersonate |
 | `src/core/humanity/biomouse.ts` | ghost-cursor: Bézier-кривые, фиксации, анти-паттерн прямолинейного движения |
@@ -109,6 +110,7 @@ MelonityMedia/
 |------|----------|
 | `src/plugins/` | Plugin registry (BasePlugin + extensible) |
 | `src/lib/socket-logger.ts` | Отправка логов в Socket.io Terminal |
+| `src/lib/prisma.ts` | Singleton Prisma Client для Worker (БД доступ для shadowban-detector) |
 | `Dockerfile` | Chrome + Xvfb + **ffmpeg** + **curl-impersonate** + Node.js 20 |
 | `entrypoint.sh` | Xvfb startup + `DISPLAY=:99` + Node.js |
 | `eslint.config.mjs` | **Banned imports** (puppeteer, selenium, cheerio, UC) |

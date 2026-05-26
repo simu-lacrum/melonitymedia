@@ -171,7 +171,7 @@ MelonityMedia/
 │   │   │   ├── index.ts        # Server entrypoint
 │   │   │   ├── routes/         # auth, accounts, proxies, workspace, videos, analytics, admin
 │   │   │   ├── middleware/     # jwt-auth, rbac-admin, redis-firewall
-│   │   │   ├── lib/            # prisma, redis, bullmq singletons
+│   │   │   ├── lib/            # prisma, redis, bullmq, proxy-pin-rules
 │   │   │   └── types/          # shared TypeScript types
 │   │   ├── prisma/
 │   │   │   └── schema.prisma   # Database schema v3 (cookie-based auth, fingerprints)
@@ -202,7 +202,7 @@ MelonityMedia/
 │       │   │   └── video/      # uniquifier.ts (FFmpeg pipeline)
 │       │   ├── handlers/       # upload, warmup, cookies, edit-profile, analytics, cleanup, shadowban
 │       │   ├── plugins/        # Plugin system (BasePlugin + Registry)
-│       │   └── lib/            # Socket logger
+│       │   └── lib/            # prisma singleton, socket-logger
 │       ├── Dockerfile          # Chrome + Xvfb + ffmpeg + curl-impersonate + Node.js 20
 │       ├── entrypoint.sh       # Xvfb :99 virtual display startup
 │       ├── eslint.config.mjs   # Banned imports (puppeteer, selenium, cheerio)
@@ -544,7 +544,9 @@ graph LR
 | **CORS** | Strict origin через `CORS_ORIGIN` переменную |
 | **Helmet** | Security headers на всех API-ответах |
 | **ESLint Banned Imports** | puppeteer, selenium, cheerio заблокированы на уровне lint |
-| **Fingerprint Stability** | Per-account fingerprint генерируется ОДИН раз и никогда не меняется |
+| **Fingerprint Consistency** | 7 правил валидации: OS↔platform, GPU↔OS, screen≥viewport, locale↔timezone, hardware bounds, Chrome version pinning, touch coherence |
+| **Carrier Stability Rule** | 14-day proxy pin window для TikTok: блокировка смены carrier/country, LTE-only для свежих аккаунтов |
+| **Shadowban 24h Gate** | Детекция shadowban только по видео старше 24ч (предотвращение ложных срабатываний) |
 | **No Secrets in Response** | Encrypted cookies никогда не отправляются на фронтенд |
 
 ---
@@ -617,6 +619,17 @@ gitGraph
     commit id: "eslint banned imports"
     checkout main
     merge feat/antidetect-refactor-v2 id: "merge v3"
+    branch chore/docs-hardening-pass
+    commit id: "fix env vars"
+    commit id: "first-run flow"
+    commit id: "cookie refresh docs"
+    commit id: "Card variants"
+    commit id: "carrier stability rule"
+    commit id: "shadowban 24h gate"
+    commit id: "fingerprint consistency"
+    commit id: "remove browser-automation"
+    checkout main
+    merge chore/docs-hardening-pass id: "merge hardening"
 ```
 
 ### Правила
@@ -637,10 +650,11 @@ gitGraph
 |----------|----------|
 | [`instructions.md`](instructions.md) | Source of Truth — полное ТЗ проекта |
 | [`design.md`](design.md) | Дизайн-система: цвета, типографика, отступы |
-| [`docs/guides/local-development.md`](docs/guides/local-development.md) | Инструкция по локальному запуску |
-| [`docs/guides/repository-map.md`](docs/guides/repository-map.md) | «Что где лежит» — архитектура папок |
-| [`docs/guides/interface-map.md`](docs/guides/interface-map.md) | Карта экранов и роутов |
-| [`docs/architecture/backend-contracts.md`](docs/architecture/backend-contracts.md) | API-контракты, BullMQ payloads, Socket.io events |
+| [`docs/guides/local-development.md`](docs/guides/local-development.md) | Инструкция по локальному запуску (секции 6.1-6.5: прокси → cookies → pin → warmup → залив) |
+| [`docs/guides/repository-map.md`](docs/guides/repository-map.md) | «Что где лежит» — архитектура папок, все модули |
+| [`docs/guides/interface-map.md`](docs/guides/interface-map.md) | Карта экранов и роутов с указанием antifraud-гардов |
+| [`docs/architecture/backend-contracts.md`](docs/architecture/backend-contracts.md) | API-контракты, BullMQ payloads, Socket.io events, Fingerprint Contract, Proxy Contract |
+| [`docs/architecture/antifraud-logic.md`](docs/architecture/antifraud-logic.md) | **Подробная спецификация** всей антифрод-логики: carrier stability, shadowban detection, fingerprint consistency, cookie encryption |
 
 > 📂 Все документы из `/docs/` доступны на GitHub:  
 > [`docs/guides/`](https://github.com/simu-lacrum/melonitymedia/tree/main/docs/guides) ·
