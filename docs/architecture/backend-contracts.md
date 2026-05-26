@@ -430,26 +430,62 @@ interface ShadowbanCheckPayload {
 
 ### Fingerprint Contract
 
-```typescript
-// Generated ONCE per account from accountId seed.
-// NEVER changes after creation.
-// Stored in SocialAccount.fingerprint (JSON).
+Per-account stable fingerprint. Generated ONCE per account from `accountId` seed.
+**NEVER changes after creation.** Stored in `SocialAccount.fingerprint` (JSON).
+Validated at generation and on every load.
 
+```typescript
 interface AccountFingerprint {
   userAgent: string;
-  screen: { width: number; height: number };
+  platform: "Win32" | "MacIntel" | "Linux x86_64";
+  screen: { width: number; height: number; colorDepth: 24 };
+  viewport: { width: number; height: number };
   devicePixelRatio: number;
-  locale: string;
-  timezone: string;
-  platform: string;
-  hardwareConcurrency: number;
-  deviceMemory: number;
-  maxTouchPoints: number;
+  locale: string;          // BCP 47 (en-US, ru-RU, ...)
+  timezone: string;        // IANA (America/Chicago, Europe/Moscow, ...)
+  hardwareConcurrency: 4 | 6 | 8 | 12 | 16;
+  deviceMemory: 4 | 8;     // Chrome caps reported value at 8
+  maxTouchPoints: 0 | 1 | 5;
   webgl: { vendor: string; renderer: string };
-  canvas: { seed: string };
+  canvas: { seed: string }; // 16-char hex
   fonts: string[];
+  chromeMajor: number;     // must match installed system Chrome major
 }
 ```
+
+**Consistency Rules (enforced in `validateFingerprintConsistency`):**
+
+1. **OS coherence.** `userAgent` OS token must match `platform`:
+   - `Windows NT 10.0` -> `platform = "Win32"`
+   - `Macintosh; Intel Mac OS X` -> `platform = "MacIntel"`
+   - `X11; Linux` -> `platform = "Linux x86_64"`
+2. **GPU coherence.** `webgl.renderer` must match the OS:
+   - Windows -> must contain `ANGLE (...)`.
+   - macOS -> must contain `Apple`, `AMD Radeon Pro`, or `Intel ... Iris/UHD`.
+   - Linux -> must contain `Mesa`, `llvmpipe`, or `NVIDIA`.
+3. **Display geometry.** `screen.width >= viewport.width` AND
+   `screen.height - viewport.height >= 80` (chrome/taskbar space).
+4. **Geo coherence.** `locale` country must match `timezone` region
+   (e.g. `en-US` requires `America/*`; `ru-RU` requires `Europe/*` or `Asia/*`).
+5. **Hardware realism.** `hardwareConcurrency in {4,6,8,12,16}`,
+   `deviceMemory in {4,8}` (Chrome doesn't report higher values).
+6. **Chrome version pinning.** UA Chrome major **must equal** `chromeMajor`,
+   which is captured from the live system Chrome at worker startup
+   via `getSystemChromeMajor()`. A UA claiming Chrome 100 while the
+   container ships Chrome 148 is a top-tier antifraud signal.
+7. **Touch coherence.** Desktop UAs (Windows / macOS / Linux) require
+   `maxTouchPoints = 0`. Non-zero touch points on desktop UA is one of
+   the strongest "synthetic browser" signals TikTok looks for.
+
+A `FingerprintInconsistencyError` is thrown on the first violation —
+generation aborts; load aborts with a worker-level log so the operator
+can decide to regenerate (allowed only for accounts that have never
+published — see UI warning in `/account/profiles`).
+
+**Why this matters:** rotating or randomising fingerprint per session is
+the #1 cause of TikTok shadowban in 2026. A stable, internally consistent
+fingerprint correlates with the proxy IP over the 14-day window and
+keeps the account in "real user" cluster of TikTok's ML classifier.
 
 ### Proxy Contract — Carrier Stability Rule (TikTok 2026)
 

@@ -20,7 +20,7 @@
 import { chromium } from 'patchright';
 import type { Browser, BrowserContext, Page } from 'patchright';
 import { loadCookiesFromEncryptedStore } from '../auth/cookie-store.js';
-import { applyFingerprint, type AccountFingerprint } from './fingerprint-manager.js';
+import { applyFingerprint, validateFingerprintConsistency, type AccountFingerprint } from './fingerprint-manager.js';
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -73,6 +73,8 @@ const STEALTH_ARGS = [
 export async function launchStealthContext(opts: LaunchOptions): Promise<StealthContext> {
   const { fingerprint } = opts;
 
+  // Validate fingerprint before launching browser — throws on tampered/legacy data
+  validateFingerprintConsistency(fingerprint);
   // Build proxy config for Patchright (native auth support, no extension needed)
   const proxyConfig = opts.proxyUrl
     ? { server: opts.proxyUrl }
