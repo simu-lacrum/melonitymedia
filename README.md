@@ -551,17 +551,20 @@ graph LR
 
 ```bash
 # ── Database ──────────────────────────────────────────
-DATABASE_URL=postgresql://melonity:melonity@localhost:5432/melonitymedia
+DATABASE_URL=postgresql://melonity:***@localhost:5432/melonitymedia
 
 # ── Redis (BullMQ + Cache + Firewall) ─────────────────
 REDIS_URL=redis://localhost:6379
 
 # ── JWT Auth ──────────────────────────────────────────
-JWT_SECRET=change-me-to-a-64-char-random-string
+JWT_SECRET=replace_me_64_hex_chars
 JWT_EXPIRES_IN=7d
 
-# ── AES-256-GCM master key for encrypting account cookies
-# Generate ONCE: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+# ── Cookie Encryption (AES-256-GCM) ───────────────────
+# Generate ONCE per environment with:
+#   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+# 32 bytes -> 44 chars base64. NEVER change after launch — old cookies become unrecoverable.
+# Use scripts/rotate-master-key.mjs for safe rotation.
 MASTER_KEY=replace_me_44_chars_base64
 
 # ── Server Ports ──────────────────────────────────────
