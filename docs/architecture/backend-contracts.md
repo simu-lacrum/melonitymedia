@@ -336,17 +336,43 @@ interface CleanupJobPayload {
 }
 ```
 
-### Queue: `shadowban-check` *(NEW in v3)*
+### Queue: `shadowban-check` (NEW in v3)
+
 ```typescript
 interface ShadowbanCheckPayload {
   accountId: string;
-
-  // Worker internally:
-  // 1. Fetches recent videos via curl-impersonate
-  // 2. Checks for shadowban pattern: 3+ consecutive videos with <100 views
-  // 3. If detected → sets account status = SHADOWBAN_SUSPECTED
-  // 4. Emits Socket.io warning to frontend
 }
+
+// Worker logic (apps/worker/src/handlers/shadowban-detector.ts):
+//
+// THRESHOLDS:
+//   SHADOWBAN_MIN_VIDEO_AGE_HOURS = 24
+//   SHADOWBAN_VIEW_THRESHOLD = 100
+//   SHADOWBAN_CONSECUTIVE_VIDEOS = 3
+//   SHADOWBAN_LOOKBACK_DAYS = 14
+//
+// ALGORITHM:
+//   1. Skip if account.status !== "ALIVE" OR warmupCompletedAt is null.
+//   2. Fetch the most recent N videos that satisfy BOTH:
+//        - uploadedAt <= now - 24h    (CRITICAL: 24h post-publish gate;
+//                                       TikTok ramps distribution over hours)
+//        - uploadedAt >= now - 14d    (older videos aren't representative)
+//   3. If fewer than SHADOWBAN_CONSECUTIVE_VIDEOS aged videos exist, exit silently.
+//   4. If ALL of them have views < SHADOWBAN_VIEW_THRESHOLD:
+//        - account.status -> SHADOWBAN_SUSPECTED
+//        - cancel all PENDING upload tasks for this account
+//        - emit Socket.io warning to frontend
+//
+// WHY THE 24-HOUR GATE MATTERS:
+//   A 30-minute-old video with 50 views is statistically normal.
+//   Without this gate, every fresh upload would briefly satisfy the "low views"
+//   criterion and prematurely flag the account, blocking its entire queue.
+//
+// RECOVERY (manual):
+//   Owner reviews the flagged account in /account/profiles, decides whether to:
+//     (a) pause uploads 7+ days then resume with organic content, OR
+//     (b) discard the account.
+//   Status reverts to ALIVE only via manual user action — never automatically.
 ```
 
 ---

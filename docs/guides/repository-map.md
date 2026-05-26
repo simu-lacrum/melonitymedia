@@ -100,7 +100,7 @@ MelonityMedia/
 | `src/handlers/edit-profile.ts` | Редактирование профиля (аватар, био) через ghost-cursor |
 | `src/handlers/analytics.ts` | **curl-impersonate JSON API** (~200ms/профиль, без браузера) |
 | `src/handlers/cleanup.ts` | Очистка временных файлов после загрузки |
-| `src/handlers/shadowban-detector.ts` | Автоматическая детекция (3+ видео <100 views = SHADOWBAN_SUSPECTED) |
+| `src/handlers/shadowban-detector.ts` | Детекция шэдоубана: 3+ consecutive видео >=24ч после публикации с <100 views = SHADOWBAN_SUSPECTED + отмена pending uploads |
 | `src/handlers/index.ts` | Barrel export всех handlers |
 
 ### Инфраструктура
