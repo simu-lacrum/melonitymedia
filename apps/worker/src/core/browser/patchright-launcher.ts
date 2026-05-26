@@ -20,7 +20,7 @@
 import { chromium } from 'patchright';
 import type { Browser, BrowserContext, Page } from 'patchright';
 import { loadCookiesFromEncryptedStore } from '../auth/cookie-store.js';
-import { applyFingerprint, validateFingerprintConsistency, type AccountFingerprint } from './fingerprint-manager.js';
+import { applyFingerprint, inspectFingerprintConsistency, getSystemChromeMajor, type AccountFingerprint } from './fingerprint-manager.js';
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -73,8 +73,25 @@ const STEALTH_ARGS = [
 export async function launchStealthContext(opts: LaunchOptions): Promise<StealthContext> {
   const { fingerprint } = opts;
 
-  // Validate fingerprint before launching browser — throws on tampered/legacy data
-  validateFingerprintConsistency(fingerprint);
+  // Soft validation: fatal issues block, stale issues warn and continue
+  const issues = inspectFingerprintConsistency(fingerprint, getSystemChromeMajor());
+  const fatal = issues.filter(i => i.severity === "fatal");
+  const stale = issues.filter(i => i.severity === "stale");
+
+  if (fatal.length > 0) {
+    throw new Error(
+      `[Patchright] Cannot launch — fingerprint has fatal issues: ` +
+      fatal.map(i => `${i.rule}: ${i.message}`).join("; ")
+    );
+  }
+
+  if (stale.length > 0) {
+    console.warn(
+      `[Patchright] Fingerprint stale for account ${opts.accountId}: ` +
+      stale.map(i => i.message).join("; ") +
+      ` — launching anyway; mark for regeneration on safe occasion.`
+    );
+  }
   // Build proxy config for Patchright (native auth support, no extension needed)
   const proxyConfig = opts.proxyUrl
     ? { server: opts.proxyUrl }
@@ -125,21 +142,6 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
   return { browser, context, page };
 }
 
-/**
- * Build a proxy URL string from separate components.
- * Returns format: http://user:pass@host:port
- */
-export function buildProxyUrl(proxy: {
-  host: string;
-  port: number;
-  username?: string | null;
-  password?: string | null;
-}): string {
-  if (proxy.username && proxy.password) {
-    return `http://${proxy.username}:${proxy.password}@${proxy.host}:${proxy.port}`;
-  }
-  return `http://${proxy.host}:${proxy.port}`;
-}
 
 /**
  * Safely close browser and all pages.

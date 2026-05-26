@@ -67,9 +67,15 @@ export const cleanupQueue = new Queue('cleanup', {
   },
 });
 
+/** Shadowban detection — periodic check via DB analytics */
+export const shadowbanCheckQueue = new Queue('shadowban-check', {
+  connection: redis,
+  defaultJobOptions: DEFAULT_JOB_OPTIONS,
+});
+
 // ── Typed Job Dispatch ──────────────────────────────────────
 
-export type QueueName = 'upload' | 'warmup' | 'cookies' | 'edit-profile' | 'analytics-cron' | 'cleanup';
+export type QueueName = 'upload' | 'warmup' | 'cookies' | 'edit-profile' | 'analytics-cron' | 'cleanup' | 'shadowban-check';
 
 const QUEUES: Record<QueueName, Queue> = {
   upload: uploadQueue,
@@ -78,6 +84,7 @@ const QUEUES: Record<QueueName, Queue> = {
   'edit-profile': editProfileQueue,
   'analytics-cron': analyticsCronQueue,
   cleanup: cleanupQueue,
+  'shadowban-check': shadowbanCheckQueue,
 };
 
 /**

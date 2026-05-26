@@ -335,15 +335,18 @@ router.patch('/:id', async (req: Request, res: Response) => {
         await prisma.auditLog.create({
           data: {
             userId: req.user!.id,
-            action: "PROXY_PIN_FORCE_OVERRIDE",
-            entityType: "SocialAccount",
-            entityId: existing.id,
-            metadata: {
+            action: "proxy.pin.force_override",
+            ip: req.ip ?? null,
+            details: {
+              entityType: "SocialAccount",
+              entityId: existing.id,
               violation: violation.code,
               oldProxyId: oldProxy?.id ?? null,
               newProxyId: newProxy.id,
-              oldCarrier: violation.oldCarrier,
-              newCarrier: violation.newCarrier,
+              oldCarrier: violation.oldCarrier ?? null,
+              newCarrier: violation.newCarrier ?? null,
+              oldCountry: violation.oldCountry ?? null,
+              newCountry: violation.newCountry ?? null,
             },
           },
         });
@@ -443,6 +446,14 @@ router.post('/bulk-proxy', async (req: Request, res: Response) => {
       select: { id: true, carrier: true, country: true, type: true },
     });
 
+    // Phase 1: validate ALL accounts before mutating anything.
+    type Plan = {
+      accountId: string;
+      violation: ReturnType<typeof validatePinChange>;
+      oldProxyId: string | null;
+    };
+    const plans: Plan[] = [];
+
     for (const accountId of accountIds) {
       const account = await prisma.socialAccount.findUniqueOrThrow({
         where: { id: accountId, userId: req.user!.id },
@@ -463,51 +474,69 @@ router.post('/bulk-proxy', async (req: Request, res: Response) => {
         : null;
 
       const violation = validatePinChange({ account, oldProxy, newProxy });
-
-      if (violation && !force) {
-        res.status(409).json({
-          success: false,
-          error: violation.message,
-          code: violation.code,
-          details: {
-            daysRemaining: violation.daysRemaining,
-            oldCarrier: violation.oldCarrier,
-            newCarrier: violation.newCarrier,
-            oldCountry: violation.oldCountry,
-            newCountry: violation.newCountry,
-          },
-        });
-        return;
-      }
-
-      if (violation && force) {
-        await prisma.auditLog.create({
-          data: {
-            userId: req.user!.id,
-            action: "PROXY_PIN_FORCE_OVERRIDE",
-            entityType: "SocialAccount",
-            entityId: account.id,
-            metadata: {
-              violation: violation.code,
-              oldProxyId: oldProxy?.id ?? null,
-              newProxyId: newProxy.id,
-              oldCarrier: violation.oldCarrier,
-              newCarrier: violation.newCarrier,
-            },
-          },
-        });
-      }
-
-      await prisma.socialAccount.update({
-        where: { id: accountId },
-        data: {
-          pinnedProxyId: newProxy.id,
-          proxyPinnedAt: new Date(),
-        },
-      });
+      plans.push({ accountId, violation, oldProxyId: oldProxy?.id ?? null });
     }
 
-    res.json({ updated: accountIds.length });
+    // If any violation exists and force is false, reject the WHOLE batch.
+    const blockers = plans.filter(p => p.violation);
+    if (blockers.length > 0 && !force) {
+      res.status(409).json({
+        success: false,
+        code: blockers[0].violation!.code,
+        error: `${blockers.length} аккаунт(ов) заблокированы Carrier Stability Rule. ` +
+               `Используйте force=true (только ADMIN) для override.`,
+        blockedAccountIds: blockers.map(b => b.accountId),
+        violations: blockers.map(b => ({
+          accountId: b.accountId,
+          code: b.violation!.code,
+          message: b.violation!.message,
+          details: {
+            daysRemaining: b.violation!.daysRemaining,
+            oldCarrier: b.violation!.oldCarrier,
+            newCarrier: b.violation!.newCarrier,
+            oldCountry: b.violation!.oldCountry,
+            newCountry: b.violation!.newCountry,
+          },
+        })),
+      });
+      return;
+    }
+
+    // Phase 2: atomic write + AuditLog for every force-overridden violation.
+    await prisma.$transaction(async (tx) => {
+      const now = new Date();
+      for (const plan of plans) {
+        if (plan.violation && force) {
+          await tx.auditLog.create({
+            data: {
+              userId: req.user!.id,
+              action: "proxy.pin.force_override",
+              ip: req.ip ?? null,
+              details: {
+                entityType: "SocialAccount",
+                entityId: plan.accountId,
+                violation: plan.violation.code,
+                oldProxyId: plan.oldProxyId,
+                newProxyId: newProxy.id,
+                oldCarrier: plan.violation.oldCarrier ?? null,
+                newCarrier: plan.violation.newCarrier ?? null,
+                oldCountry: plan.violation.oldCountry ?? null,
+                newCountry: plan.violation.newCountry ?? null,
+              },
+            },
+          });
+        }
+        await tx.socialAccount.update({
+          where: { id: plan.accountId },
+          data: { pinnedProxyId: newProxy.id, proxyPinnedAt: now },
+        });
+      }
+    });
+
+    res.json({
+      updated: plans.length,
+      forcedOverrides: plans.filter(p => p.violation).length,
+    });
   } catch (err) {
     console.error('[Accounts] Bulk proxy bind error:', err);
     res.status(500).json({ error: 'Ошибка при привязке прокси' });

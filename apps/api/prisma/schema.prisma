@@ -68,8 +68,10 @@ model SocialAccount {
   cookiesAuthTag    Bytes?       // 16-byte authentication tag
   cookiesUpdatedAt  DateTime?    // last time cookies were refreshed
 
+
   // Per-account fingerprint — generated once, NEVER changes
   fingerprint       Json?        // AccountFingerprint JSON
+  fingerprintStale  Boolean      @default(false) // true when Chrome version diverges after upgrade
 
   status      AccountStatus @default(ALIVE)
 

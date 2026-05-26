@@ -14,7 +14,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { Job } from 'bullmq';
-import { launchStealthContext, closeBrowser, buildProxyUrl } from '../core/browser/patchright-launcher.js';
+import { launchStealthContext, closeBrowser } from '../core/browser/patchright-launcher.js';
 import { validateCookies } from '../core/auth/session-validator.js';
 import { saveCookiesToDiskCache, type BrowserCookie } from '../core/auth/cookie-store.js';
 import { uniquifyVideo, cleanupUniquifiedVideo } from '../core/video/uniquifier.js';

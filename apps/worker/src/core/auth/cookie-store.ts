@@ -240,3 +240,36 @@ export async function saveCookiesToDiskCache(
     updatedAt: new Date().toISOString(),
   }));
 }
+
+// ── DB-backed Cookie Loader ─────────────────────────────────
+
+import { prisma } from '../lib/prisma.js';
+
+/**
+ * Load and decrypt cookies for an account, reading directly from Prisma.
+ * DB is single source of truth — use this instead of disk-based store
+ * for all new handler code.
+ */
+export async function loadCookiesForAccount(
+  accountId: string,
+): Promise<BrowserCookie[]> {
+  const acc = await prisma.socialAccount.findUnique({
+    where: { id: accountId },
+    select: {
+      cookiesEncrypted: true,
+      cookiesIv: true,
+      cookiesAuthTag: true,
+    },
+  });
+
+  if (!acc?.cookiesEncrypted || !acc.cookiesIv || !acc.cookiesAuthTag) {
+    return [];
+  }
+
+  return decryptCookies(
+    Buffer.from(acc.cookiesEncrypted),
+    Buffer.from(acc.cookiesIv),
+    Buffer.from(acc.cookiesAuthTag),
+  );
+}
+
