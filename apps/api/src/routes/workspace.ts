@@ -13,7 +13,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
-import { addJob } from '../lib/bullmq.js';
+import { dispatchAccountJob } from '../lib/job-dispatch.js';
 import { authMiddleware } from '../middleware/auth.js';
 
 const router = Router();
@@ -113,13 +113,13 @@ router.post('/launch', async (req: Request, res: Response) => {
     }
 
     const { type, accountIds, config, threads } = parsed.data;
+    const force = req.query.force === "true" && req.user!.role === "ADMIN";
 
-    // Verify user doesn't exceed their thread limit
+    // Verify thread limit (existing behaviour)
     const user = await prisma.user.findUnique({
       where: { id: req.user!.id },
       select: { maxThreads: true },
     });
-
     if (threads > (user?.maxThreads ?? 3)) {
       res.status(400).json({
         error: `Максимум ${user?.maxThreads} потоков. Обратитесь к администратору.`,
@@ -127,7 +127,7 @@ router.post('/launch', async (req: Request, res: Response) => {
       return;
     }
 
-    // Create task record in DB
+    // Create parent task record
     const task = await prisma.task.create({
       data: {
         userId: req.user!.id,
@@ -136,33 +136,83 @@ router.post('/launch', async (req: Request, res: Response) => {
       },
     });
 
-    // Map task type to BullMQ queue name
-    const queueMap: Record<string, string> = {
+    // Map task type -> queue
+    const queueMap = {
       UPLOAD: 'upload',
       WARMUP: 'warmup',
       COOKIES: 'cookies',
       EDIT_PROFILE: 'edit-profile',
+    } as const;
+    const queueName = queueMap[type];
+
+    // Build per-job extras (UPLOAD needs videoId/path/title/description/hashtags)
+    const buildExtra = async (_accountId: string) => {
+      if (type !== 'UPLOAD') return { taskId: task.id, config };
+
+      const videoId = (config as Record<string, unknown>).videoId as string | undefined;
+      if (!videoId) throw new Error("UPLOAD requires config.videoId");
+
+      const video = await prisma.video.findFirstOrThrow({
+        where: { id: videoId, userId: req.user!.id },
+      });
+
+      return {
+        taskId: task.id,
+        videoId: video.id,
+        videoPath: video.filepath,
+        title: (config as Record<string, unknown>).title ?? video.originalName,
+        description: video.description ?? "",
+        hashtags: video.hashtags ?? [],
+      };
     };
 
-    // Dispatch to BullMQ
-    const jobId = await addJob(
-      queueMap[type] as any,
-      {
-        taskId: task.id,
-        userId: req.user!.id,
-        accountIds,
-        config,
-        threads,
-      },
+    // Dispatch one job per account
+    const results = await Promise.all(
+      accountIds.map(async (accountId) => {
+        const extra = await buildExtra(accountId);
+        return dispatchAccountJob({
+          queueName,
+          userId: req.user!.id,
+          accountId,
+          extra,
+          forceSkipWarmup: force,
+        });
+      }),
     );
 
-    // Link BullMQ job ID back to task record
+    const successCount = results.filter(r => r.jobId).length;
+    const failures = results.filter(r => !r.jobId);
+
+    // If everything failed pre-flight, no point in keeping the task record.
+    if (successCount === 0) {
+      await prisma.task.update({
+        where: { id: task.id },
+        data: { status: 'FAILED', error: 'All accounts failed pre-flight checks' },
+      });
+      res.status(409).json({
+        error: "Все аккаунты заблокированы pre-flight проверками",
+        task,
+        failures,
+      });
+      return;
+    }
+
+    // Persist BullMQ job ids on the task (use first as primary, full list in config)
     await prisma.task.update({
       where: { id: task.id },
-      data: { bullmqJobId: jobId, status: 'PENDING' },
+      data: {
+        bullmqJobId: results.find(r => r.jobId)!.jobId,
+        status: 'PENDING',
+        config: { ...config, accountIds, threads, dispatchedJobs: results },
+      },
     });
 
-    res.status(201).json({ task: { ...task, bullmqJobId: jobId } });
+    res.status(201).json({
+      task: { ...task, bullmqJobId: results[0].jobId },
+      dispatched: successCount,
+      skipped: failures.length,
+      failures,
+    });
   } catch (err) {
     console.error('[Workspace] Launch error:', err);
     res.status(500).json({ error: 'Ошибка при запуске задачи' });

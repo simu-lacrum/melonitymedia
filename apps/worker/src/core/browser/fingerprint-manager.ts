@@ -43,18 +43,32 @@ export interface AccountFingerprint {
 
 // ── Consistency Validation ──────────────────────────────────
 
+export interface FingerprintIssue {
+  rule: "OS_COHERENCE" | "GPU_COHERENCE" | "DISPLAY_GEOMETRY"
+      | "GEO_COHERENCE" | "HARDWARE_REALISM"
+      | "CHROME_VERSION" | "TOUCH_COHERENCE";
+  message: string;
+  severity: "fatal" | "stale";
+}
+
 /**
- * Consistency rules for AccountFingerprint.
+ * Soft variant of consistency check. Returns the list of detected issues
+ * instead of throwing. Used at LOAD time, where one stale field (Chrome
+ * version after upgrade) should not block the entire account network.
  *
- * Bot-detection systems (Cloudflare, DataDome, TikTok BotManager) flag
- * any internally inconsistent fingerprint within 1 request. Generating
- * a Windows UA with a MacIntel platform is an instant red flag.
- *
- * Throws on first violation with a precise message. Used both at
- * generation time and on load from DB (defence in depth against
- * tampering or schema drift).
+ * Caller decides:
+ *   - severity="fatal" issues -> refuse to launch (UA/platform mismatch
+ *                                etc. would get the account banned anyway)
+ *   - severity="stale" issues -> log + persist `fingerprintStale: true`,
+ *                                continue. Operator regenerates on
+ *                                "never-published" accounts via UI.
  */
-export function validateFingerprintConsistency(fp: AccountFingerprint): void {
+export function inspectFingerprintConsistency(
+  fp: AccountFingerprint,
+  systemChromeMajor: number,
+): FingerprintIssue[] {
+  const issues: FingerprintIssue[] = [];
+
   // 1. UA OS must match navigator.platform.
   const uaOsMatches: Record<AccountFingerprint["platform"], RegExp> = {
     Win32: /Windows NT \d+\.\d+/,
@@ -62,9 +76,11 @@ export function validateFingerprintConsistency(fp: AccountFingerprint): void {
     "Linux x86_64": /X11; Linux x86_64/,
   };
   if (!uaOsMatches[fp.platform].test(fp.userAgent)) {
-    throw new FingerprintInconsistencyError(
-      `userAgent OS does not match platform=${fp.platform}. UA="${fp.userAgent}"`,
-    );
+    issues.push({
+      rule: "OS_COHERENCE",
+      severity: "fatal",
+      message: `userAgent does not match platform=${fp.platform}`,
+    });
   }
 
   // 2. WebGL renderer must match OS family.
@@ -75,85 +91,98 @@ export function validateFingerprintConsistency(fp: AccountFingerprint): void {
     (fp.platform === "Linux x86_64" &&
       /(Mesa|llvmpipe|NVIDIA)/i.test(fp.webgl.renderer));
   if (!rendererOk) {
-    throw new FingerprintInconsistencyError(
-      `webgl.renderer "${fp.webgl.renderer}" doesn't match platform=${fp.platform}. ` +
-        `Windows must report ANGLE, macOS must report Apple/AMD Radeon Pro/Intel Iris-UHD, ` +
-        `Linux must report Mesa/llvmpipe/NVIDIA.`,
-    );
+    issues.push({
+      rule: "GPU_COHERENCE",
+      severity: "fatal",
+      message: `webgl.renderer "${fp.webgl.renderer}" doesn't match platform=${fp.platform}`,
+    });
   }
 
   // 3. Screen >= viewport with realistic chrome (>=80px height for taskbar/header).
   if (fp.viewport.width > fp.screen.width) {
-    throw new FingerprintInconsistencyError(
-      `viewport.width (${fp.viewport.width}) exceeds screen.width (${fp.screen.width}). ` +
-        `This is physically impossible.`,
-    );
+    issues.push({
+      rule: "DISPLAY_GEOMETRY", severity: "fatal",
+      message: `viewport.width ${fp.viewport.width} exceeds screen.width ${fp.screen.width}`,
+    });
   }
   if (fp.viewport.height > fp.screen.height - 80) {
-    throw new FingerprintInconsistencyError(
-      `viewport.height (${fp.viewport.height}) leaves <80px for taskbar/header ` +
-        `on screen.height ${fp.screen.height}. Real browsers always reserve chrome space.`,
-    );
+    issues.push({
+      rule: "DISPLAY_GEOMETRY", severity: "fatal",
+      message: `viewport.height leaves <80px chrome on screen ${fp.screen.height}`,
+    });
   }
 
   // 4. Timezone <-> locale country sanity check.
   const localeCountry = fp.locale.split("-")[1]?.toUpperCase();
   const tzRegion = fp.timezone.split("/")[0];
   const validRegions: Record<string, string[]> = {
-    US: ["America"],
-    GB: ["Europe"],
-    DE: ["Europe"],
-    FR: ["Europe"],
-    RU: ["Europe", "Asia"],
-    KZ: ["Asia"],
-    UA: ["Europe"],
-    JP: ["Asia"],
-    BR: ["America"],
-    IN: ["Asia"],
-    AU: ["Australia"],
+    US: ["America"], GB: ["Europe"], DE: ["Europe"], FR: ["Europe"],
+    RU: ["Europe", "Asia"], KZ: ["Asia"], UA: ["Europe"], JP: ["Asia"],
+    BR: ["America"], IN: ["Asia"], AU: ["Australia"],
   };
   if (localeCountry && validRegions[localeCountry]) {
     if (!validRegions[localeCountry].includes(tzRegion)) {
-      throw new FingerprintInconsistencyError(
-        `locale ${fp.locale} country ${localeCountry} doesn't match timezone region ${tzRegion}. ` +
-          `Expected one of: ${validRegions[localeCountry].join(", ")}.`,
-      );
+      issues.push({
+        rule: "GEO_COHERENCE", severity: "fatal",
+        message: `locale ${fp.locale} mismatches timezone ${fp.timezone}`,
+      });
     }
   }
 
   // 5. hardwareConcurrency and deviceMemory bounds.
   if (![4, 6, 8, 12, 16].includes(fp.hardwareConcurrency)) {
-    throw new FingerprintInconsistencyError(
-      `hardwareConcurrency must be one of {4,6,8,12,16}, got ${fp.hardwareConcurrency}.`,
-    );
+    issues.push({
+      rule: "HARDWARE_REALISM", severity: "fatal",
+      message: `hardwareConcurrency=${fp.hardwareConcurrency} unrealistic`,
+    });
   }
   if (![4, 8].includes(fp.deviceMemory)) {
-    throw new FingerprintInconsistencyError(
-      `deviceMemory must be 4 or 8 (Chrome caps reported value at 8), got ${fp.deviceMemory}.`,
-    );
+    issues.push({
+      rule: "HARDWARE_REALISM", severity: "fatal",
+      message: `deviceMemory=${fp.deviceMemory} exceeds Chrome cap`,
+    });
   }
 
-  // 6. Chrome major in UA must match system Chrome.
+  // 6. Chrome version: internal consistency is fatal, system divergence is stale.
   const uaChromeMajor = parseInt(
     fp.userAgent.match(/Chrome\/(\d+)/)?.[1] ?? "0",
     10,
   );
   if (uaChromeMajor !== fp.chromeMajor) {
-    throw new FingerprintInconsistencyError(
-      `Chrome major in userAgent (${uaChromeMajor}) doesn't match fingerprint.chromeMajor ` +
-        `(${fp.chromeMajor}). System Chrome version must be reflected in UA.`,
-    );
+    issues.push({
+      rule: "CHROME_VERSION", severity: "fatal",
+      message: `UA Chrome ${uaChromeMajor} != fp.chromeMajor ${fp.chromeMajor} — internal inconsistency`,
+    });
+  } else if (fp.chromeMajor !== systemChromeMajor) {
+    issues.push({
+      rule: "CHROME_VERSION", severity: "stale",
+      message: `fingerprint Chrome ${fp.chromeMajor} != system Chrome ${systemChromeMajor} — regenerate when safe`,
+    });
   }
 
-  // 7. maxTouchPoints sanity: desktop UA -> 0; iOS/Android UA -> 5.
-  if (
-    fp.maxTouchPoints !== 0 &&
-    /Windows NT|Macintosh; Intel|X11; Linux/.test(fp.userAgent)
-  ) {
-    throw new FingerprintInconsistencyError(
-      `Desktop userAgent must have maxTouchPoints=0 (got ${fp.maxTouchPoints}). ` +
-        `Non-zero touch points on a desktop UA is a top-3 antifraud signal.`,
-    );
+  // 7. maxTouchPoints sanity: desktop UA -> 0.
+  if (fp.maxTouchPoints !== 0 &&
+      /Windows NT|Macintosh; Intel|X11; Linux/.test(fp.userAgent)) {
+    issues.push({
+      rule: "TOUCH_COHERENCE", severity: "fatal",
+      message: `maxTouchPoints=${fp.maxTouchPoints} on desktop UA`,
+    });
+  }
+
+  return issues;
+}
+
+/**
+ * Strict variant. Throws on first FATAL issue. Use at GENERATION TIME
+ * only — never on load from DB, where stale Chrome version is normal
+ * after a container rebuild.
+ */
+export function validateFingerprintConsistency(fp: AccountFingerprint): void {
+  const systemChromeMajor = getSystemChromeMajor();
+  const issues = inspectFingerprintConsistency(fp, systemChromeMajor);
+  const fatal = issues.find(i => i.severity === "fatal");
+  if (fatal) {
+    throw new FingerprintInconsistencyError(`${fatal.rule}: ${fatal.message}`);
   }
 }
 
