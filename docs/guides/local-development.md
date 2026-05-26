@@ -29,6 +29,7 @@ cp .env.example .env
 | `DATABASE_URL` | PostgreSQL connection string | ✅ |
 | `REDIS_URL` | Redis connection string | ✅ |
 | `JWT_SECRET` | Случайная строка 64+ символов | ✅ |
+| `MASTER_KEY` | AES-256-GCM ключ (32 байта base64) для шифрования cookies | ✅ |
 | `JWT_EXPIRES_IN` | Время жизни токена (по умолчанию `7d`) | ❌ |
 | `PORT_API` | Порт API (по умолчанию `4000`) | ❌ |
 | `PORT_WEB` | Порт фронтенда (по умолчанию `3000`) | ❌ |
@@ -41,6 +42,13 @@ cp .env.example .env
 > ```bash
 > node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 > ```
+
+> [!IMPORTANT]
+> `MASTER_KEY` обязателен для работы воркера и API. Сгенерируйте ONCE:
+> ```bash
+> node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+> ```
+> Если ключ невалиден (не 32 байта), воркер завершится с `process.exit(1)`.
 
 ## 2. Запуск инфраструктуры
 
@@ -106,14 +114,66 @@ npm run dev
 ```
 
 > [!WARNING]
-> Worker требует Chrome/Chromium и Xvfb на Linux. На Windows/macOS он будет работать
-> в headless-режиме или потребует установленный Chrome.
+> Worker использует **Patchright** (patched Playwright CDP), который сам устанавливает браузер.
+> На Linux требуется Xvfb для `headless: false` режима.
+> Для видео уникализации требуется **ffmpeg** в PATH.
+> **НЕ устанавливайте** puppeteer, selenium или undetected-chromedriver.
 
 ## 6. Первый запуск
 
+Регистрация владельца панели и первый прогон end-to-end:
+
 1. Откройте http://localhost:3000
-2. Зарегистрируйтесь через `/auth/register`
-3. Авторизуйтесь → перенаправление на `/account/dashboard`
+2. Зарегистрируйтесь через `/auth/register` — это **владелец панели MelonityMedia**, не TikTok-аккаунт.
+3. После авторизации вы попадёте на `/account/dashboard`.
+
+### 6.1. Добавление первого прокси
+
+> Без прокси воркер не запустит ни одну задачу — это hard gate.
+
+1. Перейдите в `/account/proxies` → **«Добавить прокси»**.
+2. Заполните поля:
+   - **Type:** `LTE_MOBILE` (для TikTok — обязательно; `STATIC_RESIDENTIAL` допустим для YouTube Shorts).
+   - **Host / Port / Login / Pass:** из дашборда вашего proxy-провайдера.
+   - **Rotation Link:** URL для смены IP (если есть). Cooldown минимум 900 сек (15 мин).
+   - **Carrier:** реальный оператор (T-Mobile, Verizon, MTS, Beeline, ...). Это критично — антифрод TikTok коррелирует ASN с заявленным carrier.
+   - **Country / DMA:** должны совпадать с регионом, который carrier реально обслуживает.
+3. Нажмите **«Тест»** — система проверит соединение и сохранит `bgpPathValid` флаг.
+
+### 6.2. Импорт первого TikTok-аккаунта
+
+> log:pass-формат **не поддерживается** — TikTok с 2024 принудительно требует SMS-challenge при логине через прокси. Импортируются ТОЛЬКО cookies.
+
+1. Установите расширение Cookie-Editor / EditThisCookie в обычный Chrome.
+2. Залогиньтесь вручную в TikTok с **того же региона**, что и купленный прокси (если прокси US — VPN/RDP в US, иначе TikTok сразу выставит challenge).
+3. Экспортируйте cookies → `JSON` или `Netscape .txt`.
+4. В панели: `/account/profiles` → **«Импорт аккаунтов»** → перетащите файл cookies в DropZone.
+5. Дождитесь сообщения «Аккаунт импортирован, fingerprint сгенерирован». Cookies моментально шифруются AES-256-GCM перед записью в БД.
+
+### 6.3. Привязка прокси к аккаунту (14-day pin)
+
+1. В таблице `/account/profiles` выберите аккаунт чекбоксом.
+2. **Bulk Actions** → **«Привязать прокси»** → выберите тот, что добавили в 6.1.
+3. После привязки `proxyPinnedAt = now()`. Менять прокси у этого аккаунта в течение 14 дней нельзя без `force=true` (см. `backend-contracts.md` → Carrier Stability Rule).
+
+### 6.4. Прогрев аккаунта (обязательно перед первым заливом)
+
+1. В таблице `/account/profiles` выберите аккаунт → **«Запустить прогрев»**.
+2. Статус сменится на `WARMING_UP`. Worker автоматически запустит 10-day curriculum:
+   - Day 1-3: passive FYP scroll
+   - Day 4-6: light engagement (likes, 1 comment)
+   - Day 7-10: active engagement (likes, comments, saves, follows)
+3. Колонка **«Warmup Day»** покажет прогресс `X / 10`.
+4. Когда `warmupCompletedAt != null` → аккаунт допускается в очередь `upload`.
+
+### 6.5. Первый залив
+
+1. `/account/workspace` → выберите готовый аккаунт.
+2. Перетащите .mp4 в **«Медиатеку»**. Видео автоматически уникализируется per account (FFmpeg detereministic transforms).
+3. Заполните пулы названий/описаний/тегов, нажмите **«ЗАПУСТИТЬ ЗАДАЧУ»**.
+4. Следите за **Live Terminal** — Socket.io транслирует логи воркера в реальном времени.
+
+> **Не запускайте заливы на аккаунтах со статусом `WARMING_UP` или `SHADOWBAN_SUSPECTED`** — система их отфильтрует, но если форс-пушите через API, риск перманентной потери аккаунта возрастает кратно.
 
 ## 7. Полезные команды
 

@@ -46,9 +46,13 @@
 
 | Функция | Описание |
 |---------|----------|
-| DataTable | Чекбокс, Платформа, Никнейм, Статус, Прокси, Просмотры |
-| Импорт (Drawer) | Drag-and-Drop зона для `log:pass` файлов |
-| Bulk Actions | Массовая привязка прокси, удаление |
+| DataTable | Чекбокс, Платформа, Никнейм, Статус (incl. SHADOWBAN_SUSPECTED, WARMING_UP), Прокси, Cookies, Warmup Day |
+| Импорт (Drawer) | Drag-and-Drop зона для **cookies** (Netscape .txt или JSON). Cookies шифруются AES-256-GCM |
+| Cookie re-import | Повторный импорт cookies для конкретного аккаунта (статус EXPIRED_COOKIES → ALIVE) |
+| Bulk Actions | Массовая привязка прокси (с Carrier Stability Rule: 409 при нарушении 14-day window), удаление, запуск прогрева, обновление статуса |
+| Warmup Status | Индикатор прогрева: Day X/10, прогресс-бар (passive → active) |
+| Shadowban Alert | ⚠️ При `SHADOWBAN_SUSPECTED` — красный бейдж + tooltip с рекомендацией 7-day cooldown |
+| Proxy Pin Timer | Отображение оставшихся дней до окончания 14-day pin window |
 | Empty State | Красивая заглушка «Нет аккаунтов» |
 
 ---
@@ -60,9 +64,9 @@
 |------|----------|
 | **Глобальные настройки** | Потоки, задержка старта (от/до), профиль/пресет |
 | **Медиатека** | Drag-n-Drop загрузка видео (.mp4) |
-| **Вкладка А: Залив** | Пулы названий, описаний, тегов. Лимит в сутки |
-| **Вкладка Б: Прогрев** | Хештеги, ползунки вероятности (лайк/коммент 0-100%) |
-| **Вкладка В: Cookies** | Ссылки на доноров, время на сайте. Кнопка «Скачать ZIP» |
+| **Вкладка А: Залив** | Пулы названий, описаний, тегов. Лимит в сутки. **Видео автоматически уникализируется per account** |
+| **Вкладка Б: Прогрев** | 10-day progressive curriculum. Day отображается автоматически из warmupStartedAt |
+| **Вкладка В: Cookies** | Export/refresh cookies через Patchright. **Нет доноров** — только TikTok сессии |
 | **Вкладка Г: Профиль** | Аватар, Баннер, Био. Массовое применение |
 | **Терминал** | Live Socket.io логи воркеров |
 | **Запуск** | Кнопка «🚀 ЗАПУСТИТЬ ЗАДАЧУ» |
@@ -74,10 +78,12 @@
 
 | Функция | Описание |
 |---------|----------|
-| DataTable | Host, Port, Статус, Тип (статический/ротация), Аккаунты |
-| Drawer | Добавление: host:port:login:pass + rotation link |
+| DataTable | Host, Port, Тип (LTE_MOBILE/STATIC_RESIDENTIAL/DATACENTER), Carrier, ASN, Статус, Аккаунты |
+| Drawer | Добавление: host, port, login, pass + rotation link + type + carrier + country + DMA |
 | Тест | Проверка соединения с прокси |
-| Ротация | Ручная смена IP по rotation link |
+| Ротация | Ручная смена IP (cooldown enforcement: минимум 15 мин) |
+| Carrier Warning | ⚠️ Жёлтый бейдж если `bgpPathValid: false` (ASN датацентра: AWS, Hetzner, OVH) |
+| Carrier Stability | При привязке прокси к аккаунту — API проверяет Carrier Stability Rule (14-day window + carrier/country match) |
 
 ---
 

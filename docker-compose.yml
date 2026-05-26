@@ -65,10 +65,10 @@ services:
     depends_on:
       - api
 
-  # ── Worker (Puppeteer + Xvfb + Chrome) ───────────────────
-  # CRITICAL: This container runs headless Chrome inside a
-  # virtual display (Xvfb) to avoid antifraud detection.
-  # headless: false + Xvfb = undetectable browser sessions.
+  # ── Worker (Patchright + Xvfb + Chrome + ffmpeg) ─────────
+  # CRITICAL: This container runs Chrome inside a virtual display
+  # (Xvfb) to avoid antifraud detection. Uses Patchright (patched
+  # Playwright) instead of Puppeteer/Selenium. headless:false + Xvfb.
   worker:
     build:
       context: .
@@ -82,6 +82,7 @@ services:
         condition: service_healthy
     volumes:
       - uploads:/app/uploads
+      - cookies:/data/cookies
     # Worker needs more resources for Chrome instances
     deploy:
       resources:
@@ -92,3 +93,4 @@ volumes:
   pgdata:
   redisdata:
   uploads:
+  cookies:

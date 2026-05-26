@@ -1,24 +1,27 @@
 // ─────────────────────────────────────────────────────────────
-// MelonityMedia Worker — BullMQ Job Processor
+// MelonityMedia Worker v3.0 — Patchright Job Processor
 //
 // This process runs inside a Docker container with:
 // - Xvfb (virtual display at :99)
 // - Google Chrome (real browser, not Chromium)
-// - UndetectedChrome (anti-detection ChromeDriver patches)
+// - Patchright (CDP-based anti-detection patches)
+// - curl-impersonate (TLS fingerprint impersonation binary)
+// - ffmpeg (video uniquification pipeline)
 //
-// It consumes jobs from 6 BullMQ queues and dispatches them
-// to the appropriate handler. Each handler gets a fresh
-// BrowserAutomation instance per job.
+// It consumes jobs from 7 BullMQ queues and dispatches them
+// to the appropriate handler. All browser tasks use Patchright
+// with per-account fingerprints and cookie-only auth.
 //
 // Queue → Handler mapping:
-//   upload        → uploadHandler     (video upload to TikTok/YT)
-//   warmup        → warmupHandler     (profile warmup via browsing)
-//   cookies       → cookiesHandler    (refresh session cookies)
-//   edit-profile  → editProfileHandler(update profile bio/name)
-//   analytics-cron→ analyticsHandler  (scrape profile stats)
-//   cleanup       → cleanupHandler    (delete videos after upload)
+//   upload         → uploadHandler          (video upload with uniquification)
+//   warmup         → warmupHandler          (10-day progressive curriculum)
+//   cookies        → cookiesHandler         (export/refresh session cookies)
+//   edit-profile   → editProfileHandler     (update profile bio/name)
+//   analytics-cron → analyticsHandler       (curl-impersonate JSON API stats)
+//   cleanup        → cleanupHandler         (delete videos after upload)
+//   shadowban-check→ shadowbanDetectorHandler (12h cron shadowban detection)
 //
-// Lifecycle: connect → consume → process → report → wait
+// FORBIDDEN imports: puppeteer, selenium, undetected-chromedriver
 // ─────────────────────────────────────────────────────────────
 
 import 'dotenv/config';
@@ -32,7 +35,22 @@ import {
   analyticsHandler,
   editProfileHandler,
   cleanupHandler,
+  shadowbanDetectorHandler,
 } from './handlers/index.js';
+
+// ── Master Key Validation ───────────────────────────────────
+// Fail fast if MASTER_KEY is missing/invalid — don't process any jobs
+const masterKey = Buffer.from(process.env.MASTER_KEY ?? '', 'base64');
+if (masterKey.length !== 32) {
+  console.error(
+    '\n╔══════════════════════════════════════════════════════════════╗\n' +
+    '║  FATAL: MASTER_KEY must be 32 bytes (base64 encoded)       ║\n' +
+    '║  Generate: node -e "console.log(require(\'crypto\')         ║\n' +
+    '║    .randomBytes(32).toString(\'base64\'))"                   ║\n' +
+    '╚══════════════════════════════════════════════════════════════╝\n',
+  );
+  process.exit(1);
+}
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
@@ -43,6 +61,7 @@ const connection = new Redis(REDIS_URL, {
 // ── Queue → Handler Mapping ─────────────────────────────────
 // Each queue has a dedicated handler function and concurrency limit.
 // Upload/warmup run 3 concurrent (limited by proxy count),
+// analytics uses 2 (lightweight curl-impersonate, no browser),
 // cleanup runs 1 (filesystem operations, no race conditions).
 
 interface QueueConfig {
@@ -52,12 +71,13 @@ interface QueueConfig {
 }
 
 const QUEUE_CONFIGS: QueueConfig[] = [
-  { name: 'upload',         handler: uploadHandler as (job: Job) => Promise<unknown>,       concurrency: 3 },
-  { name: 'warmup',         handler: warmupHandler as (job: Job) => Promise<unknown>,       concurrency: 3 },
-  { name: 'cookies',        handler: cookiesHandler as (job: Job) => Promise<unknown>,      concurrency: 3 },
-  { name: 'edit-profile',   handler: editProfileHandler as (job: Job) => Promise<unknown>,  concurrency: 3 },
-  { name: 'analytics-cron', handler: analyticsHandler as (job: Job) => Promise<unknown>,    concurrency: 2 },
-  { name: 'cleanup',        handler: cleanupHandler as (job: Job) => Promise<unknown>,      concurrency: 1 },
+  { name: 'upload',          handler: uploadHandler as (job: Job) => Promise<unknown>,               concurrency: 3 },
+  { name: 'warmup',          handler: warmupHandler as (job: Job) => Promise<unknown>,               concurrency: 3 },
+  { name: 'cookies',         handler: cookiesHandler as (job: Job) => Promise<unknown>,              concurrency: 3 },
+  { name: 'edit-profile',    handler: editProfileHandler as (job: Job) => Promise<unknown>,          concurrency: 3 },
+  { name: 'analytics-cron',  handler: analyticsHandler as (job: Job) => Promise<unknown>,            concurrency: 2 },
+  { name: 'cleanup',         handler: cleanupHandler as (job: Job) => Promise<unknown>,              concurrency: 1 },
+  { name: 'shadowban-check', handler: shadowbanDetectorHandler as (job: Job) => Promise<unknown>,    concurrency: 2 },
 ];
 
 const workers: Worker[] = [];
@@ -96,13 +116,15 @@ for (const config of QUEUE_CONFIGS) {
 }
 
 console.log(`
-╔══════════════════════════════════════════════════════╗
-║     MelonityMedia Worker v2.0                        ║
-║     Browser: UndetectedChrome (Selenium)             ║
-║     Parser:  cheerio (bs4 equivalent)                ║
-║     Queues:  ${QUEUE_CONFIGS.length} active                                  ║
-║     Display: ${process.env.DISPLAY || 'N/A'}                                     ║
-╚══════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════╗
+║     MelonityMedia Worker v3.0                                ║
+║     Browser: Patchright (patched Playwright)                 ║
+║     Scraper: curl-impersonate (TLS impersonation)            ║
+║     Video:   ffmpeg (uniquification pipeline)                ║
+║     Auth:    cookie-only (AES-256-GCM encrypted)             ║
+║     Queues:  ${QUEUE_CONFIGS.length} active                                          ║
+║     Display: ${process.env.DISPLAY || 'N/A'}                                             ║
+╚══════════════════════════════════════════════════════════════╝
 `);
 
 // ── Graceful Shutdown ───────────────────────────────────────

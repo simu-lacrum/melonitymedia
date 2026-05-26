@@ -1,112 +1,118 @@
 // ─────────────────────────────────────────────────────────────
-// Edit Profile Handler — Update Account Bio/Name/Avatar
+// Edit Profile Handler v2 — Uses Patchright + ghost-cursor
 //
-// Changes profile details on the platform using UndetectedChrome.
-// Navigates to settings, updates fields, saves changes.
+// Same function, new browser engine. All interactions use
+// human-like mouse movements and typing patterns.
 // ─────────────────────────────────────────────────────────────
 
 import { Job } from 'bullmq';
-import { BrowserAutomation, ProxyConfig } from '../core/browser-automation.js';
+import { launchStealthContext, closeBrowser } from '../core/browser/patchright-launcher.js';
+import { createPageCursor, humanClick } from '../core/humanity/biomouse.js';
+import { humanType } from '../core/humanity/typing-emulator.js';
+import { saveCookiesToDiskCache, type BrowserCookie } from '../core/auth/cookie-store.js';
 import { SocketLogger } from '../lib/socket-logger.js';
+import type { AccountFingerprint } from '../core/browser/fingerprint-manager.js';
+import type { Browser } from 'patchright';
+
+// ── Types ───────────────────────────────────────────────────
 
 interface EditProfileJobData {
   userId: string;
-  profileId: string;
-  platform: 'TIKTOK' | 'YOUTUBE_SHORTS';
-  cookies: string;
-  proxy?: ProxyConfig;
+  accountId: string;
+  platform: 'TIKTOK' | 'YOUTUBE';
+  fingerprint: AccountFingerprint;
+  proxyUrl?: string;
+  cookiesDir?: string;
   changes: {
     name?: string;
     bio?: string;
   };
 }
 
+// ── Main ────────────────────────────────────────────────────
+
 export async function editProfileHandler(job: Job<EditProfileJobData>): Promise<void> {
-  const { userId, profileId, platform, cookies, proxy, changes } = job.data;
-  const logger = new SocketLogger(userId);
-  const automation = new BrowserAutomation({ proxy, headless: false });
+  const data = job.data;
+  const logger = new SocketLogger(data.userId);
+  let browser: Browser | null = null;
 
   try {
-    logger.info(`Редактирование профиля ${profileId}...`);
-    const driver = await automation.initDriver();
+    logger.info(`Редактирование профиля ${data.accountId}...`);
 
-    // Inject cookies
-    const baseUrl = platform === 'TIKTOK'
-      ? 'https://www.tiktok.com'
-      : 'https://www.youtube.com';
-    await automation.navigateTo(baseUrl);
-    await automation.humanDelay(2000, 3000);
-
-    const parsedCookies = JSON.parse(cookies);
-    for (const cookie of parsedCookies) {
-      try {
-        await driver.manage().addCookie({
-          name: cookie.name,
-          value: cookie.value,
-          domain: cookie.domain,
-          path: cookie.path || '/',
-          secure: cookie.secure || false,
-          httpOnly: cookie.httpOnly || false,
-        });
-      } catch { /* skip */ }
-    }
+    const ctx = await launchStealthContext({
+      accountId: data.accountId,
+      proxyUrl: data.proxyUrl,
+      cookiesPath: data.cookiesDir ?? '/data/cookies',
+      fingerprint: data.fingerprint,
+    });
+    browser = ctx.browser;
+    const page = ctx.page;
+    const cursor = await createPageCursor(page);
 
     // Navigate to profile settings
-    if (platform === 'TIKTOK') {
-      await automation.navigateTo('https://www.tiktok.com/setting');
+    if (data.platform === 'TIKTOK') {
+      await page.goto('https://www.tiktok.com/setting', { waitUntil: 'networkidle' });
     } else {
-      await automation.navigateTo('https://studio.youtube.com/channel/editing');
+      await page.goto('https://studio.youtube.com/channel/editing', { waitUntil: 'networkidle' });
     }
-    await automation.humanDelay(3000, 5000);
+    await page.waitForTimeout(_randomDelay(3000, 5000));
 
     // Update name if provided
-    if (changes.name) {
+    if (data.changes.name) {
       try {
-        const nameInput = await driver.findElement({
-          css: 'input[name="nickname"], input[placeholder*="name"], #name-input',
-        });
-        await nameInput.clear();
-        await nameInput.sendKeys(changes.name);
-        logger.info(`Имя обновлено: ${changes.name}`);
+        const nameSelector = 'input[name="nickname"], input[placeholder*="name"], #name-input';
+        await page.waitForSelector(nameSelector, { timeout: 5_000 });
+        await humanType(page, nameSelector, data.changes.name, { clearBefore: true });
+        logger.info(`Имя обновлено: ${data.changes.name}`);
       } catch {
         logger.warn('Не удалось обновить имя — селектор не найден');
       }
     }
 
     // Update bio if provided
-    if (changes.bio) {
+    if (data.changes.bio) {
       try {
-        const bioInput = await driver.findElement({
-          css: 'textarea[name="signature"], textarea[placeholder*="bio"], #description-input',
-        });
-        await bioInput.clear();
-        await bioInput.sendKeys(changes.bio);
-        logger.info(`Био обновлено: ${changes.bio.substring(0, 50)}...`);
+        const bioSelector = 'textarea[name="signature"], textarea[placeholder*="bio"], #description-input';
+        await page.waitForSelector(bioSelector, { timeout: 5_000 });
+        await humanType(page, bioSelector, data.changes.bio, { clearBefore: true });
+        logger.info(`Био обновлено: ${data.changes.bio.substring(0, 50)}...`);
       } catch {
         logger.warn('Не удалось обновить био — селектор не найден');
       }
     }
 
-    // Click save button
+    // Click save with human mouse
     try {
-      const saveButton = await driver.findElement({
-        css: 'button[type="submit"], button:has-text("Save"), button:has-text("Сохранить")',
-      });
-      await saveButton.click();
-      await automation.humanDelay(2000, 3000);
+      const saveSelector = 'button[type="submit"]';
+      await humanClick(page, cursor, saveSelector, { postClickDelay: 2000 });
       logger.info('✅ Профиль сохранён');
     } catch {
-      // Fallback: try clicking any "Save" button
-      const buttons = await driver.findElements({ css: 'button' });
-      for (const btn of buttons) {
-        const text = await btn.getText();
-        if (text.includes('Save') || text.includes('Сохранить')) {
-          await btn.click();
+      // Fallback: try any Save/Submit button
+      const buttons = page.locator('button');
+      const count = await buttons.count();
+      for (let i = 0; i < count; i++) {
+        const text = await buttons.nth(i).textContent();
+        if (text?.includes('Save') || text?.includes('Сохранить')) {
+          await buttons.nth(i).click();
           logger.info('✅ Профиль сохранён (fallback)');
           break;
         }
       }
     }
+
+    // Save updated cookies
+    const cookies = await ctx.context.cookies();
+    const browserCookies: BrowserCookie[] = cookies.map(c => ({
+      name: c.name,
+      value: c.value,
+      domain: c.domain,
+      path: c.path,
+      expires: c.expires,
+      httpOnly: c.httpOnly,
+      secure: c.secure,
+      sameSite: c.sameSite === 'Strict' ? 'Strict' : c.sameSite === 'None' ? 'None' : 'Lax',
+    }));
+    await saveCookiesToDiskCache(data.accountId, browserCookies, data.cookiesDir);
 
     await job.updateProgress(100);
 
@@ -115,7 +121,11 @@ export async function editProfileHandler(job: Job<EditProfileJobData>): Promise<
     logger.error(`❌ Ошибка редактирования: ${message}`);
     throw err;
   } finally {
-    await automation.close();
+    await closeBrowser(browser);
     logger.disconnect();
   }
+}
+
+function _randomDelay(min: number, max: number): number {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
 }

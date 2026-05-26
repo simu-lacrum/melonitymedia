@@ -38,7 +38,7 @@ interface Account {
   followers: number;
   views: number;
   videos: number;
-  proxyId: string | null;
+  pinnedProxyId: string | null;
   createdAt: string;
   updatedAt: string;
 }
