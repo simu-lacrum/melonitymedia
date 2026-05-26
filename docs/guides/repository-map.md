@@ -107,7 +107,6 @@ MelonityMedia/
 
 | Путь | Описание |
 |------|----------|
-| `src/core/browser-automation.ts` | **⚠️ DEPRECATED** — старый модуль Selenium/UC. Только для reference. |
 | `src/plugins/` | Plugin registry (BasePlugin + extensible) |
 | `src/lib/socket-logger.ts` | Отправка логов в Socket.io Terminal |
 | `Dockerfile` | Chrome + Xvfb + **ffmpeg** + **curl-impersonate** + Node.js 20 |
