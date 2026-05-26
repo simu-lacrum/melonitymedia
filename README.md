@@ -435,6 +435,7 @@ graph LR
 | **Без градиентов** | Никаких `linear-gradient`. Фоны — сплошные цвета из палитры |
 | **Без neon glow** | Никаких `box-shadow` с цветным свечением (`rgba(255,20,105,...)`) |
 | **Glassmorphism — exception** | `backdrop-filter: blur(12px)` допустим ТОЛЬКО в `Card.tsx` варианте `header`. Все остальные Card используют сплошной `--color-surface-dark`. |
+| **Animated transitions OK** | Чистые `transform`/`opacity` transitions (Tabs underline, `.animate-enter`) разрешены; glow/blur — нет |
 | **Тонкие бордеры** | `border: 1px solid rgba(255,255,255,0.04)` — еле заметные разделители |
 | **Spatial elevation** | Глубина через `box-shadow: 0 8px 30px rgba(0,0,0,0.2)` |
 | **Primary = White** | Основная кнопка — белый фон + тёмный текст (не градиент) |
@@ -599,35 +600,15 @@ gitGraph
     checkout main
     merge feat/foundation id: "merge foundation"
     branch feat/phase2-features
-    commit id: "full pages"
-    commit id: "worker handlers"
-    commit id: "landing + proxies"
-    commit id: "Recharts + workspace tabs"
-    commit id: "docs + Docker + proxy bind"
+    commit id: "pages + worker + docs"
     checkout main
     merge feat/phase2-features id: "merge phase2"
     branch feat/antidetect-refactor-v2
-    commit id: "patchright launcher"
-    commit id: "cookie-store AES-256"
-    commit id: "fingerprint manager"
-    commit id: "ghost-cursor + typing"
-    commit id: "video uniquifier"
-    commit id: "warmup 10-day curriculum"
-    commit id: "shadowban detector"
-    commit id: "curl-impersonate analytics"
-    commit id: "carrier/ASN validation"
-    commit id: "eslint banned imports"
+    commit id: "patchright + AES + fingerprint + warmup + shadowban"
     checkout main
     merge feat/antidetect-refactor-v2 id: "merge v3"
     branch chore/docs-hardening-pass
-    commit id: "fix env vars"
-    commit id: "first-run flow"
-    commit id: "cookie refresh docs"
-    commit id: "Card variants"
-    commit id: "carrier stability rule"
-    commit id: "shadowban 24h gate"
-    commit id: "fingerprint consistency"
-    commit id: "remove browser-automation"
+    commit id: "carrier stability + 24h gate + FP consistency"
     checkout main
     merge chore/docs-hardening-pass id: "merge hardening"
 ```
@@ -655,6 +636,7 @@ gitGraph
 | [`docs/guides/interface-map.md`](docs/guides/interface-map.md) | Карта экранов и роутов с указанием antifraud-гардов |
 | [`docs/architecture/backend-contracts.md`](docs/architecture/backend-contracts.md) | API-контракты, BullMQ payloads, Socket.io events, Fingerprint Contract, Proxy Contract |
 | [`docs/architecture/antifraud-logic.md`](docs/architecture/antifraud-logic.md) | **Подробная спецификация** всей антифрод-логики: carrier stability, shadowban detection, fingerprint consistency, cookie encryption |
+| [`docs/architecture/worker-dockerfile.md`](docs/architecture/worker-dockerfile.md) | Полная спецификация Docker-образа Worker: системные зависимости, Chrome, curl-impersonate, entrypoint.sh |
 
 > 📂 Все документы из `/docs/` доступны на GitHub:  
 > [`docs/guides/`](https://github.com/simu-lacrum/melonitymedia/tree/main/docs/guides) ·
