@@ -434,6 +434,7 @@ graph LR
 |---------|----------|
 | **Без градиентов** | Никаких `linear-gradient`. Фоны — сплошные цвета из палитры |
 | **Без neon glow** | Никаких `box-shadow` с цветным свечением (`rgba(255,20,105,...)`) |
+| **Glassmorphism — exception** | `backdrop-filter: blur(12px)` допустим ТОЛЬКО в `Card.tsx` варианте `header`. Все остальные Card используют сплошной `--color-surface-dark`. |
 | **Тонкие бордеры** | `border: 1px solid rgba(255,255,255,0.04)` — еле заметные разделители |
 | **Spatial elevation** | Глубина через `box-shadow: 0 8px 30px rgba(0,0,0,0.2)` |
 | **Primary = White** | Основная кнопка — белый фон + тёмный текст (не градиент) |
@@ -458,7 +459,7 @@ graph LR
 | Компонент | Файл | Описание |
 |-----------|------|----------|
 | `Button` | `Button.tsx` | Варианты: primary/secondary/ghost/danger + иконки |
-| `Card` | `Card.tsx` | Контейнер с glassmorphism-эффектом |
+| `Card` | `Card.tsx` | Контейнер с тонкой границей и spatial elevation. **Только в варианте `header`** используется лёгкий backdrop-blur для глобальной шапки. |
 | `Badge` | `Badge.tsx` | Статус-индикатор (success/error/warning/info/neutral) |
 | `Input` | `Input.tsx` | Текстовое поле с label и иконкой |
 | `DataTable` | `DataTable.tsx` | Таблица с сортировкой, чекбоксами, bulk actions |
