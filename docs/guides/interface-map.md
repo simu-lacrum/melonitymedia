@@ -65,7 +65,7 @@
 | **Глобальные настройки** | Потоки, задержка старта (от/до), профиль/пресет |
 | **Медиатека** | Drag-n-Drop загрузка видео (.mp4) |
 | **Вкладка А: Залив** | Пулы названий, описаний, тегов. Лимит в сутки. **Видео автоматически уникализируется per account** |
-| **Вкладка Б: Прогрев** | 10-day progressive curriculum. Day отображается автоматически из warmupStartedAt |
+| **Вкладка Б: Прогрев** | Настройка и мониторинг batch-прогрева для выбранных аккаунтов. Триггер warmup — из `/account/profiles` (per-account) или из Workspace (batch). Day отображается из `warmupStartedAt` |
 | **Вкладка В: Cookies** | Export/refresh cookies через Patchright. **Нет доноров** — только TikTok сессии |
 | **Вкладка Г: Профиль** | Аватар, Баннер, Био. Массовое применение |
 | **Терминал** | Live Socket.io логи воркеров |
@@ -80,7 +80,7 @@
 |---------|----------|
 | DataTable | Host, Port, Тип (LTE_MOBILE/STATIC_RESIDENTIAL/DATACENTER), Carrier, ASN, Статус, Аккаунты |
 | Drawer | Добавление: host, port, login, pass + rotation link + type + carrier + country + DMA |
-| Тест | Проверка соединения с прокси |
+| Тест | Проверка соединения с прокси + BGP/ASN валидация (carrier vs реальный AS) + сохранение `bgpPathValid` флага |
 | Ротация | Ручная смена IP (cooldown enforcement: минимум 15 мин) |
 | Carrier Warning | ⚠️ Жёлтый бейдж если `bgpPathValid: false` (ASN датацентра: AWS, Hetzner, OVH) |
 | Carrier Stability | При привязке прокси к аккаунту — API проверяет Carrier Stability Rule (14-day window + carrier/country match) |

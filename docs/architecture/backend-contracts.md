@@ -99,7 +99,8 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
     proxyPinnedAt: string | null;
     warmupStartedAt: string | null;
     warmupCompletedAt: string | null;
-    fingerprint: object | null; // AccountFingerprint JSON (read-only)
+    fingerprint: object; // AccountFingerprint JSON — generated ONCE at import, never null after.
+                         // NOT regenerated when system Chrome upgrades (see §Fingerprint Lifecycle).
     views: number;
     followers: number;
     createdAt: string;
@@ -155,21 +156,44 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
   bio?: string;
   avatarUrl?: string;
   bannerUrl?: string;
-  proxyId?: string;    // auto-sets proxyPinnedAt if changed
+  pinnedProxyId?: string;  // auto-sets proxyPinnedAt if changed;
+                           // subject to Carrier Stability Rule (see §Proxy Contract)
   status?: string;
   secUid?: string;
 }
+
 // Response 200
 { account: Account }  // cookiesEncrypted stripped
+
+// Response 409 CONFLICT (Carrier Stability Rule violation, force not passed)
+{
+  success: false,
+  code: "CARRIER_CHANGE_BLOCKED" | "COUNTRY_CHANGE_BLOCKED" | "PROXY_NOT_LTE_FOR_TIKTOK" | "PIN_WINDOW_ACTIVE",
+  error: "Human-readable description with daysRemaining / old vs new values",
+  details: { daysRemaining?: number, oldCarrier?: string, newCarrier?: string }
+}
+// Override: PATCH /api/accounts/:id?force=true (ADMIN only) → logs AuditLog row
 ```
 
 #### `POST /api/accounts/bulk-proxy`
 ```typescript
 // Request — bulk proxy binding
-{ accountIds: string[], proxyId: string }
-// Sets proxyPinnedAt = now() for all accounts
-// Response 200
-{ updated: number }
+{ accountIds: string[], pinnedProxyId: string }
+// Validates Carrier Stability Rule for EACH account (see §Proxy Contract).
+// Sets proxyPinnedAt = now() for all accounts that pass validation.
+
+// Response 200 (no violations OR force=true override)
+{ updated: number, forcedOverrides?: ViolationCode[] }
+
+// Response 409 CONFLICT (violations detected, force not passed)
+{
+  success: false,
+  code: "CARRIER_CHANGE_BLOCKED" | "COUNTRY_CHANGE_BLOCKED" | "PROXY_NOT_LTE_FOR_TIKTOK" | "PIN_WINDOW_ACTIVE",
+  error: "Human-readable message",
+  blockedAccountIds: string[],
+  details: { oldCarrier?: string, newCarrier?: string, daysRemaining?: number }
+}
+// Override: POST /api/accounts/bulk-proxy?force=true (ADMIN only) → logs AuditLog row
 ```
 
 #### `POST /api/accounts/warmup`
@@ -210,7 +234,15 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
 #### `POST /api/proxies/:id/test`
 ```typescript
 // Response 200
-{ success: true, status: string, address: string }
+{
+  success: true,
+  status: string,
+  address: string,
+  asn: number,           // observed ASN from BGP lookup
+  bgpPathValid: boolean, // true if ASN matches declared carrier
+  warning?: string       // if datacenter ASN detected (AWS, Hetzner, OVH)
+}
+// Side-effect: saves bgpPathValid flag to Proxy record in DB
 ```
 
 ---
@@ -336,7 +368,12 @@ interface CleanupJobPayload {
 }
 ```
 
-### Queue: `shadowban-check` (NEW in v3)
+### Queue: `shadowban-check` (handler: `shadowban-detector.ts`)
+
+> **Naming convention note:** The BullMQ queue name is `shadowban-check`,
+> but the handler file is `shadowban-detector.ts`. This is intentional —
+> the queue name describes the *action* (check), the file describes the
+> *component* (detector). All other queues match 1:1 (upload→upload.ts, etc.).
 
 ```typescript
 interface ShadowbanCheckPayload {
@@ -426,6 +463,60 @@ interface ShadowbanCheckPayload {
 
 // MASTER_KEY: 32 bytes from env (base64 encoded, 44 chars)
 // Validated at startup: if invalid → process.exit(1)
+```
+
+### Fingerprint Lifecycle
+
+```typescript
+// Fingerprint is generated ONCE at POST /api/accounts/import and persisted to DB.
+// It is NOT regenerated when system Chrome upgrades — UA must remain stable
+// to preserve TikTok identity correlation.
+//
+// When Chrome major increments (e.g. 148→149), the `chromeMajor` field in the
+// stored fingerprint becomes stale by design. The validator treats this as a
+// SOFT WARNING (log + set fingerprintStale flag) rather than a hard error,
+// so production accounts continue working after Docker image rebuild.
+//
+// Manual regeneration is allowed ONLY for accounts where:
+//   warmupCompletedAt === null (never published any content)
+//
+// UI shows a "Fingerprint stale" badge on affected accounts with a
+// recommendation to regenerate after shadowban-cooldown period.
+fingerprint: object;  // never null after import
+```
+
+### AuditLog Model
+
+```prisma
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  action      String   // "PROXY_PIN_FORCE_OVERRIDE" | "MASTER_KEY_ROTATED" | "ACCOUNT_SOFT_BANNED" | ...
+  entityType  String   // "SocialAccount" | "Proxy" | "User"
+  entityId    String
+  metadata    Json     // violation code, before/after values, etc.
+  createdAt   DateTime @default(now())
+  @@index([userId, createdAt])
+  @@index([entityType, entityId])
+}
+```
+
+```typescript
+// GET /api/admin/audit-log?userId=...&action=...&from=...&to=...
+// Response 200
+{
+  logs: Array<{
+    id: string;
+    userId: string;
+    action: string;
+    entityType: string;
+    entityId: string;
+    metadata: object;
+    createdAt: string;
+  }>;
+  total: number;
+}
 ```
 
 ### Fingerprint Contract
