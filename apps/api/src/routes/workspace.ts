@@ -66,6 +66,15 @@ router.post('/upload', upload.single('video'), async (req: Request, res: Respons
       _max: { order: true },
     });
 
+    // Extract description and hashtags from form body
+    const description = typeof req.body.description === 'string' ? req.body.description.trim() || null : null;
+    const rawHashtags = req.body.hashtags;
+    const hashtags: string[] = Array.isArray(rawHashtags)
+      ? rawHashtags.map((h: string) => String(h).replace(/^#/, '').trim()).filter(Boolean)
+      : typeof rawHashtags === 'string'
+        ? rawHashtags.split(',').map((h: string) => h.replace(/^#/, '').trim()).filter(Boolean)
+        : [];
+
     const video = await prisma.video.create({
       data: {
         userId: req.user!.id,
@@ -74,6 +83,8 @@ router.post('/upload', upload.single('video'), async (req: Request, res: Respons
         filepath: req.file.path,
         mimeType: req.file.mimetype,
         size: req.file.size,
+        description,
+        hashtags,
         order: (maxOrder._max.order ?? -1) + 1,
       },
     });

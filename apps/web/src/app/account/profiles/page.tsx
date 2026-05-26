@@ -39,6 +39,9 @@ interface Account {
   views: number;
   videos: number;
   pinnedProxyId: string | null;
+  warmupDay: number | null;
+  warmupDays: number;
+  defaultDescription: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -484,6 +487,62 @@ export default function ProfilesPage() {
               <Button variant="secondary" icon={<Eye className="w-4 h-4" />} className="w-full justify-start">
                 Проверить статус
               </Button>
+            </div>
+
+            {/* Account Settings: Description + Warmup Days */}
+            <div className="flex flex-col gap-4 mt-4 pt-4 border-t border-pure-white/[0.04]">
+              <p className="text-sm font-medium text-pure-white flex items-center gap-1.5">
+                <Settings className="w-3.5 h-3.5 text-muted-gray" />
+                Настройки аккаунта
+              </p>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs text-muted-gray">Описание по умолчанию (для загрузки видео)</label>
+                <textarea
+                  defaultValue={detailAccount.defaultDescription ?? ''}
+                  onBlur={async (e) => {
+                    try {
+                      await api.patch(`/api/accounts/${detailAccount.id}`, {
+                        defaultDescription: e.target.value || null,
+                      });
+                    } catch { /* save failed silently */ }
+                  }}
+                  rows={3}
+                  className="w-full px-4 py-3 rounded-xl bg-surface-dark text-pure-white text-sm border border-transparent focus:border-melon-pink focus:outline-none focus:ring-1 focus:ring-melon-pink/30 placeholder:text-muted-gray/60 resize-none"
+                  placeholder="Описание, которое будет использоваться при загрузке видео..."
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs text-muted-gray">
+                  Продолжительность прогрева: <span className="text-melon-pink font-bold">{detailAccount.warmupDays} дней</span>
+                </label>
+                <input
+                  type="range"
+                  min={3}
+                  max={21}
+                  defaultValue={detailAccount.warmupDays}
+                  onMouseUp={async (e) => {
+                    const val = parseInt((e.target as HTMLInputElement).value);
+                    try {
+                      await api.patch(`/api/accounts/${detailAccount.id}`, { warmupDays: val });
+                      fetchAccounts();
+                    } catch { /* save failed */ }
+                  }}
+                  className="w-full accent-melon-pink h-2 rounded-full bg-surface-dark cursor-pointer"
+                />
+                <div className="flex justify-between text-xs text-muted-gray/50">
+                  <span>3</span><span>10</span><span>21</span>
+                </div>
+              </div>
+              {detailAccount.warmupDay !== null && (
+                <div className="bg-night-base rounded-xl p-3">
+                  <p className="text-xs text-muted-gray">
+                    Текущий день прогрева: <span className="text-melon-pink font-bold">{detailAccount.warmupDay}/{detailAccount.warmupDays}</span>
+                    {detailAccount.warmupDay > detailAccount.warmupDays && (
+                      <Badge variant="success" className="ml-2">Завершён</Badge>
+                    )}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         )}

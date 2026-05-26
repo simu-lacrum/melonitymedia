@@ -95,6 +95,7 @@ export default function WorkspacePage() {
 
   // ── Warmup tab state ────────────────────────────────────
   const [warmupHashtags, setWarmupHashtags] = useState('');
+  const [warmupDays, setWarmupDays] = useState(10);
   const [likeProbability, setLikeProbability] = useState(50);
   const [commentProbability, setCommentProbability] = useState(20);
   const [commentPool, setCommentPool] = useState('');
@@ -135,6 +136,17 @@ export default function WorkspacePage() {
       const formData = new FormData();
       formData.append('video', file);
       formData.append('title', file.name.replace(/\.[^/.]+$/, ''));
+
+      // Include description and hashtags from the upload tab pools
+      if (descPool.trim()) {
+        const descriptions = descPool.split('\n').filter(Boolean);
+        formData.append('description', descriptions[Math.floor(Math.random() * descriptions.length)]);
+      }
+      if (tagPool.trim()) {
+        const tags = tagPool.split(',').map(t => t.trim()).filter(Boolean);
+        tags.forEach(tag => formData.append('hashtags', tag));
+      }
+
       try {
         await fetch('/api/videos/upload', { method: 'POST', body: formData, credentials: 'include' });
       } catch (err) { console.error('Upload failed:', err); }
@@ -163,6 +175,7 @@ export default function WorkspacePage() {
         uploadDelay,
       } : mode === 'warmup' ? {
         hashtags: warmupHashtags.split(',').map(t => t.trim()).filter(Boolean),
+        warmupDays,
         likeProbability,
         commentProbability,
         commentPool: commentPool.split('\n').filter(Boolean),
@@ -402,6 +415,30 @@ export default function WorkspacePage() {
           {/* ── Вкладка Б: Прогрев ──────────────────────── */}
           {mode === 'warmup' && (
             <div className="flex flex-col gap-6">
+              {/* Warmup duration slider */}
+              <div className="flex flex-col gap-2">
+                <label className="text-sm text-muted-gray font-medium flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-melon-pink" />
+                  Продолжительность прогрева: <span className="text-melon-pink font-bold">{warmupDays} дней</span>
+                </label>
+                <input
+                  type="range"
+                  min={3}
+                  max={21}
+                  value={warmupDays}
+                  onChange={e => setWarmupDays(parseInt(e.target.value))}
+                  className="w-full accent-melon-pink h-2 rounded-full bg-surface-dark cursor-pointer"
+                />
+                <div className="flex justify-between text-xs text-muted-gray/50">
+                  <span>3 дня (быстрый)</span>
+                  <span>10 дней</span>
+                  <span>21 день (безопасный)</span>
+                </div>
+                <p className="text-xs text-muted-gray/60 mt-1">
+                  Фазы: пассивный просмотр → лёгкая активность → полная активность.
+                  Границы масштабируются автоматически.
+                </p>
+              </div>
               <Input
                 label="Хештеги для поиска (через запятую)"
                 value={warmupHashtags}

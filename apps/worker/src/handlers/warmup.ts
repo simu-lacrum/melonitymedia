@@ -1,17 +1,18 @@
 // ─────────────────────────────────────────────────────────────
-// Warmup Handler v2 — 10-Day Progressive Curriculum
+// Warmup Handler v3 — Configurable Progressive Curriculum
 //
-// MAJOR CHANGES from v1:
-// 1. 10-day progressive curriculum instead of simple scroll+like
-// 2. Day 1-3: passive FYP watching (zero engagement)
-// 3. Day 4-6: gradual likes, comments, saves
-// 4. Day 7-10: organic upload + engagement mix
-// 5. Day 11+: warmup complete, account ready for operations
-// 6. Uses Patchright + ghost-cursor for human behavior
-// 7. Tracks warmup day via DB (warmupStartedAt)
+// MAJOR CHANGES from v2:
+// 1. User-configurable warmup duration (3–21 days, default 10)
+// 2. Phase boundaries scale proportionally:
+//    - Phase 1 (passive): days 1 → 30% of total
+//    - Phase 2 (light):   next 30%
+//    - Phase 3 (active):  remaining 40%
+// 3. Day counter uses warmupDays from job data
+// 4. Uses Patchright + ghost-cursor for human behavior
+// 5. Tracks warmup day via DB (warmupStartedAt + warmupDays)
 //
 // Each day runs as a separate BullMQ job — cron dispatches daily.
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
 
 import { Job } from 'bullmq';
 import { launchStealthContext, closeBrowser, type StealthContext } from '../core/browser/patchright-launcher.js';
@@ -31,8 +32,10 @@ interface WarmupJobData {
   fingerprint: AccountFingerprint;
   proxyUrl?: string;
   cookiesDir?: string;
-  /** Which day of warmup (1-10). Calculated from warmupStartedAt. */
+  /** Which day of warmup (1-N). Calculated from warmupStartedAt. */
   warmupDay: number;
+  /** Total warmup days for this account (3-21, default 10). */
+  warmupDays: number;
 }
 
 // ── Warmup Comments Pool ────────────────────────────────────
@@ -52,7 +55,7 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
   let browser: Browser | null = null;
 
   try {
-    logger.info(`🔥 Прогрев аккаунта — День ${data.warmupDay}/10 (${data.platform})`);
+    logger.info(`🔥 Прогрев аккаунта — День ${data.warmupDay}/${data.warmupDays ?? 10} (${data.platform})`);
 
     // Launch browser with fingerprint
     const ctx = await launchStealthContext({
@@ -73,16 +76,24 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(_randomDelay(3000, 5000));
 
-    // Route to day-appropriate behavior
-    if (data.warmupDay <= 3) {
+    // Calculate phase boundaries proportionally:
+    // Phase 1 (passive): first 30% of warmupDays
+    // Phase 2 (light):   next 30%
+    // Phase 3 (active):  remaining 40%
+    const totalDays = data.warmupDays ?? 10;
+    const passiveEnd = Math.max(1, Math.ceil(totalDays * 0.3));
+    const lightEnd = Math.max(passiveEnd + 1, Math.ceil(totalDays * 0.6));
+
+    // Route to phase-appropriate behavior
+    if (data.warmupDay <= passiveEnd) {
       await _passiveWatching(page, cursor, data, logger, job);
-    } else if (data.warmupDay <= 6) {
+    } else if (data.warmupDay <= lightEnd) {
       await _lightEngagement(page, cursor, data, logger, job);
     } else {
       await _activeEngagement(page, cursor, data, logger, job);
     }
 
-    logger.info(`✅ Прогрев День ${data.warmupDay}/10 завершён`);
+    logger.info(`✅ Прогрев День ${data.warmupDay}/${totalDays} завершён`);
     await job.updateProgress(100);
 
   } catch (err: unknown) {

@@ -107,8 +107,9 @@ router.get('/', async (req: Request, res: Response) => {
       cookiesAuthTag: undefined,
       hasCookies: !!a.cookiesEncrypted,
       warmupDay: a.warmupStartedAt
-        ? Math.min(11, Math.ceil((Date.now() - new Date(a.warmupStartedAt).getTime()) / 86400000))
+        ? Math.min(a.warmupDays + 1, Math.ceil((Date.now() - new Date(a.warmupStartedAt).getTime()) / 86400000))
         : null,
+      warmupDays: a.warmupDays,
     }));
 
     res.json({ accounts: sanitized });
@@ -283,12 +284,17 @@ router.patch('/:id', async (req: Request, res: Response) => {
     }
 
     // Whitelist allowed update fields
-    const allowedFields = ['username', 'nickname', 'bio', 'avatarUrl', 'bannerUrl', 'pinnedProxyId', 'status', 'secUid'];
+    const allowedFields = ['username', 'nickname', 'bio', 'defaultDescription', 'avatarUrl', 'bannerUrl', 'pinnedProxyId', 'status', 'secUid', 'warmupDays'];
     const updateData: Record<string, unknown> = {};
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) {
         updateData[field] = req.body[field];
       }
+    }
+
+    // Clamp warmupDays to valid range (3-21)
+    if (updateData.warmupDays !== undefined) {
+      updateData.warmupDays = Math.max(3, Math.min(21, Math.floor(Number(updateData.warmupDays))));
     }
 
     // If pinning a new proxy, validate against carrier stability rules
@@ -534,11 +540,14 @@ router.delete('/bulk', async (req: Request, res: Response) => {
 // ── POST /warmup — start warmup for accounts ────────────────
 router.post('/warmup', async (req: Request, res: Response) => {
   try {
-    const { ids } = req.body;
+    const { ids, warmupDays } = req.body;
     if (!Array.isArray(ids) || ids.length === 0) {
       res.status(400).json({ error: 'Выберите хотя бы один аккаунт' });
       return;
     }
+
+    // Validate warmupDays if provided (3-21 days, default 10)
+    const days = warmupDays ? Math.max(3, Math.min(21, Math.floor(Number(warmupDays)))) : 10;
 
     // Mark accounts as WARMING_UP and set warmupStartedAt
     await prisma.socialAccount.updateMany({
@@ -549,6 +558,7 @@ router.post('/warmup', async (req: Request, res: Response) => {
       },
       data: {
         status: 'WARMING_UP',
+        warmupDays: days,
         warmupStartedAt: new Date(),
       },
     });
@@ -558,7 +568,7 @@ router.post('/warmup', async (req: Request, res: Response) => {
       data: {
         userId: req.user!.id,
         type: 'WARMUP',
-        config: { accountIds: ids, threads: 3 },
+        config: { accountIds: ids, threads: 3, warmupDays: days },
       },
     });
 

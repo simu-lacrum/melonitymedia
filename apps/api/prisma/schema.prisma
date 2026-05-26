@@ -78,6 +78,7 @@ model SocialAccount {
   proxyPinnedAt    DateTime?     // when proxy was pinned (14-day rule)
 
   // Warmup tracking
+  warmupDays        Int         @default(10)  // user-configurable warmup duration (3-21)
   warmupStartedAt   DateTime?   // when warmup began (null = not started)
   warmupCompletedAt DateTime?   // when warmup finished (null = in progress)
 
@@ -86,6 +87,7 @@ model SocialAccount {
   avatarUrl     String?
   bannerUrl     String?
   bio           String?
+  defaultDescription String?    // default upload description for this account
   nickname      String?       // TikTok @handle
   secUid        String?       // TikTok secUid for API queries
   views         Int           @default(0)
@@ -188,6 +190,8 @@ model Video {
   uploadedAt   DateTime?
   shouldDelete Boolean   @default(true) // auto-delete after upload?
   accountId    String?   // which account this video was uploaded to
+  description  String?   // user-provided video description
+  hashtags     String[]  // array of hashtag strings (without #)
   views        Int       @default(0) // views count from analytics
   createdAt    DateTime  @default(now())
 

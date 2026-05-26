@@ -94,7 +94,9 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
     nickname: string | null;
     status: "ALIVE" | "AUTH_NEEDED" | "BANNED" | "EXPIRED_COOKIES" | "SHADOWBAN_SUSPECTED" | "WARMING_UP";
     hasCookies: boolean;        // true if cookiesEncrypted is set
-    warmupDay: number | null;   // 1-11, null if warmup not started
+    warmupDay: number | null;   // 1-(warmupDays+1), null if warmup not started
+    warmupDays: number;         // user-configurable (3-21, default 10)
+    defaultDescription: string | null; // default description for video uploads
     proxy: { id, address, label, type } | null;
     proxyPinnedAt: string | null;
     warmupStartedAt: string | null;
@@ -154,10 +156,12 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
   username?: string;
   nickname?: string;
   bio?: string;
+  defaultDescription?: string; // default description for uploads (per-account)
   avatarUrl?: string;
   bannerUrl?: string;
   pinnedProxyId?: string;  // auto-sets proxyPinnedAt if changed;
                            // subject to Carrier Stability Rule (see §Proxy Contract)
+  warmupDays?: number;     // 3-21, clamped server-side
   status?: string;
   secUid?: string;
 }
@@ -198,9 +202,14 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
 
 #### `POST /api/accounts/warmup`
 ```typescript
-// Request — start 10-day warmup curriculum
-{ ids: string[] }
-// Sets status = WARMING_UP, warmupStartedAt = now()
+// Request — start warmup curriculum (3-21 days, default 10)
+{ ids: string[], warmupDays?: number }
+// warmupDays clamped to [3, 21], default 10 if omitted.
+// Sets status = WARMING_UP, warmupDays = days, warmupStartedAt = now()
+// Phase boundaries scale proportionally:
+//   Phase 1 (passive): first 30% of total days
+//   Phase 2 (light):   next 30%
+//   Phase 3 (active):  remaining 40%
 // Dispatches WARMUP task to BullMQ
 // Response 201
 { task: Task }
@@ -291,6 +300,7 @@ interface UploadJobPayload {
   platform: "TIKTOK" | "YOUTUBE";
   title: string;
   description: string;
+  hashtags: string[];         // without # prefix, added by worker
   tags: string[];
 
   // Worker internally:
@@ -306,12 +316,14 @@ interface UploadJobPayload {
 ```typescript
 interface WarmupJobPayload {
   accountId: string;
+  warmupDays: number;       // 3-21, from account.warmupDays (default 10)
 
-  // Worker internally calculates warmupDay from account.warmupStartedAt:
-  // Day 1-3: Passive (scroll FYP, watch 5-8 videos, no interactions)
-  // Day 4-6: Light (like 3-5 videos, leave 1 comment per session)
-  // Day 7-10: Active (like 5-10, comment 2-3, save 1, follow 1)
-  // Day 11+: Ready for upload
+  // Worker internally calculates warmupDay from account.warmupStartedAt.
+  // Phase boundaries scale proportionally to warmupDays:
+  //   Phase 1 (passive): first 30% of total — scroll FYP, watch videos, no interactions
+  //   Phase 2 (light):   next 30% — like 3-5 videos, leave 1 comment per session
+  //   Phase 3 (active):  remaining 40% — like 5-10, comment 2-3, save 1, follow 1
+  //   Day N+1+: Ready for upload
 
   // All actions use:
   // - Patchright with per-account fingerprint

@@ -33,6 +33,7 @@ interface UploadJobData {
   videoPath: string;
   title: string;
   description: string;
+  hashtags?: string[];
   platform: 'TIKTOK' | 'YOUTUBE';
   accountId: string;
   fingerprint: AccountFingerprint;
@@ -181,8 +182,15 @@ async function _uploadToTikTok(
     const captionSelector = '[data-text="true"], .public-DraftEditor-content, [contenteditable="true"]';
     await page.waitForSelector(captionSelector, { timeout: 10_000 });
     await humanClick(page, cursor, captionSelector);
-    await humanType(page, captionSelector, `${data.title}\n${data.description}`, { clearBefore: true });
-    logger.info('Описание заполнено');
+
+    // Build full caption: title + description + hashtags
+    const hashtagStr = data.hashtags?.length
+      ? '\n' + data.hashtags.map(h => `#${h}`).join(' ')
+      : '';
+    const caption = `${data.title}\n${data.description}${hashtagStr}`;
+
+    await humanType(page, captionSelector, caption, { clearBefore: true });
+    logger.info('Описание и хештеги заполнены');
   } catch {
     logger.warn('Не удалось заполнить описание — селектор изменился');
   }
