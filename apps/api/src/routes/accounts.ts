@@ -13,6 +13,7 @@
 // 6. POST /:id/cookies for single account cookie re-import
 //
 // ALL queries are userId-scoped — strict tenant isolation.
+import { validatePinChange } from "../lib/proxy-pin-rules.js";
 // ─────────────────────────────────────────────────────────────
 
 import { Router, Request, Response } from 'express';
@@ -282,7 +283,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
     }
 
     // Whitelist allowed update fields
-    const allowedFields = ['username', 'nickname', 'bio', 'avatarUrl', 'bannerUrl', 'proxyId', 'status', 'secUid'];
+    const allowedFields = ['username', 'nickname', 'bio', 'avatarUrl', 'bannerUrl', 'pinnedProxyId', 'status', 'secUid'];
     const updateData: Record<string, unknown> = {};
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) {
@@ -290,8 +291,58 @@ router.patch('/:id', async (req: Request, res: Response) => {
       }
     }
 
-    // If pinning a new proxy, record the timestamp
-    if (updateData.proxyId && updateData.proxyId !== existing.proxyId) {
+    // If pinning a new proxy, validate against carrier stability rules
+    if (updateData.pinnedProxyId && updateData.pinnedProxyId !== existing.pinnedProxyId) {
+      const force = req.query.force === "true" && req.user!.role === "ADMIN";
+
+      const newProxy = await prisma.proxy.findUniqueOrThrow({
+        where: { id: updateData.pinnedProxyId as string, userId: req.user!.id },
+        select: { id: true, carrier: true, country: true, type: true },
+      });
+
+      const oldProxy = existing.pinnedProxyId
+        ? await prisma.proxy.findUnique({
+            where: { id: existing.pinnedProxyId },
+            select: { id: true, carrier: true, country: true, type: true },
+          })
+        : null;
+
+      const violation = validatePinChange({ account: existing, oldProxy, newProxy });
+
+      if (violation && !force) {
+        res.status(409).json({
+          success: false,
+          error: violation.message,
+          code: violation.code,
+          details: {
+            daysRemaining: violation.daysRemaining,
+            oldCarrier: violation.oldCarrier,
+            newCarrier: violation.newCarrier,
+            oldCountry: violation.oldCountry,
+            newCountry: violation.newCountry,
+          },
+        });
+        return;
+      }
+
+      if (violation && force) {
+        await prisma.auditLog.create({
+          data: {
+            userId: req.user!.id,
+            action: "PROXY_PIN_FORCE_OVERRIDE",
+            entityType: "SocialAccount",
+            entityId: existing.id,
+            metadata: {
+              violation: violation.code,
+              oldProxyId: oldProxy?.id ?? null,
+              newProxyId: newProxy.id,
+              oldCarrier: violation.oldCarrier,
+              newCarrier: violation.newCarrier,
+            },
+          },
+        });
+      }
+
       updateData.proxyPinnedAt = new Date();
     }
 
@@ -331,7 +382,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
 const bulkUpdateSchema = z.object({
   accountIds: z.array(z.string()).min(1),
   update: z.object({
-    proxyId: z.string().optional(),
+    pinnedProxyId: z.string().optional(),
     avatarUrl: z.string().optional(),
     bannerUrl: z.string().optional(),
     bio: z.string().optional(),
@@ -379,25 +430,78 @@ router.post('/bulk-proxy', async (req: Request, res: Response) => {
     }
 
     const { accountIds, proxyId } = parsed.data;
+    const force = req.query.force === "true" && req.user!.role === "ADMIN";
 
-    const proxy = await prisma.proxy.findFirst({
+    const newProxy = await prisma.proxy.findUniqueOrThrow({
       where: { id: proxyId, userId: req.user!.id },
+      select: { id: true, carrier: true, country: true, type: true },
     });
 
-    if (!proxy) {
-      res.status(404).json({ error: 'Прокси не найден' });
-      return;
+    for (const accountId of accountIds) {
+      const account = await prisma.socialAccount.findUniqueOrThrow({
+        where: { id: accountId, userId: req.user!.id },
+        select: {
+          id: true,
+          platform: true,
+          pinnedProxyId: true,
+          proxyPinnedAt: true,
+          createdAt: true,
+        },
+      });
+
+      const oldProxy = account.pinnedProxyId
+        ? await prisma.proxy.findUnique({
+            where: { id: account.pinnedProxyId },
+            select: { id: true, carrier: true, country: true, type: true },
+          })
+        : null;
+
+      const violation = validatePinChange({ account, oldProxy, newProxy });
+
+      if (violation && !force) {
+        res.status(409).json({
+          success: false,
+          error: violation.message,
+          code: violation.code,
+          details: {
+            daysRemaining: violation.daysRemaining,
+            oldCarrier: violation.oldCarrier,
+            newCarrier: violation.newCarrier,
+            oldCountry: violation.oldCountry,
+            newCountry: violation.newCountry,
+          },
+        });
+        return;
+      }
+
+      if (violation && force) {
+        await prisma.auditLog.create({
+          data: {
+            userId: req.user!.id,
+            action: "PROXY_PIN_FORCE_OVERRIDE",
+            entityType: "SocialAccount",
+            entityId: account.id,
+            metadata: {
+              violation: violation.code,
+              oldProxyId: oldProxy?.id ?? null,
+              newProxyId: newProxy.id,
+              oldCarrier: violation.oldCarrier,
+              newCarrier: violation.newCarrier,
+            },
+          },
+        });
+      }
+
+      await prisma.socialAccount.update({
+        where: { id: accountId },
+        data: {
+          pinnedProxyId: newProxy.id,
+          proxyPinnedAt: new Date(),
+        },
+      });
     }
 
-    const result = await prisma.socialAccount.updateMany({
-      where: {
-        id: { in: accountIds },
-        userId: req.user!.id,
-      },
-      data: { proxyId, proxyPinnedAt: new Date() },
-    });
-
-    res.json({ updated: result.count });
+    res.json({ updated: accountIds.length });
   } catch (err) {
     console.error('[Accounts] Bulk proxy bind error:', err);
     res.status(500).json({ error: 'Ошибка при привязке прокси' });

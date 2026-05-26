@@ -425,18 +425,45 @@ interface AccountFingerprint {
 }
 ```
 
-### Proxy Contract
+### Proxy Contract — Carrier Stability Rule (TikTok 2026)
+
+Pinning policy: один аккаунт = один прокси на 14+ дней. `SocialAccount.proxyPinnedAt` фиксируется при первой привязке и при каждой смене.
 
 ```typescript
-// Proxy pinning: one proxy per account, stable for 14+ days.
-// SocialAccount.proxyPinnedAt tracks when proxy was assigned.
-// Worker checks: if (now - proxyPinnedAt) < 14 days → reuse same proxy.
+// Enforced server-side in apps/api/src/lib/proxy-pin-rules.ts
+// (function `validatePinChange`)
 
-// LTE rotation: minimum 15 min cooldown between IP rotations.
-// Proxy.rotationCooldown (seconds, default 900)
-// Proxy.lastRotatedAt — last successful rotation timestamp
+// HARD BLOCKS (returns HTTP 409 unless ?force=true is passed by ADMIN):
 
-// Carrier validation (carrier-validator.ts):
-// Checks ASN against known datacenter ranges (AWS, Hetzner, OVH, etc.)
-// If ASN matches datacenter → proxy.bgpPathValid = false → WARNING in UI
+// 1. PROXY_NOT_LTE_FOR_TIKTOK
+//    TikTok account younger than 30 days requires `type === "LTE_MOBILE"`.
+//    Residential / datacenter on fresh accounts triggers BGP path scoring.
+
+// 2. COUNTRY_CHANGE_BLOCKED
+//    Cannot swap proxy across countries on an account with existing
+//    session history. TikTok geo-correlates carrier with country.
+//    Full re-warm required if you proceed.
+
+// 3. CARRIER_CHANGE_BLOCKED (TikTok-only)
+//    Cannot swap to a different carrier (T-Mobile -> Verizon, etc.).
+//    Resets the 14-day correlation window. Expected shadowban 14-21 days.
+
+// SOFT WARN (still requires force, but lower-risk):
+
+// 4. PIN_WINDOW_ACTIVE
+//    Same-carrier, same-country swap within 14 days of last pin.
+//    Frequent rotations within window are themselves a signal.
+
+// Override mechanism:
+//   POST /api/accounts/bulk-proxy?force=true       (ADMIN role only)
+//   PATCH /api/accounts/:id?force=true             (ADMIN role only)
+// Every force-override writes an AuditLog row with the violation code.
+
+// LTE rotation cooldown:
+//   Proxy.rotationCooldown — minimum seconds between IP rotations (default 900 = 15 min).
+//   Worker enforces: if (now - lastRotatedAt) < rotationCooldown → reject rotation request.
 ```
+
+**Frontend handling:**
+- В `/account/profiles` при попытке bulk-bind показывается modal с человекочитаемой причиной из `error.message` и кнопкой «Override (admin only)» если у текущего юзера `role === ADMIN`.
+- В `/account/proxies` при добавлении нового прокси индикатор `bgpPathValid: false` рисует ⚠️ жёлтый бейдж.

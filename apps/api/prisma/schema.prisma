@@ -74,8 +74,8 @@ model SocialAccount {
   status      AccountStatus @default(ALIVE)
 
   // Proxy pinning — one proxy per account, stable for 14+ days
-  proxyId         String?       // currently pinned proxy
-  proxyPinnedAt   DateTime?     // when proxy was pinned (14-day rule)
+  pinnedProxyId    String?       // currently pinned proxy
+  proxyPinnedAt    DateTime?     // when proxy was pinned (14-day rule)
 
   // Warmup tracking
   warmupStartedAt   DateTime?   // when warmup began (null = not started)
@@ -94,7 +94,7 @@ model SocialAccount {
   updatedAt     DateTime      @updatedAt
 
   user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  proxy Proxy? @relation(fields: [proxyId], references: [id], onDelete: SetNull)
+  pinnedProxy Proxy? @relation(fields: [pinnedProxyId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([userId, platform])
