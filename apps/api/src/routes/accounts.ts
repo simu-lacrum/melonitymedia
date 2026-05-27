@@ -40,7 +40,7 @@ router.post('/:id/regenerate-fingerprint', async (req: Request, res: Response) =
     }
 
     const account = await prisma.socialAccount.findFirst({
-      where: { id: req.params.id, userId: req.user!.id },
+      where: { id: (req.params.id as string), userId: req.user!.id },
     });
     if (!account) {
       res.status(404).json({ error: 'Аккаунт не найден' });
@@ -259,155 +259,173 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
-// ── POST /import — import with cookies (Netscape .txt or JSON)
-const importSchema = z.object({
+const bulkImportSchema = z.object({
   platform: z.enum(['TIKTOK', 'YOUTUBE']),
-  text: z.string().optional(),
-  data: z.string().optional(),
-  cookies: z.string().optional(),
+  data: z.string().min(1, 'Данные обязательны'),
+  authMode: z.enum(['cookies', 'login_pass', 'auto']).default('auto'),
 });
+
+/**
+ * Parses bulk import text. Supports three formats per line:
+ * 1. login:password
+ * 2. login:password:cookies_json_or_netscape
+ * 3. {raw cookies JSON or Netscape, one account per import}
+ *
+ * Returns list of {login?, password?, cookies?} entries.
+ */
+function parseBulkImport(text: string, mode: 'cookies' | 'login_pass' | 'auto'): Array<{
+  login?: string;
+  password?: string;
+  cookies?: string;
+}> {
+  const trimmed = text.trim();
+
+  // Try whole-text as cookies JSON first (single account)
+  if (mode === 'cookies' || (mode === 'auto' && (trimmed.startsWith('[') || trimmed.startsWith('{')))) {
+    try {
+      JSON.parse(trimmed);
+      return [{ cookies: trimmed }];
+    } catch { /* not JSON, fall through */ }
+  }
+
+  // Try whole-text as Netscape format
+  if (mode === 'cookies' || mode === 'auto') {
+    const isNetscape = trimmed.split('\n').some(l => l.includes('\t') && l.split('\t').length >= 7);
+    if (isNetscape) {
+      return [{ cookies: trimmed }];
+    }
+  }
+
+  // Line-by-line: login:password OR login:password:cookies
+  const lines = trimmed.split('\n').map(l => l.trim()).filter(Boolean);
+  const result: Array<{ login?: string; password?: string; cookies?: string }> = [];
+
+  for (const line of lines) {
+    if (line.startsWith('#')) continue;  // comment
+
+    const parts = line.split(':');
+    if (parts.length === 2) {
+      result.push({ login: parts[0], password: parts[1] });
+    } else if (parts.length === 3) {
+      result.push({ login: parts[0], password: parts[1], cookies: parts[2] });
+    } else if (parts.length > 3) {
+      // login:password:cookies where cookies has ':' — rejoin from index 2
+      result.push({ login: parts[0], password: parts[1], cookies: parts.slice(2).join(':') });
+    }
+  }
+
+  return result;
+}
 
 router.post('/import', async (req: Request, res: Response) => {
   try {
-    const parsed = importSchema.safeParse(req.body);
+    const parsed = bulkImportSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: parsed.error.errors[0].message });
       return;
     }
 
-    const { platform } = parsed.data;
-    const rawText = parsed.data.text || parsed.data.data || parsed.data.cookies || '';
+    const { platform, data, authMode } = parsed.data;
+    const entries = parseBulkImport(data, authMode);
 
-    const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-    if (lines.length === 0) {
-      res.status(400).json({ error: 'Нет данных для импорта' });
+    if (entries.length === 0) {
+      res.status(400).json({ error: 'Не удалось распарсить ни одной записи (ожидается login:password или login:password:cookies, по одной на строку)' });
+      return;
+    }
+    if (entries.length > 500) {
+      res.status(400).json({ error: 'Слишком много записей за раз (максимум 500)' });
       return;
     }
 
-    const createdAccounts = [];
+    const masterKey = Buffer.from(process.env.MASTER_KEY ?? '', 'base64');
 
-    for (const line of lines) {
-      let username: string | null = null;
-      let password: string | null = null;
-      let proxyPart: string | null = null;
-      let cookiesPart: string = line;
+    function encryptString(plain: string) {
+      const iv = crypto.randomBytes(12);
+      const cipher = crypto.createCipheriv('aes-256-gcm', masterKey, iv);
+      const encrypted = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+      return { encrypted, iv, authTag: cipher.getAuthTag() };
+    }
 
-      if (line.includes('>')) {
-        const [creds, parsedProxy, parsedCookies] = line.split('>').map(s => s.trim());
-        proxyPart = parsedProxy || null;
-        cookiesPart = parsedCookies || '';
-        
-        if (creds) {
-          const credParts = creds.split(':').map(s => s.trim());
-          username = credParts[0] || null;
-          password = credParts[1] || null;
-        }
-      }
+    const created: string[] = [];
+    const failed: Array<{ line: number; reason: string }> = [];
 
-      // Generate account ID early for fingerprint seed
-      const accountId = crypto.randomUUID().replace(/-/g, '').substring(0, 25);
-
-      // Parse and validate cookies
-      let cookieJson: string;
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
       try {
-        if (cookiesPart.startsWith('[') || cookiesPart.startsWith('{')) {
-          JSON.parse(cookiesPart);
-          cookieJson = cookiesPart;
-        } else {
-          // If it's a single line and not JSON, it could be Netscape format on a single line, 
-          // or just raw session ID. We'll wrap it in JSON format to be safe.
-          const parts = cookiesPart.split('\t');
-          if (parts.length >= 7) {
-            cookieJson = JSON.stringify([{
-              domain: parts[0],
-              path: parts[2],
-              secure: parts[3] === 'TRUE',
-              expires: parseInt(parts[4]) || 0,
-              name: parts[5],
-              value: parts[6],
-            }]);
-          } else {
-            cookieJson = JSON.stringify([{ name: 'sessionid', value: cookiesPart, domain: platform === 'TIKTOK' ? '.tiktok.com' : '.youtube.com' }]);
-          }
-        }
-      } catch {
-        cookieJson = JSON.stringify([{ name: 'raw', value: cookiesPart }]);
-      }
-
-      // Encrypt cookies
-      const { encrypted, iv, authTag } = encryptCookies(cookieJson);
-
-      // Handle Proxy
-      let pinnedProxyId: string | null = null;
-      if (proxyPart) {
-        let host = '', port = 0, pUser = '', pPass = '';
-        if (proxyPart.split(':').length === 4 && !proxyPart.includes(']')) {
-          const parts = proxyPart.split(':');
-          host = parts[0]; port = parseInt(parts[1], 10) || 0;
-          pUser = parts[2]; pPass = parts[3];
-        } else if (proxyPart.includes('@')) {
-          const [auth, hostPort] = proxyPart.split('@');
-          const authParts = auth.split(':');
-          pUser = authParts[0] || ''; pPass = authParts[1] || '';
-          const hpParts = hostPort.split(':');
-          host = hpParts[0]; port = parseInt(hpParts[1] || '0', 10);
-        } else {
-          const parts = proxyPart.split(':');
-          host = parts[0]; port = parseInt(parts[1] || '0', 10);
-        }
-        
-        const proxyAddress = (pUser && pPass) ? `${pUser}:${pPass}@${host}:${port}` : `${host}:${port}`;
-        
-        try {
-          const newProxy = await prisma.proxy.create({
-            data: {
-              host,
-              port,
-              username: pUser || null,
-              password: pPass || null,
-              address: proxyAddress,
-              type: 'STATIC_RESIDENTIAL',
-              isRotating: false,
-              country: 'US',
-              userId: req.user!.id,
-            }
-          });
-          pinnedProxyId = newProxy.id;
-        } catch (err) {
-          console.error('[Accounts] Failed to create proxy from import:', err);
-        }
-      }
-
-      // Generate per-account fingerprint
-      const fingerprint = generateFingerprint(accountId);
-
-      const account = await prisma.socialAccount.create({
-        data: {
+        const accountId = crypto.randomUUID().replace(/-/g, '').substring(0, 25);
+        const data_: any = {
           id: accountId,
           userId: req.user!.id,
           platform: platform as 'TIKTOK' | 'YOUTUBE',
-          username: username,
-          password: password,
-          cookiesEncrypted: encrypted,
-          cookiesIv: iv,
-          cookiesAuthTag: authTag,
-          cookiesUpdatedAt: new Date(),
-          fingerprint: fingerprint as any,
-          pinnedProxyId,
-          proxyPinnedAt: pinnedProxyId ? new Date() : null,
+          username: entry.login ?? null,
           status: 'ALIVE',
-        },
-      });
-      
-      createdAccounts.push(account);
+        };
+
+        // Generate fingerprint (default desktop — user can switch to mobile after)
+        const fingerprint = generateFingerprint(accountId);
+        data_.fingerprint = fingerprint as any;
+
+        // Encrypt cookies if present
+        if (entry.cookies) {
+          // Validate cookies format (JSON or Netscape)
+          let cookieJson: string;
+          try {
+            JSON.parse(entry.cookies);
+            cookieJson = entry.cookies;
+          } catch {
+            // Try Netscape
+            const lines = entry.cookies.split('\n').filter(l => l.trim() && !l.startsWith('#'));
+            const parsedCookies = lines.map(line => {
+              const parts = line.split('\t');
+              if (parts.length >= 7) {
+                return {
+                  domain: parts[0], path: parts[2], secure: parts[3] === 'TRUE',
+                  expires: parseInt(parts[4]) || 0, name: parts[5], value: parts[6],
+                };
+              }
+              return null;
+            }).filter(Boolean);
+            if (parsedCookies.length === 0) {
+              throw new Error('Невалидный формат cookies');
+            }
+            cookieJson = JSON.stringify(parsedCookies);
+          }
+
+          const { encrypted, iv, authTag } = encryptString(cookieJson);
+          data_.cookiesEncrypted = encrypted as any;
+          data_.cookiesIv = iv as any;
+          data_.cookiesAuthTag = authTag as any;
+          data_.cookiesUpdatedAt = new Date();
+        } else if (entry.login && entry.password) {
+          // login:pass only — store encrypted credentials, status=AUTH_NEEDED until login job succeeds
+          const loginEnc = encryptString(entry.login);
+          const passEnc = encryptString(entry.password);
+          data_.loginEncrypted = loginEnc.encrypted as any;
+          data_.loginIv = loginEnc.iv as any;
+          data_.loginAuthTag = loginEnc.authTag as any;
+          data_.passwordEncrypted = passEnc.encrypted as any;
+          data_.passwordIv = passEnc.iv as any;
+          data_.passwordAuthTag = passEnc.authTag as any;
+          data_.status = 'AUTH_NEEDED';
+        } else {
+          throw new Error('Запись не содержит ни cookies, ни login:password');
+        }
+
+        await prisma.socialAccount.create({ data: data_ });
+        created.push(accountId);
+      } catch (err: any) {
+        failed.push({ line: i + 1, reason: err.message ?? String(err) });
+      }
     }
 
     res.status(201).json({
-      success: true,
-      imported: createdAccounts.length,
+      created: created.length,
+      failed: failed.length,
+      failedDetails: failed,
+      ids: created,
     });
   } catch (err) {
-    console.error('[Accounts] Import error:', err);
+    console.error('[Accounts] Bulk import error:', err);
     res.status(500).json({ error: 'Ошибка при импорте аккаунтов' });
   }
 });
@@ -416,7 +434,7 @@ router.post('/import', async (req: Request, res: Response) => {
 router.post('/:id/cookies', async (req: Request, res: Response) => {
   try {
     const existing = await prisma.socialAccount.findFirst({
-      where: { id: req.params.id, userId: req.user!.id },
+      where: { id: (req.params.id as string), userId: req.user!.id },
     });
 
     if (!existing) {
@@ -455,11 +473,11 @@ router.post('/:id/cookies', async (req: Request, res: Response) => {
     const { encrypted, iv, authTag } = encryptCookies(cookieJson);
 
     await prisma.socialAccount.update({
-      where: { id: req.params.id },
+      where: { id: (req.params.id as string) },
       data: {
-        cookiesEncrypted: encrypted,
-        cookiesIv: iv,
-        cookiesAuthTag: authTag,
+        cookiesEncrypted: encrypted as any,
+        cookiesIv: iv as any,
+        cookiesAuthTag: authTag as any,
         cookiesUpdatedAt: new Date(),
         status: 'ALIVE', // reset from EXPIRED_COOKIES
       },
@@ -476,7 +494,7 @@ router.post('/:id/cookies', async (req: Request, res: Response) => {
 router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const existing = await prisma.socialAccount.findFirst({
-      where: { id: req.params.id, userId: req.user!.id },
+      where: { id: (req.params.id as string), userId: req.user!.id },
     });
 
     if (!existing) {
@@ -557,7 +575,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
     }
 
     const account = await prisma.socialAccount.update({
-      where: { id: req.params.id },
+      where: { id: (req.params.id as string) },
       data: updateData,
     });
 
@@ -572,7 +590,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const existing = await prisma.socialAccount.findFirst({
-      where: { id: req.params.id, userId: req.user!.id },
+      where: { id: (req.params.id as string), userId: req.user!.id },
     });
 
     if (!existing) {
@@ -580,7 +598,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
       return;
     }
 
-    await prisma.socialAccount.delete({ where: { id: req.params.id } });
+    await prisma.socialAccount.delete({ where: { id: (req.params.id as string) } });
     res.json({ success: true });
   } catch (err) {
     console.error('[Accounts] Delete error:', err);
@@ -707,7 +725,7 @@ router.post('/bulk-proxy', async (req: Request, res: Response) => {
     }
 
     // Phase 2: atomic write + AuditLog for every force-overridden violation.
-    await prisma.$transaction(async (tx: typeof prisma) => {
+    await prisma.$transaction(async (tx: any) => {
       const now = new Date();
       for (const plan of plans) {
         if (plan.violation && force) {

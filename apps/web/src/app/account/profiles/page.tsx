@@ -80,6 +80,7 @@ export default function ProfilesPage() {
   const [detailAccount, setDetailAccount] = useState<Account | null>(null);
   const [importText, setImportText] = useState('');
   const [importPlatform, setImportPlatform] = useState<'TIKTOK' | 'YOUTUBE'>('TIKTOK');
+  const [importAuthMode, setImportAuthMode] = useState<'auto' | 'cookies' | 'login_pass'>('auto');
   const [importLoading, setImportLoading] = useState(false);
   const [showProxyModal, setShowProxyModal] = useState(false);
   const [availableProxies, setAvailableProxies] = useState<AvailableProxy[]>([]);
@@ -121,6 +122,7 @@ export default function ProfilesPage() {
       await api.post('/api/accounts/import', {
         platform: importPlatform,
         data: importText,
+        authMode: importAuthMode,
       });
       setImportText('');
       setShowImportDrawer(false);
@@ -384,6 +386,30 @@ export default function ProfilesPage() {
                   )}
                 >
                   {p === 'TIKTOK' ? 'TikTok' : 'YouTube'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm text-muted-gray font-medium">Режим импорта (Auth Mode)</label>
+            <div className="flex gap-2">
+              {[
+                { id: 'auto', label: 'Auto-detect' },
+                { id: 'cookies', label: 'Только Cookies' },
+                { id: 'login_pass', label: 'Login:Pass (Login Flow)' }
+              ].map(mode => (
+                <button
+                  key={mode.id}
+                  onClick={() => setImportAuthMode(mode.id as any)}
+                  className={cn(
+                    'px-4 py-2 rounded-lg text-sm font-medium transition-all',
+                    importAuthMode === mode.id
+                      ? 'bg-melon-pink text-pure-white'
+                      : 'bg-surface-dark text-muted-gray hover:text-pure-white',
+                  )}
+                >
+                  {mode.label}
                 </button>
               ))}
             </div>
