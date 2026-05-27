@@ -109,8 +109,8 @@ function generateFingerprint(accountId: string, geo?: { country?: string; city?:
   const locale = localeByCountry[geo?.country ?? 'US'] ?? 'en-US';
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-  // --- UA (Chrome version pinned to 148 — stable default) ---
-  const chromeMajor = 148;
+  // --- UA (Chrome version from env, with sane default) ---
+  const chromeMajor = parseInt(process.env.EXPECTED_CHROME_MAJOR ?? '148', 10);
   const osTokens: Record<string, string> = {
     Win32: 'Windows NT 10.0; Win64; x64',
     MacIntel: 'Macintosh; Intel Mac OS X 10_15_7',
@@ -678,11 +678,13 @@ router.post('/warmup', async (req: Request, res: Response) => {
     });
 
     // Create task for BullMQ
+    const accountId = ids.length === 1 ? ids[0] : null;
     const task = await prisma.task.create({
       data: {
         userId: req.user!.id,
         type: 'WARMUP',
         config: { accountIds: ids, threads: 3, warmupDays: days },
+        accountId,
       },
     });
 
@@ -702,11 +704,13 @@ router.post('/cookies', async (req: Request, res: Response) => {
       return;
     }
 
+    const accountId = ids.length === 1 ? ids[0] : null;
     const task = await prisma.task.create({
       data: {
         userId: req.user!.id,
         type: 'COOKIES',
         config: { accountIds: ids, threads: 3 },
+        accountId,
       },
     });
 

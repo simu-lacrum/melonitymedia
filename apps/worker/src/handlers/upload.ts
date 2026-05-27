@@ -21,26 +21,23 @@ import { uniquifyVideo, cleanupUniquifiedVideo } from '../core/video/uniquifier.
 import { createPageCursor, humanClick, humanScroll } from '../core/humanity/biomouse.js';
 import { humanType } from '../core/humanity/typing-emulator.js';
 import { SocketLogger } from '../lib/socket-logger.js';
-import type { AccountFingerprint } from '../core/browser/fingerprint-manager.js';
+import { loadAccountContext } from '../lib/account-context.js';
+import { prisma } from '../lib/prisma.js';
 import type { Browser } from 'patchright';
 import fs from 'fs';
 
 // ── Types ───────────────────────────────────────────────────
 
 interface UploadJobData {
-  userId: string;
+  userId: string;          // for SocketLogger only — DO NOT use as auth signal
   videoId: string;
   videoPath: string;
   title: string;
   description: string;
   hashtags?: string[];
-  platform: 'TIKTOK' | 'YOUTUBE';
-  accountId: string;
-  fingerprint: AccountFingerprint;
-  proxyUrl?: string;
-  cookiesDir?: string;
-  /** Skip warmup check (user acknowledged risk) */
+  accountId: string;       // EVERYTHING else is resolved from this in the worker
   forceSkipWarmup?: boolean;
+  cookiesDir?: string;
 }
 
 // ── Main ────────────────────────────────────────────────────
@@ -52,65 +49,116 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
   let uniquifiedPath: string | null = null;
 
   try {
-    logger.info(`Начинаю загрузку: "${data.title}" → ${data.platform}`);
+    // ── Resolve everything fresh from the DB ────────────────
+    const ctxAcc = await loadAccountContext(data.accountId);
+    const { platform, fingerprint, proxyUrl } = ctxAcc;
 
-    // Step 1: Validate video file exists
+    logger.info(`Начинаю загрузку: "${data.title}" → ${platform}`);
+
+    // ── Gate 1: video file exists ───────────────────────────
     if (!fs.existsSync(data.videoPath)) {
       throw new Error(`Видео файл не найден: ${data.videoPath}`);
     }
 
-    // Step 2: Pre-flight cookie validation (lightweight, no browser)
+    // ── Gate 2: account warmed up ───────────────────────────
+    if (!ctxAcc.warmupCompletedAt && !data.forceSkipWarmup) {
+      throw new Error(
+        `Account ${data.accountId} not warmed up yet. ` +
+        `Refusing upload. Set forceSkipWarmup=true (admin only) to override.`,
+      );
+    }
+
+    // ── Gate 3: proxy pinned ────────────────────────────────
+    if (!proxyUrl) {
+      throw new Error(
+        `Account ${data.accountId} has no pinned proxy. ` +
+        `Pin an LTE_MOBILE proxy via /account/profiles before uploading.`,
+      );
+    }
+
+    // ── Gate 4: rate limit (3 videos / 24h) ─────────────────
+    const dayAgo = new Date(Date.now() - 86_400_000);
+    const recentUploads = await prisma.video.count({
+      where: {
+        accountId: data.accountId,
+        isUploaded: true,
+        uploadedAt: { gte: dayAgo },
+      },
+    });
+    if (recentUploads >= 3) {
+      throw new Error(
+        `Account ${data.accountId} hit the 3-uploads/day limit. Try tomorrow.`,
+      );
+    }
+
+    // ── Gate 5: minimum 2h gap between uploads ──────────────
+    const lastUpload = await prisma.video.findFirst({
+      where: { accountId: data.accountId, isUploaded: true },
+      orderBy: { uploadedAt: 'desc' },
+      select: { uploadedAt: true },
+    });
+    if (
+      lastUpload?.uploadedAt &&
+      Date.now() - lastUpload.uploadedAt.getTime() < 2 * 60 * 60 * 1000
+    ) {
+      throw new Error(`Less than 2h since previous upload on ${data.accountId}. Wait.`);
+    }
+
+    // ── Gate 6: cookies valid ───────────────────────────────
     logger.info('Pre-flight проверка cookies...');
     const cookieStatus = await validateCookies(
       data.accountId,
-      data.fingerprint,
-      data.proxyUrl,
+      fingerprint,
+      proxyUrl,
       data.cookiesDir,
     );
-
     if (cookieStatus === 'banned') {
+      await prisma.socialAccount.update({
+        where: { id: data.accountId },
+        data: { status: 'BANNED' },
+      });
       throw new Error('Аккаунт забанен. Отмена загрузки.');
     }
     if (cookieStatus === 'expired') {
+      await prisma.socialAccount.update({
+        where: { id: data.accountId },
+        data: { status: 'EXPIRED_COOKIES' },
+      });
       throw new Error('Cookies истекли. Импортируйте новые cookies через UI.');
     }
 
     await job.updateProgress(10);
 
-    // Step 3: Uniquify video for this account
+    // ── Uniquify video for this account ─────────────────────
     logger.info('Уникализация видео (FFmpeg pipeline)...');
     const { outputPath } = await uniquifyVideo({
       accountId: data.accountId,
       inputPath: data.videoPath,
     });
     uniquifiedPath = outputPath;
-
     await job.updateProgress(25);
 
-    // Step 4: Launch stealth browser
+    // ── Launch stealth browser ──────────────────────────────
     logger.info('Запуск Patchright (stealth Chrome)...');
     const ctx = await launchStealthContext({
       accountId: data.accountId,
-      proxyUrl: data.proxyUrl,
+      proxyUrl,
       cookiesPath: data.cookiesDir ?? '/data/cookies',
-      fingerprint: data.fingerprint,
+      fingerprint,
     });
     browser = ctx.browser;
     const page = ctx.page;
-
     await job.updateProgress(35);
 
-    // Step 5: Create ghost cursor for human-like mouse
     const cursor = await createPageCursor(page);
 
-    // Step 6: Route to platform-specific upload logic
-    if (data.platform === 'TIKTOK') {
+    if (platform === 'TIKTOK') {
       await _uploadToTikTok(page, cursor, data, uniquifiedPath, logger, job);
     } else {
       await _uploadToYouTubeShorts(page, cursor, data, uniquifiedPath, logger, job);
     }
 
-    // Step 7: Export updated cookies after session
+    // ── Export updated cookies ──────────────────────────────
     const cookies = await ctx.context.cookies();
     const browserCookies: BrowserCookie[] = cookies.map(c => ({
       name: c.name,
@@ -120,12 +168,24 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
       expires: c.expires,
       httpOnly: c.httpOnly,
       secure: c.secure,
-      sameSite: c.sameSite === 'Strict' ? 'Strict' : c.sameSite === 'None' ? 'None' : 'Lax',
+      sameSite:
+        c.sameSite === 'Strict' ? 'Strict' :
+        c.sameSite === 'None'   ? 'None'   :
+                                  'Lax',
     }));
     await saveCookiesToDiskCache(data.accountId, browserCookies, data.cookiesDir);
 
-    // Step 8: Report success
-    logger.info(`✅ Видео "${data.title}" успешно загружено на ${data.platform}`);
+    // ── Mark video as uploaded ──────────────────────────────
+    await prisma.video.update({
+      where: { id: data.videoId },
+      data: {
+        isUploaded: true,
+        uploadedAt: new Date(),
+        accountId: data.accountId,
+      },
+    });
+
+    logger.info(`✅ Видео "${data.title}" успешно загружено на ${platform}`);
     await job.updateProgress(100);
 
   } catch (err: unknown) {
@@ -144,6 +204,7 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
     logger.disconnect();
   }
 }
+
 
 // ── TikTok Upload ───────────────────────────────────────────
 

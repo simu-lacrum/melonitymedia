@@ -64,20 +64,30 @@ const connection = new Redis(REDIS_URL, {
 // analytics uses 2 (lightweight curl-impersonate, no browser),
 // cleanup runs 1 (filesystem operations, no race conditions).
 
+type WorkerQueueName =
+  | 'upload'
+  | 'warmup'
+  | 'cookies'
+  | 'edit-profile'
+  | 'analytics-cron'
+  | 'cleanup'
+  | 'shadowban-check';
+
 interface QueueConfig {
-  name: string;
-  handler: (job: Job) => Promise<unknown>;
+  name: WorkerQueueName;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- each handler defines its own typed JobData internally
+  handler: (job: Job<any>) => Promise<any>;
   concurrency: number;
 }
 
 const QUEUE_CONFIGS: QueueConfig[] = [
-  { name: 'upload',          handler: uploadHandler as (job: Job) => Promise<unknown>,               concurrency: 3 },
-  { name: 'warmup',          handler: warmupHandler as (job: Job) => Promise<unknown>,               concurrency: 3 },
-  { name: 'cookies',         handler: cookiesHandler as (job: Job) => Promise<unknown>,              concurrency: 3 },
-  { name: 'edit-profile',    handler: editProfileHandler as (job: Job) => Promise<unknown>,          concurrency: 3 },
-  { name: 'analytics-cron',  handler: analyticsHandler as (job: Job) => Promise<unknown>,            concurrency: 2 },
-  { name: 'cleanup',         handler: cleanupHandler as (job: Job) => Promise<unknown>,              concurrency: 1 },
-  { name: 'shadowban-check', handler: shadowbanDetectorHandler as (job: Job) => Promise<unknown>,    concurrency: 2 },
+  { name: 'upload',          handler: uploadHandler,               concurrency: 3 },
+  { name: 'warmup',          handler: warmupHandler,               concurrency: 3 },
+  { name: 'cookies',         handler: cookiesHandler,              concurrency: 3 },
+  { name: 'edit-profile',    handler: editProfileHandler,          concurrency: 3 },
+  { name: 'analytics-cron',  handler: analyticsHandler,            concurrency: 2 },
+  { name: 'cleanup',         handler: cleanupHandler,              concurrency: 1 },
+  { name: 'shadowban-check', handler: shadowbanDetectorHandler,    concurrency: 2 },
 ];
 
 const workers: Worker[] = [];
