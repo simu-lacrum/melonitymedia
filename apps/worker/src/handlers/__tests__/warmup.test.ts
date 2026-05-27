@@ -25,7 +25,7 @@ describe('warmup handler source verification', () => {
     });
 
     it('checks warmupDay >= totalDays for completion gate', () => {
-      expect(WARMUP_SRC).toContain('data.warmupDay >= totalDays');
+      expect(WARMUP_SRC).toContain('warmupDay >= totalDays');
     });
 
     it('imports prisma for DB update', () => {

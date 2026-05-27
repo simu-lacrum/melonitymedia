@@ -3,7 +3,9 @@ import { mockDeep, mockReset } from 'vitest-mock-extended';
 import type { PrismaClient } from '@prisma/client';
 
 const prismaMock = mockDeep<PrismaClient>();
-vi.mock('../prisma.js', () => ({ prisma: prismaMock }));
+vi.mock('../prisma.js', () => ({
+  get prisma() { return prismaMock; }
+}));
 
 import { loadAccountContext } from '../account-context.js';
 

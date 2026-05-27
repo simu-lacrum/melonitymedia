@@ -153,7 +153,7 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
     const cursor = await createPageCursor(page);
 
     if (platform === 'TIKTOK') {
-      await _uploadToTikTok(page, cursor, data, uniquifiedPath, logger, job);
+      await _uploadToTikTok(page, cursor, data, uniquifiedPath, logger, job, proxyUrl, fingerprint);
     } else {
       await _uploadToYouTubeShorts(page, cursor, data, uniquifiedPath, logger, job);
     }
@@ -215,6 +215,8 @@ async function _uploadToTikTok(
   videoPath: string,
   logger: SocketLogger,
   job: Job,
+  proxyUrl?: string,
+  fingerprint?: any
 ): Promise<void> {
   // Navigate to TikTok upload
   logger.info('Переход на страницу загрузки TikTok...');
@@ -259,6 +261,26 @@ async function _uploadToTikTok(
   await page.waitForTimeout(_randomDelay(2000, 3000));
   await job.updateProgress(75);
 
+  // ── Captcha handling before POST ─────────────────────────
+  const { handleTikTokCaptcha } = await import('../core/captcha/tiktok-captcha-handler.js');
+  try {
+    const solved = await handleTikTokCaptcha({
+      page,
+      proxyUrl: proxyUrl!,
+      userAgent: fingerprint?.userAgent || '',
+      websiteURL: page.url(),
+    });
+    if (solved) {
+      logger.info('Captcha auto-solved via CapSolver ✓ (pre-post)');
+    }
+  } catch (capErr: unknown) {
+    const msg = capErr instanceof Error ? capErr.message : String(capErr);
+    if (!process.env.CAPSOLVER_API_KEY) {
+      throw new Error('CAPTCHA обнаружена (pre-post). Установите CAPSOLVER_API_KEY для автоматического решения.');
+    }
+    throw new Error(`CAPTCHA solve failed (pre-post): ${msg}`);
+  }
+
   // Click Post button with human mouse
   try {
     const postSelector = 'button[data-e2e="upload-btn"]';
@@ -283,10 +305,23 @@ async function _uploadToTikTok(
   await page.waitForTimeout(_randomDelay(10000, 20000));
   await job.updateProgress(90);
 
-  // Verify success
-  const afterText = await page.textContent('body');
-  if (afterText?.toLowerCase().includes('captcha') || afterText?.toLowerCase().includes('verify')) {
-    throw new Error('CAPTCHA обнаружена — аккаунт требует ручной верификации');
+  // ── Captcha handling ─────────────────────────────────────
+  try {
+    const solved = await handleTikTokCaptcha({
+      page,
+      proxyUrl: proxyUrl!,
+      userAgent: fingerprint?.userAgent || '',
+      websiteURL: page.url(),
+    });
+    if (solved) {
+      logger.info('Captcha auto-solved via CapSolver ✓');
+    }
+  } catch (capErr: unknown) {
+    const msg = capErr instanceof Error ? capErr.message : String(capErr);
+    if (!process.env.CAPSOLVER_API_KEY) {
+      throw new Error('CAPTCHA обнаружена. Установите CAPSOLVER_API_KEY для автоматического решения.');
+    }
+    throw new Error(`CAPTCHA solve failed: ${msg}`);
   }
 
   logger.info('TikTok подтвердил загрузку ✓');

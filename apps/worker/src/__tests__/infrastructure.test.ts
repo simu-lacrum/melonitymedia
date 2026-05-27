@@ -17,8 +17,8 @@ describe('Dockerfile source verification', () => {
       expect(DOCKERFILE).not.toContain('lwthiker/curl-impersonate');
     });
 
-    it('uses v0.7.1 or later', () => {
-      expect(DOCKERFILE).toContain('v0.7.1');
+    it('uses v1.1.0 or later', () => {
+      expect(DOCKERFILE).toContain('v1.1.0');
       expect(DOCKERFILE).not.toContain('v0.6.1');
     });
   });
