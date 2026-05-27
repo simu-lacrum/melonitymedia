@@ -21,11 +21,11 @@ export default function LandingPage() {
       <nav className="header-blur">
         <div className="max-w-wrapper flex items-center justify-between">
           <Link href="/" className="flex items-center gap-3">
-            <Image
+            <img
               src="/logo.svg"
               alt="MelonityMedia"
-              width={28}
-              height={28}
+              width="28"
+              height="28"
             />
             <span className="text-sm font-semibold tracking-wide text-pure-white uppercase">
               Melonity<span className="text-melon-pink">Media</span>
@@ -166,33 +166,33 @@ export default function LandingPage() {
               {[
                 {
                   icon: Shield,
-                  title: 'Антидетект-среда',
-                  desc: 'Собственная сборка UndetectedChrome. Динамические отпечатки и нулевой фрод-рейтинг на целевых платформах.',
+                  title: 'Антидетект Patchright',
+                  desc: 'Собственная сборка Patchright + ghost-cursor. Динамические отпечатки и нулевой фрод-рейтинг. Изолированная публикация через Xvfb.',
                 },
                 {
                   icon: Upload,
-                  title: 'Публикация контента',
-                  desc: 'Мультипоточная загрузка на TikTok и YouTube Shorts. Централизованное расписание и гео-ротация.',
+                  title: 'Массовый залив',
+                  desc: 'Мультипоточная загрузка на TikTok и YouTube Shorts с CapSolver. Уникализация видео через детерминистичный FFmpeg pipeline.',
                 },
                 {
                   icon: Globe,
-                  title: 'Управление прокси',
-                  desc: 'Интеграция с мобильными фермами. Один аккаунт строго привязан к одному аппаратному IP-адресу.',
+                  title: 'Мобильные прокси',
+                  desc: 'Строгая привязка аккаунта к IP (Proxy Pinning). Интеграция с фермами, валидация Carrier и ASN.',
                 },
                 {
                   icon: Layers,
-                  title: 'Прогрев аккаунтов',
-                  desc: 'Эмуляция человеческого поведения: скроллинг, паузы, лайки. Программируемая вероятность действий.',
+                  title: 'Прогрев (10 дней)',
+                  desc: '10-day progressive curriculum: от пассивного скроллинга (FYP) к активному взаимодействию. Детекция теневого бана.',
                 },
                 {
                   icon: BarChart3,
-                  title: 'Сбор аналитики',
-                  desc: 'Автоматизированный парсинг статистики без авторизации. Точные данные о просмотрах и конверсиях.',
+                  title: 'Аналитика',
+                  desc: 'JSON API парсинг через curl-impersonate TLS. ~200ms на профиль вместо долгих браузерных сессий.',
                 },
                 {
                   icon: Lock,
-                  title: 'Управление сессиями',
-                  desc: 'Безопасное хранение и обновление cookies. Поддержка валидности сессий без участия оператора.',
+                  title: 'Умный импорт',
+                  desc: 'Поддержка Netscape/JSON cookies и login:pass. Cookie refresh (продление сессий) и шифрование AES-256-GCM.',
                 },
               ].map((feature, i) => (
                 <div
@@ -285,8 +285,9 @@ export default function LandingPage() {
                     { label: 'Frontend', tech: 'Next.js 15, React 19, Tailwind v4' },
                     { label: 'API Layer', tech: 'Express.js, Prisma, Socket.io' },
                     { label: 'Queue System', tech: 'BullMQ, Redis 7' },
-                    { label: 'Worker Engine', tech: 'UndetectedChrome, Cheerio' },
+                    { label: 'Worker Engine', tech: 'Patchright, FFmpeg, curl-impersonate' },
                     { label: 'Database', tech: 'PostgreSQL 16' },
+                    { label: 'Security', tech: 'AES-256-GCM, HttpOnly JWT, Xvfb' },
                   ].map((layer, i) => (
                     <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between p-6 hover:bg-surface-elevated/30 transition-colors">
                       <div className="text-sm font-semibold text-pure-white mb-1 sm:mb-0">{layer.label}</div>
@@ -371,7 +372,7 @@ export default function LandingPage() {
         <div className="max-w-wrapper">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-3">
-              <Image src="/logo.svg" alt="MelonityMedia" width={20} height={20} className="opacity-50" />
+              <img src="/logo.svg" alt="MelonityMedia" width="20" height="20" className="opacity-50" />
               <span className="text-xs text-muted-gray font-mono">
                 © {new Date().getFullYear()} Melonity. STRICT SYSTEM.
               </span>

@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,100..1000&display=swap');
 @import "tailwindcss";
 @source "../app";
 @source "../components";
@@ -50,14 +51,6 @@
 }
 
 @layer base {
-  @font-face {
-      font-family: 'Roboto Flex';
-      font-style: oblique 0deg 10deg;
-      font-weight: 100 1000;
-      font-stretch: 25% 151%;
-      font-display: swap;
-      src: url(https://fonts.gstatic.com/s/robotoflex/v30/NaPccZLOBv5T3oB7Cb4i0zu3RMH-CQ.woff2) format('woff2');
-  }
 
   body {
     background:
