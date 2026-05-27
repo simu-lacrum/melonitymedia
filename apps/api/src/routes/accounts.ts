@@ -233,6 +233,7 @@ router.get('/', async (req: Request, res: Response) => {
 
       return {
         ...a,
+        platform: a.platform === 'YOUTUBE_SHORTS' ? 'YOUTUBE' : a.platform,
         // strip secrets — never expose any of these
         cookiesEncrypted: undefined,
         cookiesIv: undefined,

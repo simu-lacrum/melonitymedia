@@ -56,7 +56,7 @@ export async function loadAccountContext(accountId: string): Promise<AccountCont
   return {
     accountId: acc.id,
     userId: acc.userId,
-    platform: acc.platform,
+    platform: acc.platform === 'YOUTUBE_SHORTS' ? 'YOUTUBE' : (acc.platform as 'TIKTOK' | 'YOUTUBE'),
     fingerprint,
     proxyUrl: acc.pinnedProxy ? buildProxyUrl(acc.pinnedProxy) : undefined,
     carrier: acc.pinnedProxy?.carrier ?? null,
