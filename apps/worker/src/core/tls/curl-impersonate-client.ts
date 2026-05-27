@@ -60,7 +60,7 @@ const MAX_BUFFER = 50 * 1024 * 1024; // 50MB stdout buffer
 export async function impersonatedFetch(
   req: ImpersonateRequest,
 ): Promise<ImpersonateResponse> {
-  const binary = `curl_${req.impersonate ?? 'chrome116'}`;
+  const binary = `curl_${req.impersonate ?? 'chrome131'}`;
 
   const args: string[] = [
     '-s',                     // silent mode (no progress)

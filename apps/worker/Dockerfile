@@ -55,7 +55,7 @@ RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --d
 # ── Install curl-impersonate (Chrome TLS fingerprint) ──────
 # Pre-built binary from: https://github.com/lexiforest/curl-impersonate
 RUN wget -q -O /tmp/curl-impersonate.tar.gz \
-    https://github.com/lexiforest/curl-impersonate/releases/download/v0.7.1/curl-impersonate-v0.7.1.x86_64-linux-gnu.tar.gz \
+    https://github.com/lexiforest/curl-impersonate/releases/download/v1.1.0/curl-impersonate-v1.1.0.x86_64-linux-gnu.tar.gz \
     && tar -xzf /tmp/curl-impersonate.tar.gz -C /usr/local/bin/ \
     && rm /tmp/curl-impersonate.tar.gz \
     && chmod +x /usr/local/bin/curl_chrome*
