@@ -36,6 +36,7 @@ import {
   editProfileHandler,
   cleanupHandler,
   shadowbanDetectorHandler,
+  loginHandler,
 } from './handlers/index.js';
 
 // ── Master Key Validation ───────────────────────────────────
@@ -71,7 +72,8 @@ type WorkerQueueName =
   | 'edit-profile'
   | 'analytics-cron'
   | 'cleanup'
-  | 'shadowban-check';
+  | 'shadowban-check'
+  | 'login';
 
 interface QueueConfig {
   name: WorkerQueueName;
@@ -88,6 +90,7 @@ const QUEUE_CONFIGS: QueueConfig[] = [
   { name: 'analytics-cron',  handler: analyticsHandler,            concurrency: 2 },
   { name: 'cleanup',         handler: cleanupHandler,              concurrency: 1 },
   { name: 'shadowban-check', handler: shadowbanDetectorHandler,    concurrency: 2 },
+  { name: 'login',           handler: loginHandler,                concurrency: 3 },
 ];
 
 const workers: Worker[] = [];

@@ -9,3 +9,4 @@ export { analyticsHandler } from './analytics.js';
 export { editProfileHandler } from './edit-profile.js';
 export { cleanupHandler } from './cleanup.js';
 export { shadowbanDetectorHandler } from './shadowban-detector.js';
+export { loginHandler } from './login.js';

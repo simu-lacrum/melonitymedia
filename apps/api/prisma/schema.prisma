@@ -62,6 +62,15 @@ model SocialAccount {
   username    String?       // optional — display name, not used for auth
   password    String?       // deprecated — kept for migration, not used in v3
 
+  // Login credentials (encrypted, only for fresh login flow)
+  loginEncrypted    Bytes?
+  loginIv           Bytes?
+  loginAuthTag      Bytes?
+  passwordEncrypted Bytes?
+  passwordIv        Bytes?
+  passwordAuthTag   Bytes?
+  // After successful login + cookies extracted, these can be cleared.
+
   // Cookie-based auth (AES-256-GCM encrypted)
   cookiesEncrypted  Bytes?       // AES-256-GCM ciphertext
   cookiesIv         Bytes?       // 12-byte IV for GCM
