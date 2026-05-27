@@ -6,6 +6,8 @@ import {
   type AccountFingerprint,
 } from '../fingerprint-manager.js';
 
+process.env.EXPECTED_CHROME_MAJOR = '148';
+
 describe('inspectFingerprintConsistency', () => {
   const systemChrome = getSystemChromeMajor();
 

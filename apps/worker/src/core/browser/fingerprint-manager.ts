@@ -206,14 +206,22 @@ export function getSystemChromeMajor(): number {
       timeout: 5_000,
     });
     const major = parseInt(out.match(/(\d+)\./)?.[1] ?? "0", 10);
-    if (major < 130) {
+    const expectedMajor = parseInt(process.env.EXPECTED_CHROME_MAJOR ?? '148', 10);
+    const minAcceptableMajor = expectedMajor - 6; // tolerate 6 versions below expected
+
+    if (major < minAcceptableMajor) {
       throw new Error(
-        `System Chrome too old (major=${major}). Patchright requires Chrome 148+.`,
+        `[fingerprint-manager] System Chrome too old (major=${major}). ` +
+        `Expected Chrome ${expectedMajor}, minimum acceptable is ${minAcceptableMajor}. ` +
+        `Update google-chrome-stable in the worker Docker image or set EXPECTED_CHROME_MAJOR.`,
       );
     }
     cachedChromeMajor = major;
     return major;
   } catch (err) {
+    if (err instanceof Error && err.message.includes('[fingerprint-manager] System Chrome too old')) {
+      throw err;
+    }
     // Fallback for dev environments (Windows/macOS)
     try {
       const raw = execSync('reg query "HKLM\\SOFTWARE\\Google\\Chrome\\BLBeacon" /v version 2>nul', {
@@ -229,10 +237,24 @@ export function getSystemChromeMajor(): number {
       // Ignore
     }
 
-    // Last-resort fallback for dev — use EXPECTED_CHROME_MAJOR env if set
-    const fallback = parseInt(process.env.EXPECTED_CHROME_MAJOR ?? '148', 10);
-    console.warn(`[Fingerprint] Could not detect Chrome version, using fallback: ${fallback}`);
-    cachedChromeMajor = fallback;
+    // Last-resort fallback for dev — require EXPECTED_CHROME_MAJOR explicitly
+    const envMajor = process.env.EXPECTED_CHROME_MAJOR;
+    if (!envMajor) {
+      throw new Error(
+        `[fingerprint-manager] Could not detect system Chrome version AND ` +
+        `EXPECTED_CHROME_MAJOR is not set. Refusing to guess. ` +
+        `Set EXPECTED_CHROME_MAJOR explicitly in .env.`,
+      );
+    }
+    cachedChromeMajor = parseInt(envMajor, 10);
+    if (isNaN(cachedChromeMajor) || cachedChromeMajor < 100) {
+      throw new Error(
+        `[fingerprint-manager] EXPECTED_CHROME_MAJOR is malformed: "${envMajor}"`,
+      );
+    }
+    console.warn(
+      `[fingerprint-manager] System Chrome detection failed, using EXPECTED_CHROME_MAJOR=${cachedChromeMajor}`,
+    );
     return cachedChromeMajor;
   }
 }
