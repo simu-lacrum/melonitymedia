@@ -141,7 +141,7 @@ export async function detectShadowbanForAccount(accountId: string): Promise<{
   }
 
   const allLowView = candidates.every(
-    (v) => v.views < SHADOWBAN_VIEW_THRESHOLD,
+    (v: { id: string; views: number; uploadedAt: Date | null }) => v.views < SHADOWBAN_VIEW_THRESHOLD,
   );
 
   if (!allLowView) return { flagged: false };
@@ -170,7 +170,7 @@ export async function detectShadowbanForAccount(accountId: string): Promise<{
     flagged: true,
     reason:
       `${candidates.length} consecutive videos (each >=24h old) under ${SHADOWBAN_VIEW_THRESHOLD} views`,
-    matchedVideos: candidates.map((v) => v.id),
+    matchedVideos: candidates.map((v: { id: string }) => v.id),
   };
 }
 
