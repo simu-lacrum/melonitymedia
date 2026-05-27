@@ -41,6 +41,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxtst6 \
     xdg-utils \
     xvfb \
+    x11-utils \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
@@ -52,9 +53,9 @@ RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --d
     && rm -rf /var/lib/apt/lists/*
 
 # ── Install curl-impersonate (Chrome TLS fingerprint) ──────
-# Pre-built binary from: https://github.com/lwthiker/curl-impersonate
+# Pre-built binary from: https://github.com/lexiforest/curl-impersonate
 RUN wget -q -O /tmp/curl-impersonate.tar.gz \
-    https://github.com/lwthiker/curl-impersonate/releases/download/v0.6.1/curl-impersonate-v0.6.1.x86_64-linux-gnu.tar.gz \
+    https://github.com/lexiforest/curl-impersonate/releases/download/v0.7.1/curl-impersonate-v0.7.1.x86_64-linux-gnu.tar.gz \
     && tar -xzf /tmp/curl-impersonate.tar.gz -C /usr/local/bin/ \
     && rm /tmp/curl-impersonate.tar.gz \
     && chmod +x /usr/local/bin/curl_chrome*
