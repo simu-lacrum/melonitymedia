@@ -75,18 +75,19 @@ type WorkerQueueName =
 
 interface QueueConfig {
   name: WorkerQueueName;
-  handler: (job: Job<Record<string, unknown>>) => Promise<void>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- each handler defines its own typed JobData internally
+  handler: (job: Job<any>) => Promise<any>;
   concurrency: number;
 }
 
 const QUEUE_CONFIGS: QueueConfig[] = [
-  { name: 'upload',          handler: uploadHandler as QueueConfig['handler'],               concurrency: 3 },
-  { name: 'warmup',          handler: warmupHandler as QueueConfig['handler'],               concurrency: 3 },
-  { name: 'cookies',         handler: cookiesHandler as QueueConfig['handler'],              concurrency: 3 },
-  { name: 'edit-profile',    handler: editProfileHandler as QueueConfig['handler'],          concurrency: 3 },
-  { name: 'analytics-cron',  handler: analyticsHandler as QueueConfig['handler'],            concurrency: 2 },
-  { name: 'cleanup',         handler: cleanupHandler as QueueConfig['handler'],              concurrency: 1 },
-  { name: 'shadowban-check', handler: shadowbanDetectorHandler as QueueConfig['handler'],    concurrency: 2 },
+  { name: 'upload',          handler: uploadHandler,               concurrency: 3 },
+  { name: 'warmup',          handler: warmupHandler,               concurrency: 3 },
+  { name: 'cookies',         handler: cookiesHandler,              concurrency: 3 },
+  { name: 'edit-profile',    handler: editProfileHandler,          concurrency: 3 },
+  { name: 'analytics-cron',  handler: analyticsHandler,            concurrency: 2 },
+  { name: 'cleanup',         handler: cleanupHandler,              concurrency: 1 },
+  { name: 'shadowban-check', handler: shadowbanDetectorHandler,    concurrency: 2 },
 ];
 
 const workers: Worker[] = [];

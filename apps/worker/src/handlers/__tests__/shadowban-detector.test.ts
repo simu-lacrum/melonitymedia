@@ -71,7 +71,11 @@ describe("detectShadowbanForAccount", () => {
     expect(prisma.socialAccount.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: { status: "SHADOWBAN_SUSPECTED" } }),
     );
-    expect(prisma.task.updateMany).toHaveBeenCalled();
+    // Verify the cancel query uses Task.accountId + cancelReason (FIX A columns)
+    expect(prisma.task.updateMany).toHaveBeenCalledWith({
+      where: { accountId: "acc-1", status: "PENDING", type: "UPLOAD" },
+      data: { status: "CANCELLED", cancelReason: "SHADOWBAN_SUSPECTED" },
+    });
   });
 
   it("does NOT flag when at least one aged video has >=100 views", async () => {
