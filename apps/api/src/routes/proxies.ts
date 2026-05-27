@@ -133,7 +133,7 @@ router.post('/', async (req: Request, res: Response) => {
 router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const existing = await prisma.proxy.findFirst({
-      where: { id: req.params.id, userId: req.user!.id },
+      where: { id: req.params.id as string, userId: req.user!.id },
     });
     if (!existing) {
       res.status(404).json({ error: 'Прокси не найден' });
@@ -162,7 +162,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
     }
 
     const proxy = await prisma.proxy.update({
-      where: { id: req.params.id },
+      where: { id: req.params.id as string },
       data: updateData,
     });
     res.json({ proxy: enrichProxy(proxy) });
@@ -176,14 +176,14 @@ router.patch('/:id', async (req: Request, res: Response) => {
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const existing = await prisma.proxy.findFirst({
-      where: { id: req.params.id, userId: req.user!.id },
+      where: { id: req.params.id as string, userId: req.user!.id },
     });
     if (!existing) {
       res.status(404).json({ error: 'Прокси не найден' });
       return;
     }
 
-    await prisma.proxy.delete({ where: { id: req.params.id } });
+    await prisma.proxy.delete({ where: { id: req.params.id as string } });
     res.json({ success: true });
   } catch (err) {
     console.error('[Proxies] Delete error:', err);
@@ -218,7 +218,7 @@ router.delete('/bulk', async (req: Request, res: Response) => {
 router.post('/:id/test', async (req: Request, res: Response) => {
   try {
     const proxy = await prisma.proxy.findFirst({
-      where: { id: req.params.id, userId: req.user!.id },
+      where: { id: req.params.id as string, userId: req.user!.id },
     });
     if (!proxy) {
       res.status(404).json({ error: 'Прокси не найден' });
@@ -235,6 +235,97 @@ router.post('/:id/test', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[Proxies] Test error:', err);
     res.status(500).json({ error: 'Ошибка при проверке прокси' });
+  }
+});
+
+// ── POST /import — bulk import and proxys.io sync ─────────────
+router.post('/import', async (req: Request, res: Response) => {
+  try {
+    const { mode, data, apiKey, type = 'STATIC_RESIDENTIAL' } = req.body;
+    let added = 0;
+
+    if (mode === 'manual') {
+      if (!data || typeof data !== 'string') {
+        res.status(400).json({ error: 'Data is required for manual import' });
+        return;
+      }
+      const lines = data.split('\n').map(l => l.trim()).filter(Boolean);
+      for (const line of lines) {
+        // expect ip:port:user:pass or host:port
+        const parts = line.split(':');
+        if (parts.length < 2) continue;
+        const host = parts[0];
+        const port = parseInt(parts[1], 10);
+        if (isNaN(port)) continue;
+        const username = parts.length >= 3 ? parts[2] : null;
+        const password = parts.length >= 4 ? parts[3] : null;
+
+        await prisma.proxy.create({
+          data: {
+            userId: req.user!.id,
+            host,
+            port,
+            username,
+            password,
+            address: composeAddress(host, port, username || undefined, password || undefined),
+            type,
+          },
+        });
+        added++;
+      }
+    } else if (mode === 'proxys_io') {
+      if (!apiKey) {
+        res.status(400).json({ error: 'API key is required for proxys.io' });
+        return;
+      }
+      
+      // Fetch from proxys.io API
+      // Since fetch is native in Node 18+:
+      const resp = await fetch(`https://proxys.io/ru/api/v2/proxies?key=${apiKey}`);
+      if (!resp.ok) {
+         res.status(400).json({ error: 'Failed to fetch from Proxys.io' });
+         return;
+      }
+      const json = await resp.json() as any;
+      if (json.status !== 'success' || !json.data) {
+         res.status(400).json({ error: 'Invalid response from Proxys.io' });
+         return;
+      }
+      
+      const proxies = Array.isArray(json.data) ? json.data : Object.values(json.data);
+      for (const p of proxies as any[]) {
+         const host = p.ip;
+         const port = parseInt(p.http_port || p.port, 10);
+         const username = p.user;
+         const password = p.pass;
+         
+         // Assuming Proxys.io gives mostly IPv4 static or mobile
+         const isMobile = p.type?.toLowerCase().includes('mobile');
+         const proxyType = isMobile ? 'LTE_MOBILE' : 'STATIC_RESIDENTIAL';
+
+         await prisma.proxy.create({
+           data: {
+             userId: req.user!.id,
+             host,
+             port,
+             username,
+             password,
+             address: composeAddress(host, port, username, password),
+             type: proxyType,
+             label: `Proxys.io #${p.id || host}`,
+           }
+         });
+         added++;
+      }
+    } else {
+      res.status(400).json({ error: 'Invalid mode' });
+      return;
+    }
+
+    res.json({ added });
+  } catch (err) {
+    console.error('[Proxies] Import error:', err);
+    res.status(500).json({ error: 'Import failed' });
   }
 });
 

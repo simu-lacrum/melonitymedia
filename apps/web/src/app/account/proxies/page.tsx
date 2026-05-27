@@ -62,6 +62,13 @@ export default function ProxiesPage() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
   const [deleteModal, setDeleteModal] = useState(false);
+  
+  // Import state
+  const [importDrawerOpen, setImportDrawerOpen] = useState(false);
+  const [importMode, setImportMode] = useState<'manual' | 'proxys_io'>('manual');
+  const [importData, setImportData] = useState('');
+  const [importApiKey, setImportApiKey] = useState('');
+  const [importing, setImporting] = useState(false);
 
   const fetchProxies = useCallback(async () => {
     try {
@@ -141,6 +148,25 @@ export default function ProxiesPage() {
       console.error('Test error:', err);
     } finally {
       setTesting(null);
+    }
+  };
+
+  const handleImport = async () => {
+    setImporting(true);
+    try {
+      await api.post('/api/proxies/import', {
+        mode: importMode,
+        data: importData,
+        apiKey: importApiKey,
+        type: 'STATIC_RESIDENTIAL'
+      });
+      setImportDrawerOpen(false);
+      setImportData('');
+      fetchProxies();
+    } catch (err) {
+      console.error('Import error:', err);
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -256,6 +282,9 @@ export default function ProxiesPage() {
         <div className="flex items-center gap-3">
           <Button variant="secondary" size="sm" icon={<RefreshCw className="w-4 h-4" />} onClick={fetchProxies}>
             Обновить
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => setImportDrawerOpen(true)}>
+            Импорт / Proxys.io
           </Button>
           <Button variant="primary" size="sm" icon={<Plus className="w-4 h-4" />} onClick={openAddDrawer}>
             Добавить прокси
@@ -392,6 +421,70 @@ export default function ProxiesPage() {
               disabled={!form.host || !form.port}
             >
               {editingProxy ? 'Сохранить' : 'Добавить'}
+            </Button>
+          </div>
+        </div>
+      </Drawer>
+
+      {/* Import Drawer */}
+      <Drawer
+        open={importDrawerOpen}
+        onClose={() => setImportDrawerOpen(false)}
+        title="Импорт прокси"
+        width="440px"
+      >
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center gap-2 mb-2 p-1 bg-muted-gray/10 rounded-lg w-fit">
+            <button
+              onClick={() => setImportMode('manual')}
+              className={`px-3 py-1.5 text-sm rounded-md transition-colors ${importMode === 'manual' ? 'bg-panel-bg text-pure-white shadow-sm' : 'text-muted-gray hover:text-pure-white'}`}
+            >
+              Ручной ввод
+            </button>
+            <button
+              onClick={() => setImportMode('proxys_io')}
+              className={`px-3 py-1.5 text-sm rounded-md transition-colors ${importMode === 'proxys_io' ? 'bg-panel-bg text-pure-white shadow-sm' : 'text-muted-gray hover:text-pure-white'}`}
+            >
+              Proxys.io API
+            </button>
+          </div>
+
+          {importMode === 'manual' ? (
+            <>
+              <p className="text-sm text-muted-gray">
+                Формат: <code>ip:port:user:pass</code> или <code>ip:port</code> (каждый с новой строки).<br/>
+                Прокси будут добавлены как статические (STATIC_RESIDENTIAL).
+              </p>
+              <textarea
+                value={importData}
+                onChange={e => setImportData(e.target.value)}
+                placeholder="192.168.1.1:8080:user1:pass1&#10;192.168.1.2:8080:user2:pass2"
+                className="w-full h-40 bg-input-bg border border-muted-gray/20 rounded-xl p-3 text-sm font-mono text-pure-white focus:outline-none focus:border-melon-pink transition-colors resize-none"
+              />
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-muted-gray">
+                Введите API-ключ от Proxys.io для автоматической синхронизации всех прокси.
+              </p>
+              <Input
+                label="API-ключ Proxys.io"
+                placeholder="abcdef1234567890..."
+                value={importApiKey}
+                onChange={e => setImportApiKey(e.target.value)}
+              />
+            </>
+          )}
+
+          <div className="flex items-center gap-3 mt-4 pt-4 border-t border-muted-gray/10">
+            <Button variant="ghost" onClick={() => setImportDrawerOpen(false)}>Отмена</Button>
+            <Button
+              variant="primary"
+              onClick={handleImport}
+              loading={importing}
+              disabled={importMode === 'manual' ? !importData.trim() : !importApiKey.trim()}
+            >
+              Импортировать
             </Button>
           </div>
         </div>
