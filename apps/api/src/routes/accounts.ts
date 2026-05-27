@@ -48,45 +48,105 @@ function encryptCookies(jsonStr: string): { encrypted: Buffer; iv: Buffer; authT
 // ── Fingerprint Generator ───────────────────────────────────
 // Lightweight version of worker's fingerprint-manager.ts.
 // Generates a deterministic fingerprint from accountId seed.
+// Output MUST be valid AccountFingerprint (worker validates at load time).
 
-function generateFingerprint(accountId: string) {
+function generateFingerprint(accountId: string, geo?: { country?: string; city?: string }) {
   const hash = crypto.createHash('sha256').update(accountId).digest();
 
-  const screenSizes = [
-    { width: 1920, height: 1080 }, { width: 1366, height: 768 },
-    { width: 1536, height: 864 }, { width: 1440, height: 900 },
-    { width: 1280, height: 720 },
-  ];
+  // --- OS selection (weighted like real traffic) ---
+  const osRoll = hash[0] % 100;
+  const platform: 'Win32' | 'MacIntel' | 'Linux x86_64' =
+    osRoll < 72 ? 'Win32' : osRoll < 92 ? 'MacIntel' : 'Linux x86_64';
 
-  const locales = ['en-US', 'en-GB', 'pt-BR', 'es-ES', 'fr-FR', 'de-DE', 'ru-RU', 'ja-JP'];
-  const webglVendors = ['Google Inc. (NVIDIA)', 'Google Inc. (AMD)', 'Google Inc. (Intel)'];
-  const webglRenderers = [
-    'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)',
-    'ANGLE (AMD, AMD Radeon RX 6700 XT Direct3D11 vs_5_0 ps_5_0, D3D11)',
-    'ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)',
-  ];
+  // --- Screen resolutions per OS ---
+  const resolutions: Record<string, Array<{ w: number; h: number }>> = {
+    Win32: [
+      { w: 1920, h: 1080 }, { w: 1366, h: 768 },
+      { w: 2560, h: 1440 }, { w: 1536, h: 864 }, { w: 1440, h: 900 },
+    ],
+    MacIntel: [
+      { w: 1440, h: 900 }, { w: 1680, h: 1050 },
+      { w: 1920, h: 1080 }, { w: 2560, h: 1600 },
+    ],
+    'Linux x86_64': [
+      { w: 1920, h: 1080 }, { w: 2560, h: 1440 }, { w: 1366, h: 768 },
+    ],
+  };
 
-  const screenIdx = hash[0] % screenSizes.length;
-  const screen = screenSizes[screenIdx];
+  const pool = resolutions[platform];
+  const screen = pool[hash[1] % pool.length];
+
+  // --- Viewport: screen minus realistic chrome (80-119px) ---
+  const viewport = {
+    width: screen.w,
+    height: screen.h - (80 + (hash[2] % 40)),
+  };
+
+  // --- WebGL per OS (must be coherent) ---
+  const gpus: Record<string, Array<{ vendor: string; renderer: string }>> = {
+    Win32: [
+      { vendor: 'Google Inc. (Intel)', renderer: 'ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)' },
+      { vendor: 'Google Inc. (NVIDIA)', renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)' },
+      { vendor: 'Google Inc. (AMD)', renderer: 'ANGLE (AMD, AMD Radeon RX 6600 Direct3D11 vs_5_0 ps_5_0, D3D11)' },
+    ],
+    MacIntel: [
+      { vendor: 'Apple Inc.', renderer: 'Apple M1' },
+      { vendor: 'Apple Inc.', renderer: 'Apple M2' },
+    ],
+    'Linux x86_64': [
+      { vendor: 'Mesa', renderer: 'Mesa Intel(R) UHD Graphics 620 (KBL GT2)' },
+      { vendor: 'Mesa/X.org', renderer: 'llvmpipe (LLVM 15.0.7, 256 bits)' },
+    ],
+  };
+  const webgl = gpus[platform][hash[3] % gpus[platform].length];
+
+  // --- Locale / timezone from geo ---
+  const localeByCountry: Record<string, string> = {
+    US: 'en-US', GB: 'en-GB', DE: 'de-DE', FR: 'fr-FR',
+    RU: 'ru-RU', KZ: 'ru-KZ', UA: 'uk-UA', JP: 'ja-JP',
+    BR: 'pt-BR', IN: 'en-IN', AU: 'en-AU',
+  };
+  const locale = localeByCountry[geo?.country ?? 'US'] ?? 'en-US';
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  // --- UA (Chrome version pinned to 148 — stable default) ---
+  const chromeMajor = 148;
+  const osTokens: Record<string, string> = {
+    Win32: 'Windows NT 10.0; Win64; x64',
+    MacIntel: 'Macintosh; Intel Mac OS X 10_15_7',
+    'Linux x86_64': 'X11; Linux x86_64',
+  };
+  const userAgent =
+    `Mozilla/5.0 (${osTokens[platform]}) AppleWebKit/537.36 ` +
+    `(KHTML, like Gecko) Chrome/${chromeMajor}.0.0.0 Safari/537.36`;
+
+  // --- Hardware (deviceMemory capped at 8 by Chrome) ---
+  const hwConcurrency = ([4, 6, 8, 8, 8, 12, 16] as const)[hash[4] % 7];
+  const deviceMemory = ([4, 8, 8, 8] as const)[hash[5] % 4];
+
+  // --- Fonts per OS ---
+  const fontPools: Record<string, string[]> = {
+    Win32: ['Arial', 'Calibri', 'Cambria', 'Consolas', 'Courier New', 'Georgia', 'Segoe UI', 'Tahoma'],
+    MacIntel: ['Helvetica Neue', 'San Francisco', 'Menlo', 'Monaco', 'Avenir', 'Geneva'],
+    'Linux x86_64': ['DejaVu Sans', 'DejaVu Serif', 'Liberation Sans', 'Liberation Mono', 'Ubuntu', 'Noto Sans'],
+  };
+  const fonts = fontPools[platform].slice(0, 6 + (hash[6] % 3));
 
   return {
-    userAgent: `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/1${30 + (hash[1] % 10)}.0.0.0 Safari/537.36`,
-    screen,
-    devicePixelRatio: [1, 1.25, 1.5, 2][hash[2] % 4],
-    locale: locales[hash[3] % locales.length],
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    platform: 'Win32',
-    hardwareConcurrency: [4, 8, 12, 16][hash[4] % 4],
-    deviceMemory: [4, 8, 16][hash[5] % 3],
-    maxTouchPoints: 0,
-    webgl: {
-      vendor: webglVendors[hash[6] % webglVendors.length],
-      renderer: webglRenderers[hash[6] % webglRenderers.length],
-    },
-    canvas: {
-      seed: hash.subarray(7, 11).toString('hex'),
-    },
-    fonts: ['Arial', 'Verdana', 'Times New Roman', 'Georgia', 'Trebuchet MS', 'Courier New'],
+    userAgent,
+    platform,
+    screen: { width: screen.w, height: screen.h, colorDepth: 24 as const },
+    viewport,
+    devicePixelRatio: platform === 'MacIntel' ? 2 : 1,
+    locale,
+    timezone,
+    hardwareConcurrency: hwConcurrency,
+    deviceMemory,
+    maxTouchPoints: 0 as const,
+    webgl,
+    canvas: { seed: hash.subarray(7, 15).toString('hex') },
+    fonts,
+    chromeMajor,
   };
 }
 
@@ -95,22 +155,44 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const accounts = await prisma.socialAccount.findMany({
       where: { userId: req.user!.id },
-      include: { proxy: { select: { id: true, address: true, label: true, type: true } } },
+      include: {
+        pinnedProxy: {
+          select: { id: true, address: true, label: true, type: true, carrier: true, country: true },
+        },
+      },
       orderBy: { createdAt: 'desc' },
     });
 
     // Strip encrypted cookie data from response (never send to frontend)
-    const sanitized = accounts.map(a => ({
-      ...a,
-      cookiesEncrypted: undefined,
-      cookiesIv: undefined,
-      cookiesAuthTag: undefined,
-      hasCookies: !!a.cookiesEncrypted,
-      warmupDay: a.warmupStartedAt
-        ? Math.min(a.warmupDays + 1, Math.ceil((Date.now() - new Date(a.warmupStartedAt).getTime()) / 86400000))
-        : null,
-      warmupDays: a.warmupDays,
-    }));
+    const sanitized = accounts.map((a: typeof accounts[number]) => {
+      const warmupDay = a.warmupStartedAt
+        ? Math.min(
+            (a.warmupDays ?? 10) + 1,
+            Math.ceil((Date.now() - new Date(a.warmupStartedAt).getTime()) / 86_400_000),
+          )
+        : null;
+
+      // Compute remaining days in the 14-day pin window (frontend uses this for badge)
+      const pinDaysRemaining = a.proxyPinnedAt
+        ? Math.max(0, Math.ceil(14 - (Date.now() - new Date(a.proxyPinnedAt).getTime()) / 86_400_000))
+        : null;
+
+      return {
+        ...a,
+        // strip secrets — never expose any of these
+        cookiesEncrypted: undefined,
+        cookiesIv: undefined,
+        cookiesAuthTag: undefined,
+        // computed flags
+        hasCookies: !!a.cookiesEncrypted,
+        warmupDay,
+        warmupDays: a.warmupDays,
+        pinDaysRemaining,
+        // expose proxy under both names so frontend doesn't break during rename
+        proxy: a.pinnedProxy,        // kept for legacy frontend
+        pinnedProxy: a.pinnedProxy,  // canonical
+      };
+    });
 
     res.json({ accounts: sanitized });
   } catch (err) {
@@ -391,7 +473,10 @@ router.delete('/:id', async (req: Request, res: Response) => {
 const bulkUpdateSchema = z.object({
   accountIds: z.array(z.string()).min(1),
   update: z.object({
-    pinnedProxyId: z.string().optional(),
+    // NOTE: pinnedProxyId is intentionally REMOVED here. Proxy reassignment
+    // must go through POST /bulk-proxy which enforces the carrier stability
+    // rule (validatePinChange). Allowing it here would silently bypass the
+    // 14-day pin window and carrier/country guards.
     avatarUrl: z.string().optional(),
     bannerUrl: z.string().optional(),
     bio: z.string().optional(),
@@ -503,7 +588,7 @@ router.post('/bulk-proxy', async (req: Request, res: Response) => {
     }
 
     // Phase 2: atomic write + AuditLog for every force-overridden violation.
-    await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx: typeof prisma) => {
       const now = new Date();
       for (const plan of plans) {
         if (plan.violation && force) {

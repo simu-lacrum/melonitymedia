@@ -214,6 +214,8 @@ model Task {
   bullmqJobId String?    // BullMQ job ID for tracking
   progress    Int        @default(0)  // 0-100
   error       String?
+  accountId    String?    // denormalized for fast cancel lookup (shadowban, etc.)
+  cancelReason String?    // e.g. "SHADOWBAN_SUSPECTED"
   startedAt   DateTime?
   completedAt DateTime?
   createdAt   DateTime   @default(now())
@@ -223,6 +225,7 @@ model Task {
   @@index([userId])
   @@index([userId, status])
   @@index([status])
+  @@index([accountId])
 }
 
 enum TaskType {

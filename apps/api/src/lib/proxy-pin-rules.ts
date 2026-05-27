@@ -1,4 +1,22 @@
-import type { Proxy, SocialAccount } from "@prisma/client";
+// Inline type aliases — avoid importing generated @prisma/client model types
+// directly, which may not re-export depending on Prisma version/output config.
+
+/** Subset of Proxy fields needed for pin validation. */
+interface ProxyFields {
+  id: string;
+  carrier: string | null;
+  country: string;
+  type: string;
+}
+
+/** Subset of SocialAccount fields needed for pin validation. */
+interface AccountFields {
+  id: string;
+  platform: string;
+  pinnedProxyId: string | null;
+  proxyPinnedAt: Date | null;
+  createdAt: Date;
+}
 
 export const PROXY_PIN_WINDOW_DAYS = 14;
 
@@ -30,12 +48,9 @@ export interface PinViolation {
  *  4. TikTok accounts younger than 30 days must use LTE_MOBILE proxy. Residential is rejected.
  */
 export function validatePinChange(args: {
-  account: Pick<
-    SocialAccount,
-    "id" | "platform" | "pinnedProxyId" | "proxyPinnedAt" | "createdAt"
-  >;
-  oldProxy: Pick<Proxy, "id" | "carrier" | "country" | "type"> | null;
-  newProxy: Pick<Proxy, "id" | "carrier" | "country" | "type">;
+  account: AccountFields;
+  oldProxy: ProxyFields | null;
+  newProxy: ProxyFields;
   now?: Date;
 }): PinViolation | null {
   const { account, oldProxy, newProxy } = args;

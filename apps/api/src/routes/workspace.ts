@@ -312,7 +312,7 @@ router.get('/cookies/export', async (req: Request, res: Response) => {
     }
 
     // Build JSON manifest for cookie files
-    const cookiesData = accounts.map(a => ({
+    const cookiesData = accounts.map((a: typeof accounts[number]) => ({
       username: a.username,
       platform: a.platform,
       cookiesPath: a.cookiesPath,

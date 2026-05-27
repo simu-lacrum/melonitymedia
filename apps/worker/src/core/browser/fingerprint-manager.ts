@@ -441,7 +441,8 @@ export async function applyFingerprint(page: Page, fp: AccountFingerprint): Prom
     ({ canvasSeed, webglVendor, webglRenderer, hwConcurrency, devMemory, screenObj, touchPoints }) => {
       // ── Canvas noise (deterministic per canvasSeed) ──
       const origGetContext = HTMLCanvasElement.prototype.getContext;
-      HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, ...args: [string, ...unknown[]]) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (HTMLCanvasElement.prototype as any).getContext = function (this: HTMLCanvasElement, ...args: [string, ...unknown[]]) {
         const ctx = origGetContext.apply(this, args as Parameters<typeof origGetContext>);
         if (args[0] === '2d' && ctx) {
           const origGetImageData = (ctx as CanvasRenderingContext2D).getImageData;
