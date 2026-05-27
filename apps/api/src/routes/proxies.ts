@@ -419,8 +419,8 @@ router.post('/import-from-provider', async (req: Request, res: Response) => {
           provider,
           providerExternalId: p.externalId,
           providerApiKey: encApi || null,
-          providerApiKeyIv: iv || null,
-          providerApiKeyTag: apiAuthTag || null,
+          providerApiKeyIv: iv ? new Uint8Array(iv) : null,
+          providerApiKeyTag: apiAuthTag ? new Uint8Array(apiAuthTag) : null,
           host: p.host,
           port: p.port,
           username: p.username ?? null,
@@ -447,7 +447,7 @@ router.post('/import-from-provider', async (req: Request, res: Response) => {
 router.post('/:id/rotate', async (req: Request, res: Response) => {
   try {
     const proxy = await prisma.proxy.findFirst({
-      where: { id: req.params.id, userId: req.user!.id },
+      where: { id: req.params.id as string, userId: req.user!.id },
     });
     if (!proxy) { res.status(404).json({ error: 'Прокси не найден' }); return; }
 
