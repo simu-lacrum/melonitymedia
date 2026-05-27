@@ -87,19 +87,14 @@ export async function dispatchAccountJob(args: {
     return { accountId: args.accountId, jobId: null, error: "NO_COOKIES" };
   }
 
-  const proxyUrl = buildProxyUrlWithCreds(account.pinnedProxy);
-
+  // NOTE: fingerprint, proxyUrl, and platform are intentionally NOT included
+  // in the BullMQ payload. Workers resolve them fresh from the DB via
+  // loadAccountContext(accountId) — this prevents stale-data crashes when
+  // proxy is re-pinned or fingerprint is regenerated while a job sits in
+  // the queue.
   const payload = {
     userId: args.userId,
     accountId: account.id,
-    platform: account.platform,
-    nickname: account.nickname,
-    secUid: account.secUid,
-    fingerprint: account.fingerprint,
-    proxyUrl,
-    // cookies are NOT inlined into the queue — worker reads them straight from DB
-    // via loadCookiesForAccount(accountId), keeping payloads small and
-    // leaving cookie material out of BullMQ history.
     ...args.extra,
   };
 

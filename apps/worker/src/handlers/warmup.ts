@@ -7,7 +7,7 @@
 //    - Phase 1 (passive): days 1 → 30% of total
 //    - Phase 2 (light):   next 30%
 //    - Phase 3 (active):  remaining 40%
-// 3. Day counter uses warmupDays from job data
+// 3. Day counter derived from warmupStartedAt (DB, not payload)
 // 4. Uses Patchright + ghost-cursor for human behavior
 // 5. Tracks warmup day via DB (warmupStartedAt + warmupDays)
 //
@@ -15,12 +15,12 @@
 // ─────────────────────────────────────────────────────────────────
 
 import { Job } from 'bullmq';
-import { launchStealthContext, closeBrowser, type StealthContext } from '../core/browser/patchright-launcher.js';
+import { launchStealthContext, closeBrowser } from '../core/browser/patchright-launcher.js';
 import { createPageCursor, humanClick, humanScroll, humanIdleMove } from '../core/humanity/biomouse.js';
 import { humanType, humanPressEnter } from '../core/humanity/typing-emulator.js';
 import { SocketLogger } from '../lib/socket-logger.js';
 import { prisma } from '../lib/prisma.js';
-import type { AccountFingerprint } from '../core/browser/fingerprint-manager.js';
+import { loadAccountContext } from '../lib/account-context.js';
 import type { Browser, Page } from 'patchright';
 import type { GhostCursor } from 'ghost-cursor';
 
@@ -28,15 +28,17 @@ import type { GhostCursor } from 'ghost-cursor';
 
 interface WarmupJobData {
   userId: string;
-  accountId: string;
-  platform: 'TIKTOK' | 'YOUTUBE';
-  fingerprint: AccountFingerprint;
-  proxyUrl?: string;
+  accountId: string;          // only field needed; the rest comes from the DB
   cookiesDir?: string;
-  /** Which day of warmup (1-N). Calculated from warmupStartedAt. */
+  /** Optional override of warmupDay for replays; normally derived from warmupStartedAt */
+  warmupDay?: number;
+}
+
+/** Inline context shim passed to phase helpers (replaces WarmupJobData). */
+interface WarmupPhaseContext {
   warmupDay: number;
-  /** Total warmup days for this account (3-21, default 10). */
   warmupDays: number;
+  platform: 'TIKTOK' | 'YOUTUBE';
 }
 
 // ── Warmup Comments Pool ────────────────────────────────────
@@ -56,54 +58,67 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
   let browser: Browser | null = null;
 
   try {
-    logger.info(`🔥 Прогрев аккаунта — День ${data.warmupDay}/${data.warmupDays ?? 10} (${data.platform})`);
+    const ctxAcc = await loadAccountContext(data.accountId);
 
-    // Launch browser with fingerprint
+    if (!ctxAcc.warmupStartedAt) {
+      throw new Error(
+        `Account ${data.accountId} warmup never started. ` +
+        `Call POST /api/accounts/warmup first.`,
+      );
+    }
+
+    const totalDays = ctxAcc.warmupDays;
+    const ageDays = Math.ceil(
+      (Date.now() - ctxAcc.warmupStartedAt.getTime()) / 86_400_000,
+    );
+    const warmupDay = data.warmupDay ?? Math.min(ageDays, totalDays);
+
+    logger.info(
+      `🔥 Прогрев аккаунта — День ${warmupDay}/${totalDays} (${ctxAcc.platform})`,
+    );
+
     const ctx = await launchStealthContext({
       accountId: data.accountId,
-      proxyUrl: data.proxyUrl,
+      proxyUrl: ctxAcc.proxyUrl,
       cookiesPath: data.cookiesDir ?? '/data/cookies',
-      fingerprint: data.fingerprint,
+      fingerprint: ctxAcc.fingerprint,
     });
     browser = ctx.browser;
     const page = ctx.page;
     const cursor = await createPageCursor(page);
 
-    // Navigate to platform
-    const baseUrl = data.platform === 'TIKTOK'
-      ? 'https://www.tiktok.com/foryou'
-      : 'https://www.youtube.com/shorts';
+    const baseUrl =
+      ctxAcc.platform === 'TIKTOK'
+        ? 'https://www.tiktok.com/foryou'
+        : 'https://www.youtube.com/shorts';
 
     await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(_randomDelay(3000, 5000));
 
-    // Calculate phase boundaries proportionally:
-    // Phase 1 (passive): first 30% of warmupDays
-    // Phase 2 (light):   next 30%
-    // Phase 3 (active):  remaining 40%
-    const totalDays = data.warmupDays ?? 10;
+    // Phase boundaries (proportional to total warmup days)
     const passiveEnd = Math.max(1, Math.ceil(totalDays * 0.3));
     const lightEnd = Math.max(passiveEnd + 1, Math.ceil(totalDays * 0.6));
 
-    // Route to phase-appropriate behavior
-    if (data.warmupDay <= passiveEnd) {
-      await _passiveWatching(page, cursor, data, logger, job);
-    } else if (data.warmupDay <= lightEnd) {
-      await _lightEngagement(page, cursor, data, logger, job);
+    const phaseCtx: WarmupPhaseContext = {
+      warmupDay,
+      warmupDays: totalDays,
+      platform: ctxAcc.platform,
+    };
+
+    if (warmupDay <= passiveEnd) {
+      await _passiveWatching(page, cursor, phaseCtx, logger, job);
+    } else if (warmupDay <= lightEnd) {
+      await _lightEngagement(page, cursor, phaseCtx, logger, job);
     } else {
-      await _activeEngagement(page, cursor, data, logger, job);
+      await _activeEngagement(page, cursor, phaseCtx, logger, job);
     }
 
-    logger.info(`✅ Прогрев День ${data.warmupDay}/${totalDays} завершён`);
+    logger.info(`✅ Прогрев День ${warmupDay}/${totalDays} завершён`);
 
-    // If this was the last warmup day, mark account as fully warmed up.
-    if (data.warmupDay >= totalDays) {
+    if (warmupDay >= totalDays) {
       await prisma.socialAccount.update({
         where: { id: data.accountId },
-        data: {
-          warmupCompletedAt: new Date(),
-          status: 'ALIVE',
-        },
+        data: { warmupCompletedAt: new Date(), status: 'ALIVE' },
       });
       logger.info(`🎉 Прогрев завершён! Аккаунт ${data.accountId} готов к загрузкам.`);
     }
@@ -120,6 +135,7 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
   }
 }
 
+
 // ── Day 1-3: Passive Watching ───────────────────────────────
 // Just scroll FYP, watch videos, no engagement at all.
 // New accounts that like/comment on day 1 = suspicious.
@@ -127,7 +143,7 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
 async function _passiveWatching(
   page: Page,
   cursor: Awaited<ReturnType<typeof createPageCursor>>,
-  data: WarmupJobData,
+  data: WarmupPhaseContext,
   logger: SocketLogger,
   job: Job,
 ): Promise<void> {
@@ -160,7 +176,7 @@ async function _passiveWatching(
 async function _lightEngagement(
   page: Page,
   cursor: Awaited<ReturnType<typeof createPageCursor>>,
-  data: WarmupJobData,
+  data: WarmupPhaseContext,
   logger: SocketLogger,
   job: Job,
 ): Promise<void> {
@@ -217,7 +233,7 @@ async function _lightEngagement(
 async function _activeEngagement(
   page: Page,
   cursor: Awaited<ReturnType<typeof createPageCursor>>,
-  data: WarmupJobData,
+  data: WarmupPhaseContext,
   logger: SocketLogger,
   job: Job,
 ): Promise<void> {
