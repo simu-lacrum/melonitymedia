@@ -99,9 +99,12 @@ router.post('/upload', upload.single('video'), async (req: Request, res: Respons
 // ── POST /launch — start automation task ────────────────────
 const launchSchema = z.object({
   type: z.enum(['UPLOAD', 'WARMUP', 'COOKIES', 'EDIT_PROFILE']),
-  accountIds: z.array(z.string()).min(1, 'Выберите хотя бы один аккаунт'),
-  config: z.record(z.unknown()), // mode-specific config
-  threads: z.number().int().min(1).max(20).default(3),
+  accountIds: z.array(z.string()),
+  applyToAll: z.boolean().optional().default(false),
+  config: z.any(),
+  threads: z.number().int().min(1).max(50),
+  delayMin: z.number().int().min(0),
+  delayMax: z.number().int().min(0),
 });
 
 router.post('/launch', async (req: Request, res: Response) => {
@@ -112,8 +115,21 @@ router.post('/launch', async (req: Request, res: Response) => {
       return;
     }
 
-    const { type, accountIds, config, threads } = parsed.data;
+    const { type, config, threads } = parsed.data;
     const force = req.query.force === "true" && req.user!.role === "ADMIN";
+
+    let targetAccountIds = parsed.data.accountIds;
+    if (parsed.data.applyToAll) {
+      const all = await prisma.socialAccount.findMany({
+        where: { userId: req.user!.id, status: 'ALIVE' },
+        select: { id: true },
+      });
+      targetAccountIds = all.map((a: { id: string }) => a.id);
+    }
+    if (targetAccountIds.length === 0) {
+      res.status(400).json({ error: 'Не выбрано ни одного аккаунта' });
+      return;
+    }
 
     // Verify thread limit (existing behaviour)
     const user = await prisma.user.findUnique({
@@ -129,14 +145,14 @@ router.post('/launch', async (req: Request, res: Response) => {
 
     // Derive accountId for single-account dispatches (shadowban-detector uses this)
     const accountId =
-      accountIds.length === 1 ? accountIds[0] : null;
+      targetAccountIds.length === 1 ? targetAccountIds[0] : null;
 
     // Create parent task record
     const task = await prisma.task.create({
       data: {
         userId: req.user!.id,
         type,
-        config: { ...config, accountIds, threads },
+        config: { ...config, accountIds: targetAccountIds, threads },
         accountId,
       },
     });
@@ -173,7 +189,7 @@ router.post('/launch', async (req: Request, res: Response) => {
 
     // Dispatch one job per account
     const results = await Promise.all(
-      accountIds.map(async (accountId) => {
+      targetAccountIds.map(async (accountId) => {
         const extra = await buildExtra(accountId);
         return dispatchAccountJob({
           queueName,
@@ -208,7 +224,7 @@ router.post('/launch', async (req: Request, res: Response) => {
       data: {
         bullmqJobId: results.find(r => r.jobId)!.jobId,
         status: 'PENDING',
-        config: { ...config, accountIds, threads, dispatchedJobs: results },
+        config: { ...config, accountIds: targetAccountIds, threads, dispatchedJobs: results },
       },
     });
 

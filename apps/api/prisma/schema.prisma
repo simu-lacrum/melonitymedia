@@ -190,6 +190,7 @@ model Video {
   order        Int       @default(0) // drag-n-drop sort order
   isUploaded   Boolean   @default(false)
   uploadedAt   DateTime?
+  status       VideoStatus @default(QUEUED)
   shouldDelete Boolean   @default(true) // auto-delete after upload?
   accountId    String?   // which account this video was uploaded to
   description  String?   // user-provided video description
@@ -201,6 +202,14 @@ model Video {
 
   @@index([userId])
   @@index([userId, isUploaded])
+  @@index([status])
+}
+
+enum VideoStatus {
+  QUEUED
+  PROCESSING
+  UPLOADED
+  FAILED
 }
 
 // ── Task ────────────────────────────────────────────────────

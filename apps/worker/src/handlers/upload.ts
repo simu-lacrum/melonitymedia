@@ -49,6 +49,8 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
   let uniquifiedPath: string | null = null;
 
   try {
+    await prisma.video.update({ where: { id: data.videoId }, data: { status: 'PROCESSING' } });
+
     // ── Resolve everything fresh from the DB ────────────────
     const ctxAcc = await loadAccountContext(data.accountId);
     const { platform, fingerprint, proxyUrl } = ctxAcc;
@@ -154,8 +156,10 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
 
     if (platform === 'TIKTOK') {
       await _uploadToTikTok(page, cursor, data, uniquifiedPath, logger, job, proxyUrl, fingerprint);
+    } else if (platform === 'YOUTUBE') {
+      await _uploadToYouTube(page, cursor, data, uniquifiedPath, logger, job);
     } else {
-      await _uploadToYouTubeShorts(page, cursor, data, uniquifiedPath, logger, job);
+      throw new Error(`Неизвестная платформа: ${platform}`);
     }
 
     // ── Export updated cookies ──────────────────────────────
@@ -181,6 +185,7 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
       data: {
         isUploaded: true,
         uploadedAt: new Date(),
+        status: 'UPLOADED',
         accountId: data.accountId,
       },
     });
@@ -189,6 +194,7 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
     await job.updateProgress(100);
 
   } catch (err: unknown) {
+    await prisma.video.update({ where: { id: data.videoId }, data: { status: 'FAILED' } }).catch(() => {});
     const message = err instanceof Error ? err.message : String(err);
     logger.error(`❌ Ошибка загрузки: ${message}`);
     throw err;
@@ -329,7 +335,7 @@ async function _uploadToTikTok(
 
 // ── YouTube Shorts Upload ───────────────────────────────────
 
-async function _uploadToYouTubeShorts(
+async function _uploadToYouTube(
   page: Parameters<typeof humanClick>[0],
   cursor: Awaited<ReturnType<typeof createPageCursor>>,
   data: UploadJobData,

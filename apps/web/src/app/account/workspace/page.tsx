@@ -44,7 +44,7 @@ interface Video {
   description: string;
   filepath: string | null;
   status: 'QUEUED' | 'PROCESSING' | 'UPLOADED' | 'FAILED';
-  platform: 'TIKTOK' | 'YOUTUBE_SHORTS';
+  platform: 'TIKTOK' | 'YOUTUBE';
   accountId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -201,7 +201,8 @@ export default function WorkspacePage() {
 
       await api.post('/api/workspace/launch', {
         type: typeMap[mode],
-        accountIds: selectedIds.length > 0 ? selectedIds : ['__all__'],
+        accountIds: selectedIds,
+        applyToAll: selectedIds.length === 0,
         config,
         threads,
         delayMin,

@@ -213,6 +213,7 @@ router.get('/', async (req: Request, res: Response) => {
         pinnedProxy: {
           select: { id: true, address: true, label: true, type: true, carrier: true, country: true },
         },
+        _count: { select: { videos: { where: { isUploaded: true } } } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -233,7 +234,9 @@ router.get('/', async (req: Request, res: Response) => {
 
       return {
         ...a,
-        platform: a.platform === 'YOUTUBE_SHORTS' ? 'YOUTUBE' : a.platform,
+        login: a.username ?? a.nickname ?? '(no login)',
+        videos: a._count.videos,
+        platform: a.platform,
         // strip secrets — never expose any of these
         cookiesEncrypted: undefined,
         cookiesIv: undefined,

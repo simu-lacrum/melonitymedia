@@ -34,7 +34,7 @@ interface Account {
   id: string;
   platform: 'TIKTOK' | 'YOUTUBE';
   login: string;
-  status: 'ALIVE' | 'BANNED' | 'AUTH_REQUIRED' | 'WARMING' | 'SHADOWBAN_SUSPECTED';
+  status: 'ALIVE' | 'AUTH_NEEDED' | 'BANNED' | 'EXPIRED_COOKIES' | 'SHADOWBAN_SUSPECTED' | 'WARMING_UP';
   followers: number;
   views: number;
   videos: number;
@@ -47,12 +47,13 @@ interface Account {
   updatedAt: string;
 }
 
-const STATUS_MAP = {
-  ALIVE: { label: 'Активен', variant: 'success' as const, icon: CheckCircle },
-  BANNED: { label: 'Заблокирован', variant: 'error' as const, icon: XCircle },
-  AUTH_REQUIRED: { label: 'Требуется авторизация', variant: 'warning' as const, icon: AlertTriangle },
-  WARMING: { label: 'Прогрев', variant: 'info' as const, icon: Zap },
-  SHADOWBAN_SUSPECTED: { label: 'Теневой бан', variant: 'error' as const, icon: AlertTriangle },
+const STATUS_MAP: Record<'ALIVE' | 'AUTH_NEEDED' | 'BANNED' | 'EXPIRED_COOKIES' | 'SHADOWBAN_SUSPECTED' | 'WARMING_UP', { label: string; variant: 'success'|'error'|'warning'|'info'|'neutral'; icon: any }> = {
+  ALIVE:               { label: 'Активен',          variant: 'success', icon: CheckCircle },
+  AUTH_NEEDED:         { label: 'Нужны cookies',    variant: 'warning', icon: AlertTriangle },
+  BANNED:              { label: 'Заблокирован',     variant: 'error',   icon: XCircle },
+  EXPIRED_COOKIES:     { label: 'Cookies истекли',  variant: 'warning', icon: AlertTriangle },
+  SHADOWBAN_SUSPECTED: { label: 'Подозр. shadowban',variant: 'error',   icon: AlertTriangle },
+  WARMING_UP:          { label: 'Прогрев',          variant: 'info',    icon: Zap },
 };
 
 const platformTabs = [
@@ -192,7 +193,7 @@ export default function ProfilesPage() {
   // Stat summary
   const alive = accounts.filter(a => a.status === 'ALIVE').length;
   const banned = accounts.filter(a => a.status === 'BANNED').length;
-  const authRequired = accounts.filter(a => a.status === 'AUTH_REQUIRED').length;
+  const authNeeded = accounts.filter(a => a.status === 'AUTH_NEEDED' || a.status === 'EXPIRED_COOKIES').length;
   const shadowbanned = accounts.filter(a => a.status === 'SHADOWBAN_SUSPECTED').length;
 
   const columns = [
@@ -309,7 +310,7 @@ export default function ProfilesPage() {
             <AlertTriangle className="w-5 h-5 text-warning-amber" />
           </div>
           <div>
-            <p className="text-2xl font-bold text-pure-white">{authRequired + shadowbanned}</p>
+            <p className="text-2xl font-bold text-pure-white">{authNeeded + shadowbanned}</p>
             <p className="text-xs text-muted-gray">Требуют внимания</p>
           </div>
         </Card>
@@ -424,8 +425,8 @@ export default function ProfilesPage() {
               'flex items-center gap-3 p-4 rounded-xl',
               detailAccount.status === 'ALIVE' && 'bg-success-green/5 border border-success-green/20',
               detailAccount.status === 'BANNED' && 'bg-alert-red/5 border border-alert-red/20',
-              detailAccount.status === 'AUTH_REQUIRED' && 'bg-warning-amber/5 border border-warning-amber/20',
-              detailAccount.status === 'WARMING' && 'bg-melon-pink/5 border border-melon-pink/20',
+              (detailAccount.status === 'AUTH_NEEDED' || detailAccount.status === 'EXPIRED_COOKIES') && 'bg-warning-amber/5 border border-warning-amber/20',
+              detailAccount.status === 'WARMING_UP' && 'bg-melon-pink/5 border border-melon-pink/20',
               detailAccount.status === 'SHADOWBAN_SUSPECTED' && 'bg-alert-red/5 border border-alert-red/20',
             )}>
               {(() => {
@@ -435,8 +436,8 @@ export default function ProfilesPage() {
                     <s.icon className={cn('w-5 h-5',
                       detailAccount.status === 'ALIVE' && 'text-success-green',
                       detailAccount.status === 'BANNED' && 'text-alert-red',
-                      detailAccount.status === 'AUTH_REQUIRED' && 'text-warning-amber',
-                      detailAccount.status === 'WARMING' && 'text-melon-pink',
+                      (detailAccount.status === 'AUTH_NEEDED' || detailAccount.status === 'EXPIRED_COOKIES') && 'text-warning-amber',
+                      detailAccount.status === 'WARMING_UP' && 'text-melon-pink',
                       detailAccount.status === 'SHADOWBAN_SUSPECTED' && 'text-alert-red',
                     )} />
                     <span className="text-sm font-medium text-pure-white">{s.label}</span>
