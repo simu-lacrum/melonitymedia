@@ -112,25 +112,37 @@ export default function LandingPage() {
                 </div>
               </div>
 
-              {/* Right — Architectural Visual */}
-              <div className="hidden lg:flex justify-end animate-enter delay-2">
-                <div className="relative w-full max-w-[500px] aspect-square flex items-center justify-center">
-                  <div className="absolute inset-0 border border-pure-white/[0.05] rounded-full" />
-                  <div className="absolute inset-[15%] border border-pure-white/[0.1] rounded-full border-dashed" />
-                  <div className="absolute inset-[30%] bg-surface-dark border border-pure-white/[0.1] rounded-full flex items-center justify-center shadow-2xl">
-                    <Image
-                      src="/logo.svg"
-                      alt="Melonity"
-                      width={100}
-                      height={100}
-                      priority
-                      className="opacity-90"
-                    />
+              {/* Right — Animated ASCII Art */}
+              <div className="hidden lg:flex justify-end animate-enter delay-2 w-full">
+                <div className="liquid-glass p-8 w-full max-w-[500px] aspect-square flex items-center justify-center relative group">
+                  <div className="absolute inset-0 bg-melon-pink/[0.03] opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+                  
+                  {/* ASCII Art */}
+                  <pre 
+                    className="font-mono text-[10px] sm:text-xs leading-[1.2] text-melon-pink opacity-90 text-center select-none animate-pulse" 
+                    style={{ textShadow: "0 0 15px rgba(255,20,105,0.4)" }}
+                  >
+{`  __  __      _             _ _         
+ |  \\/  | ___| | ___  _ __ (_) |_ _   _ 
+ | |\\/| |/ _ \\ |/ _ \\| '_ \\| | __| | | |
+ | |  | |  __/ | (_) | | | | | |_| |_| |
+ |_|  |_|\\___|_|\\___/|_| |_|_|\\__|\\__, |
+                                  |___/ `}
+                  </pre>
+
+                  {/* Corner Accents */}
+                  <div className="absolute top-6 left-6 w-3 h-3 border-t-2 border-l-2 border-melon-pink/40" />
+                  <div className="absolute top-6 right-6 w-3 h-3 border-t-2 border-r-2 border-melon-pink/40" />
+                  <div className="absolute bottom-6 left-6 w-3 h-3 border-b-2 border-l-2 border-melon-pink/40" />
+                  <div className="absolute bottom-6 right-6 w-3 h-3 border-b-2 border-r-2 border-melon-pink/40" />
+                  
+                  {/* Status Indicator */}
+                  <div className="absolute bottom-6 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-melon-pink animate-ping" />
+                    <span className="text-[10px] text-melon-pink font-mono tracking-widest uppercase opacity-80">
+                      System Online
+                    </span>
                   </div>
-                  {/* Nodes */}
-                  <div className="absolute top-[10%] left-[50%] -translate-x-1/2 -translate-y-1/2 w-3 h-3 bg-melon-pink rounded-sm" />
-                  <div className="absolute bottom-[20%] right-[10%] w-3 h-3 bg-pure-white rounded-sm" />
-                  <div className="absolute top-[30%] left-[10%] w-3 h-3 bg-muted-gray rounded-sm" />
                 </div>
               </div>
             </div>
