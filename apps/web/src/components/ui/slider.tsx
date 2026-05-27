@@ -18,7 +18,7 @@ const Slider = React.forwardRef<HTMLInputElement, SliderProps>(
     return (
       <div className={cn("relative w-full h-1 flex items-center group", className)}>
         {/* Track */}
-        <div className="absolute w-full h-1 liquid-glass-base rounded-full overflow-hidden">
+        <div className="absolute w-full h-1 liquid-glass rounded-full overflow-hidden">
           {/* Fill */}
           <div
             className="absolute h-full bg-gradient-to-r from-[#FF2877] to-[#FF1469]"
@@ -48,3 +48,4 @@ const Slider = React.forwardRef<HTMLInputElement, SliderProps>(
 Slider.displayName = "Slider"
 
 export { Slider }
+

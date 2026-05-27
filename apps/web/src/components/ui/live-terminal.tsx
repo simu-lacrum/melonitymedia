@@ -94,7 +94,7 @@ export function LiveTerminal({ taskId }: { taskId?: string }) {
   return (
     <motion.div
       layout
-      className={`liquid-glass-elevated flex flex-col overflow-hidden transition-all ${
+      className={`liquid-glass flex flex-col overflow-hidden transition-all ${
         expanded ? "fixed inset-4 z-50 rounded-2xl" : "h-[400px] rounded-card-base"
       }`}
     >
@@ -137,3 +137,4 @@ export function LiveTerminal({ taskId }: { taskId?: string }) {
     </motion.div>
   )
 }
+

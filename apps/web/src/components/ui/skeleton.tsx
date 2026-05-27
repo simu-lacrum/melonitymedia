@@ -8,7 +8,7 @@ function Skeleton({
   return (
     <div
       className={cn(
-        "relative overflow-hidden liquid-glass-base rounded-card-base bg-white/5",
+        "relative overflow-hidden liquid-glass rounded-card-base bg-white/5",
         className
       )}
       {...props}
@@ -19,3 +19,4 @@ function Skeleton({
 }
 
 export { Skeleton }
+

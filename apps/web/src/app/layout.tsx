@@ -1,13 +1,6 @@
 import type { Metadata } from 'next';
-import { Roboto_Flex, JetBrains_Mono } from 'next/font/google';
+import { JetBrains_Mono } from 'next/font/google';
 import './globals.css';
-
-const robotoFlex = Roboto_Flex({
-  subsets: ['latin', 'cyrillic'],
-  variable: '--font-roboto-flex',
-  axes: ['wdth', 'GRAD', 'opsz', 'slnt'],
-  display: 'swap',
-});
 
 const jetbrainsMono = JetBrains_Mono({
   subsets: ['latin', 'cyrillic'],
@@ -22,7 +15,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ru" className={`${robotoFlex.variable} ${jetbrainsMono.variable}`}>
+    <html lang="ru" className={`${jetbrainsMono.variable}`}>
       <body>{children}</body>
     </html>
   );

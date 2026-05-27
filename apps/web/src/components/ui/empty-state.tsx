@@ -12,7 +12,7 @@ export function EmptyState({ icon, title, description, action, className, ...pro
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center text-center p-12 liquid-glass-surface w-full h-full min-h-[300px]",
+        "flex flex-col items-center justify-center text-center p-12 liquid-glass w-full h-full min-h-[300px]",
         className
       )}
       {...props}
@@ -24,3 +24,4 @@ export function EmptyState({ icon, title, description, action, className, ...pro
     </div>
   )
 }
+

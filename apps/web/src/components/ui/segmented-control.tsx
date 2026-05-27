@@ -13,7 +13,7 @@ export interface SegmentedControlProps {
 
 export function SegmentedControl({ segments, activeSegment, onChange, className }: SegmentedControlProps) {
   return (
-    <div className={cn("liquid-glass-base flex items-center p-1 rounded-pill w-full", className)}>
+    <div className={cn("liquid-glass flex items-center p-1 rounded-pill w-full", className)}>
       {segments.map((segment) => {
         const isActive = activeSegment === segment.id
         return (
@@ -28,7 +28,7 @@ export function SegmentedControl({ segments, activeSegment, onChange, className 
             {isActive && (
               <motion.div
                 layoutId="activeSegment"
-                className="absolute inset-0 liquid-glass-elevated bg-melon-tint rounded-pill -z-10"
+                className="absolute inset-0 liquid-glass bg-melon-tint rounded-pill -z-10"
                 transition={{ type: "spring", stiffness: 300, damping: 25 }}
               />
             )}
@@ -44,3 +44,4 @@ export function SegmentedControl({ segments, activeSegment, onChange, className 
     </div>
   )
 }
+

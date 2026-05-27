@@ -22,7 +22,7 @@ export function Stepper({ steps, currentStep, className }: StepperProps) {
               className={cn(
                 "flex items-center justify-center w-3 h-3 rounded-full transition-colors",
                 isCompleted ? "bg-melon-pink text-white w-5 h-5" : 
-                isActive ? "bg-melon-pink" : "liquid-glass-base"
+                isActive ? "bg-melon-pink" : "liquid-glass"
               )}
             >
               {isCompleted && <Check className="w-3 h-3" strokeWidth={3} />}
@@ -41,3 +41,4 @@ export function Stepper({ steps, currentStep, className }: StepperProps) {
     </div>
   )
 }
+

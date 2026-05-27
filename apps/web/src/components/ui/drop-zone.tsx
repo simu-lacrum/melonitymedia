@@ -35,7 +35,7 @@ export function DropZone({ className, onFilesDrop, ...props }: DropZoneProps) {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       className={cn(
-        "flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-card-base liquid-glass-base transition-colors cursor-pointer",
+        "flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-card-base liquid-glass transition-colors cursor-pointer",
         isDragOver
           ? "border-melon-pink bg-melon-tint"
           : "border-white/10 hover:border-white/30",
@@ -58,4 +58,5 @@ export function DropZone({ className, onFilesDrop, ...props }: DropZoneProps) {
     </div>
   )
 }
+
 
