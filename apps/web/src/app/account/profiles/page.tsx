@@ -42,6 +42,7 @@ interface Account {
   warmupDay: number | null;
   warmupDays: number;
   defaultDescription: string | null;
+  fingerprint: { deviceClass?: 'desktop' | 'mobile' } | any;
   createdAt: string;
   updatedAt: string;
 }
@@ -543,6 +544,49 @@ export default function ProfilesPage() {
                   </p>
                 </div>
               )}
+
+              <div className="flex flex-col gap-1.5 mt-2">
+                <label className="text-xs text-muted-gray">Тип устройства (Fingerprint)</label>
+                <div className="flex gap-2">
+                  {(['desktop', 'mobile'] as const).map(dc => {
+                    const currentDc = detailAccount.fingerprint?.deviceClass || 'desktop';
+                    const isSelected = currentDc === dc;
+                    return (
+                      <button
+                        key={dc}
+                        onClick={async () => {
+                          if (isSelected) return;
+                          try {
+                            const res = await api.post<{deviceClass: 'desktop' | 'mobile'}>(`/api/accounts/${detailAccount.id}/regenerate-fingerprint`, {
+                              deviceClass: dc,
+                            });
+                            // Update local state to reflect new fingerprint
+                            setDetailAccount(prev => prev ? {
+                              ...prev,
+                              fingerprint: { ...prev.fingerprint, deviceClass: res.deviceClass }
+                            } : null);
+                            fetchAccounts();
+                          } catch (err: any) {
+                            if (err.code === 'PUBLISHED_VIDEOS_EXIST') {
+                              alert('Смена типа устройства запрещена для аккаунтов с опубликованными видео (риск shadowban).');
+                            } else {
+                              alert('Ошибка при смене типа устройства: ' + (err.error || err.message));
+                            }
+                          }
+                        }}
+                        className={cn(
+                          'flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all',
+                          isSelected
+                            ? 'bg-melon-pink text-pure-white'
+                            : 'bg-surface-dark text-muted-gray hover:text-pure-white border border-transparent'
+                        )}
+                      >
+                        {dc === 'desktop' ? 'Desktop (Windows/Mac)' : 'Mobile (iOS/Android)'}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </div>
         )}

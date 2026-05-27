@@ -21,9 +21,63 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { authMiddleware } from '../middleware/auth.js';
 import crypto from 'crypto';
+import { generateMobileFingerprintForAccount, generateFingerprintForAccount } from '@melonitymedia/worker/src/core/browser/fingerprint-manager.js';
 
 const router = Router();
 router.use(authMiddleware);
+
+// POST /:id/regenerate-fingerprint
+const regenSchema = z.object({
+  deviceClass: z.enum(['desktop', 'mobile']),
+});
+
+router.post('/:id/regenerate-fingerprint', async (req: Request, res: Response) => {
+  try {
+    const parsed = regenSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.errors[0].message });
+      return;
+    }
+
+    const account = await prisma.socialAccount.findFirst({
+      where: { id: req.params.id, userId: req.user!.id },
+    });
+    if (!account) {
+      res.status(404).json({ error: 'Аккаунт не найден' });
+      return;
+    }
+
+    // GUARD: only allow fingerprint regen on accounts that haven't published yet.
+    // Changing fingerprint on a published account resets TikTok's identity correlation
+    // and triggers shadowban almost certainly.
+    const publishedCount = await prisma.video.count({
+      where: { accountId: account.id, isUploaded: true },
+    });
+    if (publishedCount > 0 && req.query.force !== 'true') {
+      res.status(409).json({
+        error: 'Аккаунт уже публиковал видео. Смена fingerprint после публикации = shadowban. Используйте ?force=true (ADMIN only) для override.',
+        code: 'PUBLISHED_VIDEOS_EXIST',
+      });
+      return;
+    }
+
+    // Generate new fingerprint based on requested deviceClass
+    const geo = { country: 'US', city: 'New York' };  // TODO: derive from pinned proxy carrier when available
+    const newFp = parsed.data.deviceClass === 'mobile'
+      ? generateMobileFingerprintForAccount(account.id, geo)
+      : generateFingerprintForAccount(account.id, geo);
+
+    await prisma.socialAccount.update({
+      where: { id: account.id },
+      data: { fingerprint: newFp as any, fingerprintStale: false },
+    });
+
+    res.json({ success: true, deviceClass: parsed.data.deviceClass });
+  } catch (err) {
+    console.error('[Accounts] Regenerate fingerprint error:', err);
+    res.status(500).json({ error: 'Ошибка при пересоздании fingerprint' });
+  }
+});
 
 // ── Cookie Encryption ───────────────────────────────────────
 // Same AES-256-GCM scheme as cookie-store.ts in worker.

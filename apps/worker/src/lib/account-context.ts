@@ -47,11 +47,17 @@ export async function loadAccountContext(accountId: string): Promise<AccountCont
     );
   }
 
+  const rawFp = acc.fingerprint as Record<string, unknown>;
+  const fingerprint = {
+    deviceClass: 'desktop',
+    ...rawFp,
+  } as unknown as AccountFingerprint;
+
   return {
     accountId: acc.id,
     userId: acc.userId,
     platform: acc.platform,
-    fingerprint: acc.fingerprint as unknown as AccountFingerprint,
+    fingerprint,
     proxyUrl: acc.pinnedProxy ? buildProxyUrl(acc.pinnedProxy) : undefined,
     carrier: acc.pinnedProxy?.carrier ?? null,
     country: acc.pinnedProxy?.country ?? 'US',

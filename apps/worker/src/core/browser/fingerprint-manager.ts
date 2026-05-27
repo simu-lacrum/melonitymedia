@@ -24,21 +24,24 @@ import type { Page } from 'patchright';
 
 // ── Types ───────────────────────────────────────────────────
 
+export type DeviceClass = 'desktop' | 'mobile';
+
 export interface AccountFingerprint {
+  deviceClass: DeviceClass;
   userAgent: string;
-  platform: "Win32" | "MacIntel" | "Linux x86_64";
+  platform: 'Win32' | 'MacIntel' | 'Linux x86_64' | 'iPhone' | 'Linux armv8l';
   screen: { width: number; height: number; colorDepth: 24 };
   viewport: { width: number; height: number };
   devicePixelRatio: number;
-  locale: string;          // BCP 47, e.g. "en-US", "ru-RU"
-  timezone: string;        // IANA, e.g. "America/Chicago"
+  locale: string;
+  timezone: string;
   hardwareConcurrency: 4 | 6 | 8 | 12 | 16;
-  deviceMemory: 4 | 8;     // Chrome caps reported deviceMemory at 8
+  deviceMemory: 4 | 8;
   maxTouchPoints: 0 | 1 | 5;
   webgl: { vendor: string; renderer: string };
-  canvas: { seed: string }; // hex
+  canvas: { seed: string };
   fonts: string[];
-  chromeMajor: number;      // must match system Chrome major version
+  chromeMajor: number;
 }
 
 // ── Consistency Validation ──────────────────────────────────
@@ -70,10 +73,12 @@ export function inspectFingerprintConsistency(
   const issues: FingerprintIssue[] = [];
 
   // 1. UA OS must match navigator.platform.
-  const uaOsMatches: Record<AccountFingerprint["platform"], RegExp> = {
+  const uaOsMatches: Record<AccountFingerprint['platform'], RegExp> = {
     Win32: /Windows NT \d+\.\d+/,
     MacIntel: /Macintosh; Intel Mac OS X/,
-    "Linux x86_64": /X11; Linux x86_64/,
+    'Linux x86_64': /X11; Linux x86_64/,
+    iPhone: /iPhone; CPU iPhone OS \d+/,
+    'Linux armv8l': /Linux; Android \d+/,
   };
   if (!uaOsMatches[fp.platform].test(fp.userAgent)) {
     issues.push({
@@ -85,11 +90,11 @@ export function inspectFingerprintConsistency(
 
   // 2. WebGL renderer must match OS family.
   const rendererOk =
-    (fp.platform === "Win32" && /ANGLE \(.+\)/.test(fp.webgl.renderer)) ||
-    (fp.platform === "MacIntel" &&
-      /(Apple|AMD Radeon Pro|Intel.+(?:Iris|UHD))/.test(fp.webgl.renderer)) ||
-    (fp.platform === "Linux x86_64" &&
-      /(Mesa|llvmpipe|NVIDIA)/i.test(fp.webgl.renderer));
+    (fp.platform === 'Win32' && /ANGLE \(.+\)/.test(fp.webgl.renderer)) ||
+    (fp.platform === 'MacIntel' && /(Apple|AMD Radeon Pro|Intel.+(?:Iris|UHD))/.test(fp.webgl.renderer)) ||
+    (fp.platform === 'Linux x86_64' && /(Mesa|llvmpipe|NVIDIA)/i.test(fp.webgl.renderer)) ||
+    (fp.platform === 'iPhone' && /Apple GPU/.test(fp.webgl.renderer)) ||
+    (fp.platform === 'Linux armv8l' && /(Adreno|Mali)/i.test(fp.webgl.renderer));
   if (!rendererOk) {
     issues.push({
       rule: "GPU_COHERENCE",
@@ -105,7 +110,7 @@ export function inspectFingerprintConsistency(
       message: `viewport.width ${fp.viewport.width} exceeds screen.width ${fp.screen.width}`,
     });
   }
-  if (fp.viewport.height > fp.screen.height - 80) {
+  if (fp.deviceClass !== 'mobile' && fp.viewport.height > fp.screen.height - 80) {
     issues.push({
       rule: "DISPLAY_GEOMETRY", severity: "fatal",
       message: `viewport.height leaves <80px chrome on screen ${fp.screen.height}`,
@@ -145,7 +150,7 @@ export function inspectFingerprintConsistency(
 
   // 6. Chrome version: internal consistency is fatal, system divergence is stale.
   const uaChromeMajor = parseInt(
-    fp.userAgent.match(/Chrome\/(\d+)/)?.[1] ?? "0",
+    fp.userAgent.match(/(?:Chrome|CriOS)\/(\d+)/)?.[1] ?? "0",
     10,
   );
   if (uaChromeMajor !== fp.chromeMajor) {
@@ -160,11 +165,17 @@ export function inspectFingerprintConsistency(
     });
   }
 
-  // 7. maxTouchPoints sanity: desktop UA -> 0.
-  if (fp.maxTouchPoints !== 0 &&
-      /Windows NT|Macintosh; Intel|X11; Linux/.test(fp.userAgent)) {
+  // 7. Touch points (0 for desktop, >0 for mobile/touch)
+  const isMobileUA = /iPhone; CPU iPhone OS|Linux; Android/.test(fp.userAgent);
+  if (isMobileUA && fp.maxTouchPoints === 0) {
     issues.push({
-      rule: "TOUCH_COHERENCE", severity: "fatal",
+      rule: 'TOUCH_COHERENCE', severity: 'fatal',
+      message: `maxTouchPoints=0 on mobile UA "${fp.userAgent.slice(0, 50)}..."`,
+    });
+  }
+  if (!isMobileUA && fp.maxTouchPoints !== 0) {
+    issues.push({
+      rule: 'TOUCH_COHERENCE', severity: 'fatal',
       message: `maxTouchPoints=${fp.maxTouchPoints} on desktop UA`,
     });
   }
@@ -358,12 +369,15 @@ export function generateFingerprintForAccount(
     Win32: "Windows NT 10.0; Win64; x64",
     MacIntel: "Macintosh; Intel Mac OS X 10_15_7",
     "Linux x86_64": "X11; Linux x86_64",
+    "iPhone": "iPhone; CPU iPhone OS 17_5 like Mac OS X",
+    "Linux armv8l": "Linux; Android 14; Pixel 8",
   };
   const userAgent =
     `Mozilla/5.0 (${osTokens[platform]}) AppleWebKit/537.36 ` +
     `(KHTML, like Gecko) Chrome/${chromeMajor}.0.0.0 Safari/537.36`;
 
   const fp: AccountFingerprint = {
+    deviceClass: 'desktop',
     userAgent,
     platform,
     screen: { width: res.w, height: res.h, colorDepth: 24 },
@@ -381,6 +395,108 @@ export function generateFingerprintForAccount(
   };
 
   // Defence in depth: never return an invalid fingerprint, even by accident.
+  validateFingerprintConsistency(fp);
+  return fp;
+}
+
+export function generateMobileFingerprintForAccount(
+  accountId: string,
+  geo: { country: string; city: string },
+): AccountFingerprint {
+  const chromeMajor = getSystemChromeMajor();
+  const seedHex = createHash('sha256').update(accountId + ':mobile').digest('hex');
+  const seed = (n: number) => parseInt(seedHex.slice(n * 4, n * 4 + 8), 16);
+
+  // 60% iOS / 40% Android — global mobile share approximation
+  const isIOS = seed(0) % 100 < 60;
+  const platform: AccountFingerprint['platform'] = isIOS ? 'iPhone' : 'Linux armv8l';
+
+  // Top-7 iPhone/Android viewport sizes (real device data, 2026)
+  const iosViewports = [
+    { w: 393, h: 852 },  // iPhone 15 Pro / 14 Pro
+    { w: 390, h: 844 },  // iPhone 14 / 13
+    { w: 430, h: 932 },  // iPhone 15 Pro Max / 14 Pro Max
+    { w: 428, h: 926 },  // iPhone 14 Plus / 13 Pro Max
+    { w: 375, h: 812 },  // iPhone 13 mini / 12 mini
+    { w: 414, h: 896 },  // iPhone 11 / XR
+    { w: 360, h: 780 },  // iPhone SE
+  ];
+  const androidViewports = [
+    { w: 412, h: 915 },  // Pixel 8 / Samsung S24
+    { w: 360, h: 800 },  // Common Android default
+    { w: 393, h: 873 },  // Pixel 7
+    { w: 384, h: 854 },  // Galaxy A53/A54
+    { w: 412, h: 892 },  // Galaxy S22/S23
+  ];
+  const vpPool = isIOS ? iosViewports : androidViewports;
+  const vp = vpPool[seed(1) % vpPool.length];
+
+  // Mobile screen === viewport (no chrome offset like desktop)
+  const screen = { width: vp.w, height: vp.h, colorDepth: 24 as const };
+  const viewport = { width: vp.w, height: vp.h };
+
+  // devicePixelRatio
+  const devicePixelRatio = isIOS ? 3 : (seed(2) % 2 === 0 ? 2.625 : 3);
+
+  // GPU
+  const iosGPUs = [
+    { vendor: 'Apple Inc.', renderer: 'Apple GPU' },
+  ];
+  const androidGPUs = [
+    { vendor: 'Qualcomm', renderer: 'Adreno (TM) 740' },
+    { vendor: 'Qualcomm', renderer: 'Adreno (TM) 730' },
+    { vendor: 'ARM', renderer: 'Mali-G715' },
+    { vendor: 'ARM', renderer: 'Mali-G710' },
+  ];
+  const gpuPool = isIOS ? iosGPUs : androidGPUs;
+  const webgl = gpuPool[seed(3) % gpuPool.length];
+
+  // Locale + timezone — same logic as desktop generator
+  const localeByCountry: Record<string, string> = {
+    US: 'en-US', GB: 'en-GB', DE: 'de-DE', FR: 'fr-FR',
+    RU: 'ru-RU', KZ: 'ru-KZ', UA: 'uk-UA', JP: 'ja-JP',
+    BR: 'pt-BR', IN: 'en-IN', AU: 'en-AU',
+  };
+  const timezoneByCity: Record<string, string> = {
+    'New York': 'America/New_York', 'Chicago': 'America/Chicago',
+    'Los Angeles': 'America/Los_Angeles', 'Houston': 'America/Chicago',
+    'Moscow': 'Europe/Moscow', 'Almaty': 'Asia/Almaty',
+    'Berlin': 'Europe/Berlin', 'London': 'Europe/London',
+    'Paris': 'Europe/Paris', 'Tokyo': 'Asia/Tokyo',
+  };
+  const locale = localeByCountry[geo.country] ?? 'en-US';
+  const timezone = timezoneByCity[geo.city] ?? 'America/Chicago';
+
+  // Mobile UA. CRITICAL: must match TikTok's BytedanceWebview / musical_ly UA detection.
+  // For our case (Patchright in browser mode, not in-app), we use mobile Chrome UA.
+  // TikTok will route us to m.tiktok.com instead of www.tiktok.com — that's expected.
+  const iosUA =
+    `Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) ` +
+    `AppleWebKit/605.1.15 (KHTML, like Gecko) ` +
+    `CriOS/${chromeMajor}.0.0.0 Mobile/15E148 Safari/604.1`;
+  const androidUA =
+    `Mozilla/5.0 (Linux; Android 14; Pixel 8) ` +
+    `AppleWebKit/537.36 (KHTML, like Gecko) ` +
+    `Chrome/${chromeMajor}.0.0.0 Mobile Safari/537.36`;
+
+  const fp: AccountFingerprint = {
+    deviceClass: 'mobile',
+    userAgent: isIOS ? iosUA : androidUA,
+    platform,
+    screen,
+    viewport,
+    devicePixelRatio,
+    locale,
+    timezone,
+    hardwareConcurrency: ([6, 8, 8] as const)[seed(4) % 3],
+    deviceMemory: ([4, 8] as const)[seed(5) % 2],
+    maxTouchPoints: 5,  // mobile always reports 5
+    webgl,
+    canvas: { seed: seedHex.slice(0, 16) },
+    fonts: pickMobileFonts(platform, seed(6)),
+    chromeMajor,
+  };
+
   validateFingerprintConsistency(fp);
   return fp;
 }
@@ -410,6 +526,12 @@ function pickFonts(
   // Pick a 6-8 font subset deterministically.
   const count = 6 + (seed % 3);
   return pool.slice(0, count);
+}
+
+function pickMobileFonts(platform: AccountFingerprint['platform'], seed: number): string[] {
+  const iosFonts = ['-apple-system', 'BlinkMacSystemFont', 'San Francisco', 'Helvetica Neue', 'Helvetica'];
+  const androidFonts = ['Roboto', 'sans-serif', 'Droid Sans', 'Noto Sans'];
+  return platform === 'iPhone' ? iosFonts : androidFonts;
 }
 
 // ── Apply Fingerprint via CDP ───────────────────────────────
@@ -448,20 +570,34 @@ export async function applyFingerprint(page: Page, fp: AccountFingerprint): Prom
     locale: fp.locale,
   });
 
+  const isMobile = fp.deviceClass === 'mobile';
+
   // Screen metrics
   await cdp.send('Emulation.setDeviceMetricsOverride', {
     width: fp.viewport.width,
     height: fp.viewport.height,
     deviceScaleFactor: fp.devicePixelRatio,
-    mobile: false,
+    mobile: isMobile,
     screenWidth: fp.screen.width,
     screenHeight: fp.screen.height,
   });
 
+  // Touch events emulation
+  if (isMobile) {
+    await cdp.send('Emulation.setTouchEmulationEnabled', {
+      enabled: true,
+      maxTouchPoints: fp.maxTouchPoints,
+    });
+    await cdp.send('Emulation.setEmitTouchEventsForMouse', {
+      enabled: true,
+      configuration: 'mobile',
+    });
+  }
+
   // Canvas noise + WebGL spoofing via page scripts
   const canvasSeedNum = parseInt(fp.canvas.seed, 16);
   await page.addInitScript(
-    ({ canvasSeed, webglVendor, webglRenderer, hwConcurrency, devMemory, screenObj, touchPoints }) => {
+    ({ canvasSeed, webglVendor, webglRenderer, hwConcurrency, devMemory, screenObj, touchPoints, isMobileParam }) => {
       // ── Canvas noise (deterministic per canvasSeed) ──
       const origGetContext = HTMLCanvasElement.prototype.getContext;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -522,6 +658,12 @@ export async function applyFingerprint(page: Page, fp: AccountFingerprint): Prom
       Object.defineProperty(screen, 'availHeight', { get: () => screenObj.height - 40 });
       Object.defineProperty(screen, 'colorDepth', { get: () => screenObj.colorDepth });
       Object.defineProperty(screen, 'pixelDepth', { get: () => screenObj.colorDepth });
+
+      if (isMobileParam && (navigator as any).userAgentData) {
+        Object.defineProperty((navigator as any).userAgentData, 'mobile', {
+          get: () => true,
+        });
+      }
     },
     {
       canvasSeed: canvasSeedNum,
@@ -531,6 +673,7 @@ export async function applyFingerprint(page: Page, fp: AccountFingerprint): Prom
       devMemory: fp.deviceMemory,
       screenObj: fp.screen,
       touchPoints: fp.maxTouchPoints,
+      isMobileParam: fp.deviceClass === 'mobile',
     },
   );
 
