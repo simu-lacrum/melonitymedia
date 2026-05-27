@@ -13,6 +13,7 @@ describe('inspectFingerprintConsistency', () => {
 
   function makeFp(overrides: Partial<AccountFingerprint> = {}): AccountFingerprint {
     return {
+      deviceClass: 'desktop',
       userAgent: `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${systemChrome}.0.0.0 Safari/537.36`,
       platform: 'Win32',
       screen: { width: 1920, height: 1080, colorDepth: 24 },

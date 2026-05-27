@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll, vi } from 'vitest';
 import { mockDeep, mockReset, type DeepMockProxy } from 'vitest-mock-extended';
 import type { PrismaClient } from '@prisma/client';
 
@@ -18,10 +18,14 @@ vi.mock('../lib/socket-logger.js', () => ({
   }),
 }));
 
-// Import AFTER mocks
-const { detectShadowbanForAccount } = await import('../handlers/shadowban-detector.js');
+let detectShadowbanForAccount: any;
 
 describe('detectShadowbanForAccount', () => {
+  beforeAll(async () => {
+    const module = await import('../handlers/shadowban-detector.js');
+    detectShadowbanForAccount = module.detectShadowbanForAccount;
+  });
+
   beforeEach(() => {
     mockReset(prismaMock);
   });
