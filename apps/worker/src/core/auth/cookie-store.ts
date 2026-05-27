@@ -201,8 +201,8 @@ export async function loadCookiesFromEncryptedStore(
 ): Promise<BrowserCookie[]> {
   const cachePath = path.join(cookiesDir, `${accountId}.enc.json`);
 
+  // Layer 1: disk cache (fast path)
   try {
-    // Try disk cache first (faster than DB query)
     const raw = await fs.readFile(cachePath, 'utf8');
     const { encrypted, iv, authTag } = JSON.parse(raw);
 
@@ -212,8 +212,13 @@ export async function loadCookiesFromEncryptedStore(
       Buffer.from(authTag, 'base64'),
     );
   } catch {
-    // Cache miss — caller should load from DB and write to cache
-    return [];
+    // Layer 2: DB fallback (single source of truth)
+    const fromDb = await loadCookiesForAccount(accountId);
+    if (fromDb.length > 0) {
+      // Warm the disk cache for next launch
+      await saveCookiesToDiskCache(accountId, fromDb, cookiesDir);
+    }
+    return fromDb;
   }
 }
 
@@ -243,7 +248,7 @@ export async function saveCookiesToDiskCache(
 
 // ── DB-backed Cookie Loader ─────────────────────────────────
 
-import { prisma } from '../lib/prisma.js';
+import { prisma } from '../../lib/prisma.js';
 
 /**
  * Load and decrypt cookies for an account, reading directly from Prisma.
