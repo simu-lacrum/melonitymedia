@@ -616,6 +616,10 @@ gitGraph
     commit id: "carrier stability + 24h gate + FP consistency"
     checkout main
     merge chore/docs-hardening-pass id: "merge hardening"
+    branch chore/ui-stabilization
+    commit id: "fix typescript build and radix UI polymorphism"
+    checkout main
+    merge chore/ui-stabilization id: "merge ui fixes"
 ```
 
 ### Правила
@@ -642,6 +646,7 @@ gitGraph
 | [`docs/architecture/backend-contracts.md`](docs/architecture/backend-contracts.md) | API-контракты, BullMQ payloads, Socket.io events, Fingerprint Contract, Proxy Contract |
 | [`docs/architecture/antifraud-logic.md`](docs/architecture/antifraud-logic.md) | **Подробная спецификация** всей антифрод-логики: carrier stability, shadowban detection, fingerprint consistency, cookie encryption |
 | [`docs/architecture/worker-dockerfile.md`](docs/architecture/worker-dockerfile.md) | Полная спецификация Docker-образа Worker: системные зависимости, Chrome, curl-impersonate, entrypoint.sh |
+| [`docs/CHANGELOG.md`](docs/CHANGELOG.md) | История изменений, фиксы сборок и UI-стабилизация |
 
 > 📂 Все документы из `/docs/` доступны на GitHub:  
 > [`docs/guides/`](https://github.com/simu-lacrum/melonitymedia/tree/main/docs/guides) ·

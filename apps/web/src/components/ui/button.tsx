@@ -2,6 +2,7 @@
 
 import { forwardRef, type ButtonHTMLAttributes } from 'react';
 import { Loader2 } from 'lucide-react';
+import { Slot, Slottable } from '@radix-ui/react-slot';
 import { cn } from '@/lib/utils';
 
 // ─────────────────────────────────────────────────────────────
@@ -20,7 +21,7 @@ const variants = {
 const sizes = {
   sm: 'h-8 px-3 text-sm rounded-md gap-1.5',
   md: 'h-10 px-4 text-sm rounded-lg gap-2',
-  lg: 'h-12 px-6 text-base rounded-lg gap-2.5',
+  lg: 'h-12 px-6 text-base rounded-lg gap-2.5', icon: 'h-10 w-10',
 } as const;
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -28,12 +29,14 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   size?: keyof typeof sizes;
   loading?: boolean;
   icon?: React.ReactNode;
+  asChild?: boolean;
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant = 'primary', size = 'md', loading, icon, children, disabled, ...props }, ref) => {
+  ({ className, variant = 'primary', size = 'md', loading, icon, children, disabled, asChild = false, ...props }, ref) => {
+    const Comp = asChild ? Slot : 'button';
     return (
-      <button
+      <Comp
         ref={ref}
         disabled={disabled || loading}
         className={cn(
@@ -50,10 +53,13 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         ) : icon ? (
           <span className="shrink-0">{icon}</span>
         ) : null}
-        {children}
-      </button>
+        <Slottable>{children}</Slottable>
+      </Comp>
     );
   },
 );
 
 Button.displayName = 'Button';
+
+
+

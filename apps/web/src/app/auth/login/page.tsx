@@ -4,8 +4,8 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
-import { Card } from '@/components/ui/Card';
-import { Input } from '@/components/ui/Input';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { api, ApiError } from '@/lib/api';
 
 export default function LoginPage() {

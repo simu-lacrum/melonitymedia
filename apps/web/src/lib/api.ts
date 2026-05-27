@@ -1,48 +1,30 @@
-// ─────────────────────────────────────────────────────────────
-// API Client — Typed fetch wrapper
-// All API calls go through this. Handles auth cookies
-// automatically via credentials: 'include'.
-// ─────────────────────────────────────────────────────────────
+const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
-
-export class ApiError extends Error {
-  constructor(public status: number, message: string) {
-    super(message);
-    this.name = 'ApiError';
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include', // CRITICAL for JWT cookie
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({ error: res.statusText }));
+    throw new ApiError(res.status, errBody.error ?? 'Unknown error', errBody);
   }
+  
+  return res.json();
 }
 
-async function request<T>(
-  endpoint: string,
-  options: RequestInit = {},
-): Promise<T> {
-  const url = `${API_BASE}${endpoint}`;
-
-  const res = await fetch(url, {
-    ...options,
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
-  });
-
-  const data = await res.json().catch(() => ({}));
-
-  if (!res.ok) {
-    throw new ApiError(res.status, data.error || 'Произошла ошибка');
+export class ApiError extends Error {
+  constructor(public status: number, message: string, public body: any) {
+    super(message);
   }
-
-  return data as T;
 }
 
 export const api = {
-  get: <T>(url: string) => request<T>(url),
-  post: <T>(url: string, body?: unknown) =>
-    request<T>(url, { method: 'POST', body: JSON.stringify(body) }),
-  patch: <T>(url: string, body?: unknown) =>
-    request<T>(url, { method: 'PATCH', body: JSON.stringify(body) }),
-  delete: <T>(url: string, body?: unknown) =>
-    request<T>(url, { method: 'DELETE', body: body ? JSON.stringify(body) : undefined }),
+  get: <T>(path: string) => request<T>('GET', path),
+  post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
+  patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body),
+  delete: <T>(path: string, body?: unknown) => request<T>('DELETE', path, body),
 };

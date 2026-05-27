@@ -1,28 +1,17 @@
-import { io, type Socket } from 'socket.io-client';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+import { io, Socket } from 'socket.io-client';
 
 let socket: Socket | null = null;
 
-export function connectSocket(): Socket {
+export function connectSocket() {
   if (socket?.connected) return socket;
-
-  socket = io(`${API_URL}/logs`, {
-    transports: ['websocket'],
+  socket = io(process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000', {
     withCredentials: true,
-    reconnection: true,
-    reconnectionDelay: 1000,
-    reconnectionAttempts: 10,
+    transports: ['websocket'],
   });
-
   return socket;
 }
 
-export function getSocket(): Socket | null {
-  return socket;
-}
-
-export function disconnectSocket(): void {
+export function disconnectSocket() {
   socket?.disconnect();
   socket = null;
 }
