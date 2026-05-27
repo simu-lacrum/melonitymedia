@@ -259,11 +259,9 @@ router.get('/', async (req: Request, res: Response) => {
 // ── POST /import — import with cookies (Netscape .txt or JSON)
 const importSchema = z.object({
   platform: z.enum(['TIKTOK', 'YOUTUBE']),
-  // Each account block: "username\n<cookies>" separated by blank lines
-  // Or just cookies (one account per import)
-  cookies: z.string().min(10, 'Cookies обязательны'),
-  username: z.string().optional(),
-  nickname: z.string().optional(),
+  text: z.string().optional(),
+  data: z.string().optional(),
+  cookies: z.string().optional(),
 });
 
 router.post('/import', async (req: Request, res: Response) => {
@@ -274,77 +272,140 @@ router.post('/import', async (req: Request, res: Response) => {
       return;
     }
 
-    const { platform, cookies, username, nickname } = parsed.data;
+    const { platform } = parsed.data;
+    const rawText = parsed.data.text || parsed.data.data || parsed.data.cookies || '';
 
-    // Generate account ID early for fingerprint seed
-    const accountId = crypto.randomUUID().replace(/-/g, '').substring(0, 25);
-
-    // Parse and validate cookies (Netscape or JSON format)
-    let cookieJson: string;
-    try {
-      // Try JSON first
-      JSON.parse(cookies);
-      cookieJson = cookies;
-    } catch {
-      // Try Netscape format: domain\tTRUE\t/\tTRUE\texpiry\tname\tvalue
-      const lines = cookies.split('\n').filter(l => l.trim() && !l.startsWith('#'));
-      const parsed = lines.map(line => {
-        const parts = line.split('\t');
-        if (parts.length >= 7) {
-          return {
-            domain: parts[0],
-            path: parts[2],
-            secure: parts[3] === 'TRUE',
-            expires: parseInt(parts[4]) || 0,
-            name: parts[5],
-            value: parts[6],
-          };
-        }
-        return null;
-      }).filter(Boolean);
-
-      if (parsed.length === 0) {
-        res.status(400).json({ error: 'Невалидный формат cookies (ожидается Netscape .txt или JSON)' });
-        return;
-      }
-      cookieJson = JSON.stringify(parsed);
+    const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (lines.length === 0) {
+      res.status(400).json({ error: 'Нет данных для импорта' });
+      return;
     }
 
-    // Encrypt cookies with AES-256-GCM
-    const { encrypted, iv, authTag } = encryptCookies(cookieJson);
+    const createdAccounts = [];
 
-    // Generate per-account fingerprint
-    const fingerprint = generateFingerprint(accountId);
+    for (const line of lines) {
+      let username: string | null = null;
+      let password: string | null = null;
+      let proxyPart: string | null = null;
+      let cookiesPart: string = line;
 
-    const account = await prisma.socialAccount.create({
-      data: {
-        id: accountId,
-        userId: req.user!.id,
-        platform: platform as 'TIKTOK' | 'YOUTUBE',
-        username: username?.trim() || null,
-        nickname: nickname?.trim() || null,
-        cookiesEncrypted: encrypted,
-        cookiesIv: iv,
-        cookiesAuthTag: authTag,
-        cookiesUpdatedAt: new Date(),
-        fingerprint: fingerprint as any,
-        status: 'ALIVE',
-      },
-    });
+      if (line.includes('>')) {
+        const [creds, parsedProxy, parsedCookies] = line.split('>').map(s => s.trim());
+        proxyPart = parsedProxy || null;
+        cookiesPart = parsedCookies || '';
+        
+        if (creds) {
+          const credParts = creds.split(':').map(s => s.trim());
+          username = credParts[0] || null;
+          password = credParts[1] || null;
+        }
+      }
+
+      // Generate account ID early for fingerprint seed
+      const accountId = crypto.randomUUID().replace(/-/g, '').substring(0, 25);
+
+      // Parse and validate cookies
+      let cookieJson: string;
+      try {
+        if (cookiesPart.startsWith('[') || cookiesPart.startsWith('{')) {
+          JSON.parse(cookiesPart);
+          cookieJson = cookiesPart;
+        } else {
+          // If it's a single line and not JSON, it could be Netscape format on a single line, 
+          // or just raw session ID. We'll wrap it in JSON format to be safe.
+          const parts = cookiesPart.split('\t');
+          if (parts.length >= 7) {
+            cookieJson = JSON.stringify([{
+              domain: parts[0],
+              path: parts[2],
+              secure: parts[3] === 'TRUE',
+              expires: parseInt(parts[4]) || 0,
+              name: parts[5],
+              value: parts[6],
+            }]);
+          } else {
+            cookieJson = JSON.stringify([{ name: 'sessionid', value: cookiesPart, domain: platform === 'TIKTOK' ? '.tiktok.com' : '.youtube.com' }]);
+          }
+        }
+      } catch {
+        cookieJson = JSON.stringify([{ name: 'raw', value: cookiesPart }]);
+      }
+
+      // Encrypt cookies
+      const { encrypted, iv, authTag } = encryptCookies(cookieJson);
+
+      // Handle Proxy
+      let pinnedProxyId: string | null = null;
+      if (proxyPart) {
+        let host = '', port = 0, pUser = '', pPass = '';
+        if (proxyPart.split(':').length === 4 && !proxyPart.includes(']')) {
+          const parts = proxyPart.split(':');
+          host = parts[0]; port = parseInt(parts[1], 10) || 0;
+          pUser = parts[2]; pPass = parts[3];
+        } else if (proxyPart.includes('@')) {
+          const [auth, hostPort] = proxyPart.split('@');
+          const authParts = auth.split(':');
+          pUser = authParts[0] || ''; pPass = authParts[1] || '';
+          const hpParts = hostPort.split(':');
+          host = hpParts[0]; port = parseInt(hpParts[1] || '0', 10);
+        } else {
+          const parts = proxyPart.split(':');
+          host = parts[0]; port = parseInt(parts[1] || '0', 10);
+        }
+        
+        const proxyAddress = (pUser && pPass) ? `${pUser}:${pPass}@${host}:${port}` : `${host}:${port}`;
+        
+        try {
+          const newProxy = await prisma.proxy.create({
+            data: {
+              host,
+              port,
+              username: pUser || null,
+              password: pPass || null,
+              address: proxyAddress,
+              type: 'STATIC_RESIDENTIAL',
+              isRotating: false,
+              country: 'US',
+              userId: req.user!.id,
+            }
+          });
+          pinnedProxyId = newProxy.id;
+        } catch (err) {
+          console.error('[Accounts] Failed to create proxy from import:', err);
+        }
+      }
+
+      // Generate per-account fingerprint
+      const fingerprint = generateFingerprint(accountId);
+
+      const account = await prisma.socialAccount.create({
+        data: {
+          id: accountId,
+          userId: req.user!.id,
+          platform: platform as 'TIKTOK' | 'YOUTUBE',
+          username: username,
+          password: password,
+          cookiesEncrypted: encrypted,
+          cookiesIv: iv,
+          cookiesAuthTag: authTag,
+          cookiesUpdatedAt: new Date(),
+          fingerprint: fingerprint as any,
+          pinnedProxyId,
+          proxyPinnedAt: pinnedProxyId ? new Date() : null,
+          status: 'ALIVE',
+        },
+      });
+      
+      createdAccounts.push(account);
+    }
 
     res.status(201).json({
-      account: {
-        id: account.id,
-        platform: account.platform,
-        username: account.username,
-        nickname: account.nickname,
-        hasCookies: true,
-        status: account.status,
-      },
+      success: true,
+      imported: createdAccounts.length,
     });
   } catch (err) {
     console.error('[Accounts] Import error:', err);
-    res.status(500).json({ error: 'Ошибка при импорте аккаунта' });
+    res.status(500).json({ error: 'Ошибка при импорте аккаунтов' });
   }
 });
 
