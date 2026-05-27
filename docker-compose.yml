@@ -83,6 +83,11 @@ services:
     volumes:
       - uploads:/app/uploads
       - cookies:/data/cookies
+    # Chrome sandbox requires SYS_ADMIN capability
+    cap_add:
+      - SYS_ADMIN
+    # Chrome needs adequate shared memory (default 64MB is too small)
+    shm_size: '2gb'
     # Worker needs more resources for Chrome instances
     deploy:
       resources:
