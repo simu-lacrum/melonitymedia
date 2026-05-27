@@ -229,9 +229,10 @@ export function getSystemChromeMajor(): number {
       // Ignore
     }
 
-    // Last-resort fallback for dev
-    console.warn('[Fingerprint] Could not detect Chrome version, using fallback: 148');
-    cachedChromeMajor = 148;
+    // Last-resort fallback for dev — use EXPECTED_CHROME_MAJOR env if set
+    const fallback = parseInt(process.env.EXPECTED_CHROME_MAJOR ?? '148', 10);
+    console.warn(`[Fingerprint] Could not detect Chrome version, using fallback: ${fallback}`);
+    cachedChromeMajor = fallback;
     return cachedChromeMajor;
   }
 }
