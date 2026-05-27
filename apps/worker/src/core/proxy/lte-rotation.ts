@@ -13,6 +13,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { impersonatedFetch } from '../tls/curl-impersonate-client.js';
+import { buildProxyUrl } from '../../lib/proxy-utils.js';
 
 // ── Constants ───────────────────────────────────────────────
 
@@ -141,9 +142,3 @@ export async function rotateMobileProxyIP(proxy: LTEProxy): Promise<RotationResu
 
 // ── Utility ─────────────────────────────────────────────────
 
-function buildProxyUrl(proxy: LTEProxy): string {
-  if (proxy.username && proxy.password) {
-    return `http://${proxy.username}:${proxy.password}@${proxy.host}:${proxy.port}`;
-  }
-  return `http://${proxy.host}:${proxy.port}`;
-}

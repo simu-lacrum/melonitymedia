@@ -68,15 +68,4 @@ export async function loadAccountContext(accountId: string): Promise<AccountCont
   };
 }
 
-function buildProxyUrl(p: {
-  host: string;
-  port: number;
-  username: string | null;
-  password: string | null;
-}): string {
-  const auth =
-    p.username && p.password
-      ? `${encodeURIComponent(p.username)}:${encodeURIComponent(p.password)}@`
-      : '';
-  return `http://${auth}${p.host}:${p.port}`;
-}
+import { buildProxyUrl } from './proxy-utils.js';
