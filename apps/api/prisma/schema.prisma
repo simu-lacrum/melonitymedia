@@ -151,6 +151,16 @@ model Proxy {
   rotationCooldown Int         @default(900) // seconds between rotations (15 min)
   lastRotatedAt    DateTime?   // last IP rotation timestamp
 
+  // Provider integration (optional)
+  provider             ProxyProvider @default(MANUAL)
+  providerExternalId   String?       // slotId / modemId / proxyName at provider
+  providerApiKey       String?       // encrypted; only set when provider != MANUAL
+  providerApiKeyIv     Bytes?
+  providerApiKeyTag    Bytes?
+
+  // Rotation strategy
+  rotationMode         RotationMode  @default(MANUAL)
+
   // Carrier/ASN validation
   carrier       String?        // e.g., "T-Mobile", "MTS", "Vodafone"
   country       String         @default("US")
@@ -174,6 +184,20 @@ enum ProxyType {
   LTE_MOBILE
   STATIC_RESIDENTIAL
   DATACENTER_DEPRECATED
+}
+
+enum ProxyProvider {
+  MANUAL              // user-entered host:port creds, no API
+  PROXYS_IO           // proxys.io / mobileproxy.space
+  MOBILEPROXIES_ORG   // mobileproxies.org
+  PROXYGROW           // proxygrow.com
+  ILLUSORY            // illusory.io
+}
+
+enum RotationMode {
+  MANUAL        // rotate only on explicit user trigger
+  PER_SESSION   // rotate before every browser session
+  SCHEDULED     // rotate on a cron (cooldown-respecting)
 }
 
 enum ProxyStatus {

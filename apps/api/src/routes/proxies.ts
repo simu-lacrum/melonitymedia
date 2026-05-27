@@ -5,6 +5,13 @@
 // v3 changes:
 // 1. Proxy type classification (LTE_MOBILE, STATIC_RESIDENTIAL, DATACENTER)
 // 2. Carrier/ASN tracking fields
+// ─────────────────────────────────────────────────────────────
+// Proxy Management Routes v3
+// CRUD for mobile/static proxies with carrier validation.
+//
+// v3 changes:
+// 1. Proxy type classification (LTE_MOBILE, STATIC_RESIDENTIAL, DATACENTER)
+// 2. Carrier/ASN tracking fields
 // 3. Rotation cooldown (seconds between IP rotations)
 // 4. POST /:id/validate-carrier endpoint
 // 5. host/port stored directly (no more compose/decompose)
@@ -14,6 +21,7 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { authMiddleware } from '../middleware/auth.js';
+import crypto from 'crypto';
 
 const router = Router();
 router.use(authMiddleware);
@@ -326,6 +334,169 @@ router.post('/import', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[Proxies] Import error:', err);
     res.status(500).json({ error: 'Import failed' });
+  }
+});
+
+// POST /import-from-provider — bulk import proxies from a provider's API
+const providerImportSchema = z.object({
+  provider: z.enum(['PROXYS_IO', 'MOBILEPROXIES_ORG', 'PROXYGROW', 'ILLUSORY']),
+  apiKey: z.string().min(1),
+});
+
+router.post('/import-from-provider', async (req: Request, res: Response) => {
+  try {
+    const parsed = providerImportSchema.safeParse(req.body);
+    if (!parsed.success) { res.status(400).json({ error: parsed.error.errors[0].message }); return; }
+
+    const { provider, apiKey } = parsed.data;
+
+    // Fetch proxy list from provider
+    let proxies: Array<{
+      externalId: string;
+      host: string;
+      port: number;
+      username?: string;
+      password?: string;
+      carrier?: string;
+      country?: string;
+    }> = [];
+
+    if (provider === 'PROXYS_IO') {
+      // proxys.io / mobileproxy.space
+      const r = await fetch('https://mobileproxy.space/api/v1/proxies', {
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+      });
+      if (!r.ok) { res.status(502).json({ error: `Provider API HTTP ${r.status}` }); return; }
+      const data = (await r.json()) as { data?: Array<any> };
+      proxies = (data.data ?? []).map(p => ({
+        externalId: String(p.proxy_key ?? p.id),
+        host: p.hostname ?? p.host,
+        port: Number(p.http_port ?? p.port),
+        username: p.username,
+        password: p.password,
+        carrier: p.carrier,
+        country: p.country,
+      }));
+    } else if (provider === 'MOBILEPROXIES_ORG') {
+      const r = await fetch('https://buy.mobileproxies.org/api/v1/proxies', {
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+      });
+      if (!r.ok) { res.status(502).json({ error: `Provider API HTTP ${r.status}` }); return; }
+      const data = (await r.json()) as Array<any>;
+      proxies = data.map(p => ({
+        externalId: String(p.slot_id),
+        host: p.hostname,
+        port: Number(p.http_port),
+        username: p.username,
+        password: p.password,
+        carrier: p.carrier,
+        country: p.country,
+      }));
+    } else {
+      res.status(400).json({ error: `Provider ${provider} bulk-import not yet implemented` });
+      return;
+    }
+
+    // Encrypt apiKey for storage
+    let encApi = '';
+    let iv: Buffer | null = null;
+    let apiAuthTag: Buffer | null = null;
+
+    if (process.env.MASTER_KEY) {
+        const masterKey = Buffer.from(process.env.MASTER_KEY, 'base64');
+        iv = crypto.randomBytes(12);
+        const cipher = crypto.createCipheriv('aes-256-gcm', masterKey, iv);
+        const encBuf = Buffer.concat([cipher.update(apiKey, 'utf8'), cipher.final()]);
+        encApi = encBuf.toString('base64');
+        apiAuthTag = cipher.getAuthTag();
+    }
+
+    const created: string[] = [];
+    for (const p of proxies) {
+      const proxy = await prisma.proxy.create({
+        data: {
+          userId: req.user!.id,
+          provider,
+          providerExternalId: p.externalId,
+          providerApiKey: encApi || null,
+          providerApiKeyIv: iv || null,
+          providerApiKeyTag: apiAuthTag || null,
+          host: p.host,
+          port: p.port,
+          username: p.username ?? null,
+          password: p.password ?? null,
+          address: `${p.host}:${p.port}` + (p.username ? `:${p.username}:${p.password}` : ''),
+          type: 'LTE_MOBILE',
+          isRotating: true,
+          carrier: p.carrier ?? null,
+          country: p.country ?? 'US',
+          rotationMode: 'PER_SESSION',
+        },
+      });
+      created.push(proxy.id);
+    }
+
+    res.status(201).json({ created: created.length, ids: created });
+  } catch (err) {
+    console.error('[Proxies] Provider import error:', err);
+    res.status(500).json({ error: 'Ошибка при импорте прокси от провайдера' });
+  }
+});
+
+// POST /:id/rotate — manual rotation trigger
+router.post('/:id/rotate', async (req: Request, res: Response) => {
+  try {
+    const proxy = await prisma.proxy.findFirst({
+      where: { id: req.params.id, userId: req.user!.id },
+    });
+    if (!proxy) { res.status(404).json({ error: 'Прокси не найден' }); return; }
+
+    // Cooldown enforcement
+    if (proxy.lastRotatedAt) {
+      const elapsed = Date.now() - proxy.lastRotatedAt.getTime();
+      if (elapsed < (proxy.rotationCooldown ?? 900) * 1000) {
+        const waitSec = Math.ceil(((proxy.rotationCooldown ?? 900) * 1000 - elapsed) / 1000);
+        res.status(429).json({ error: `Подождите ${waitSec}s до следующей ротации` });
+        return;
+      }
+    }
+
+    // Decrypt apiKey if needed
+    let apiKey: string | null = null;
+    if (proxy.providerApiKey && proxy.providerApiKeyIv && proxy.providerApiKeyTag && process.env.MASTER_KEY) {
+      try {
+        const masterKey = Buffer.from(process.env.MASTER_KEY, 'base64');
+        const decipher = crypto.createDecipheriv('aes-256-gcm', masterKey, proxy.providerApiKeyIv);
+        decipher.setAuthTag(proxy.providerApiKeyTag);
+        const enc = Buffer.from(proxy.providerApiKey, 'base64');
+        apiKey = Buffer.concat([decipher.update(enc), decipher.final()]).toString('utf8');
+      } catch (e) {
+        console.error('Failed to decrypt API key', e);
+      }
+    }
+
+    const { rotateProxy } = await import('../lib/proxy-rotation-bridge.js');
+    const result = await rotateProxy({
+      provider: proxy.provider as any,
+      externalId: proxy.providerExternalId,
+      apiKey,
+      rotationLink: proxy.rotationLink,
+    });
+
+    if (!result.ok) {
+      res.status(502).json({ error: result.error ?? 'Rotation failed' });
+      return;
+    }
+
+    await prisma.proxy.update({
+      where: { id: proxy.id },
+      data: { lastRotatedAt: new Date() },
+    });
+
+    res.json({ ok: true, newIp: result.newIp });
+  } catch (err) {
+    console.error('[Proxies] Rotate error:', err);
+    res.status(500).json({ error: 'Ошибка при ротации' });
   }
 });
 

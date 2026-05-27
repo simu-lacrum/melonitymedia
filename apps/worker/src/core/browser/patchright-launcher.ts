@@ -21,6 +21,8 @@ import { chromium } from 'patchright';
 import type { Browser, BrowserContext, Page } from 'patchright';
 import { loadCookiesFromEncryptedStore } from '../auth/cookie-store.js';
 import { applyFingerprint, inspectFingerprintConsistency, getSystemChromeMajor, type AccountFingerprint } from './fingerprint-manager.js';
+import { prisma } from '../../lib/prisma.js';
+import crypto from 'crypto';
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -96,6 +98,49 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
   const proxyConfig = opts.proxyUrl
     ? { server: opts.proxyUrl }
     : undefined;
+
+  // Trigger rotation if proxy is configured for per-session mode
+  if (opts.proxyUrl) {
+    try {
+      const url = new URL(opts.proxyUrl);
+      const host = url.hostname;
+      const port = parseInt(url.port || '80', 10);
+      const proxy = await prisma.proxy.findFirst({
+        where: { host, port },
+      });
+      if (proxy?.rotationMode === 'PER_SESSION') {
+        const { rotateProxy } = await import('../proxy/rotation-client.js');
+        let apiKey: string | null = null;
+        if (proxy.providerApiKey && proxy.providerApiKeyIv && proxy.providerApiKeyTag && process.env.MASTER_KEY) {
+          try {
+            const masterKey = Buffer.from(process.env.MASTER_KEY, 'base64');
+            const decipher = crypto.createDecipheriv('aes-256-gcm', masterKey, proxy.providerApiKeyIv);
+            decipher.setAuthTag(proxy.providerApiKeyTag);
+            const enc = Buffer.from(proxy.providerApiKey, 'base64');
+            apiKey = Buffer.concat([decipher.update(enc), decipher.final()]).toString('utf8');
+          } catch (e) {
+            console.error('[Patchright] Failed to decrypt API key', e);
+          }
+        }
+        const r = await rotateProxy({
+          provider: proxy.provider as any,
+          externalId: proxy.providerExternalId,
+          apiKey,
+          rotationLink: proxy.rotationLink,
+        });
+        if (r.ok) {
+          await prisma.proxy.update({ where: { id: proxy.id }, data: { lastRotatedAt: new Date() } });
+          console.log(`[patchright-launcher] rotation triggered, new IP: ${r.newIp || 'unknown'}`);
+          // give the modem 5s to settle on new IP
+          await new Promise(res => setTimeout(res, 5000));
+        } else {
+          console.warn(`[patchright-launcher] per-session rotation failed: ${r.error}`);
+        }
+      }
+    } catch (e) {
+      console.warn(`[Patchright] Error processing per-session rotation:`, e);
+    }
+  }
 
   const browser = await chromium.launch({
     channel: 'chrome',        // CRITICAL: use system Chrome, not bundled Chromium

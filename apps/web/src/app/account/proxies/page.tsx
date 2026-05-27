@@ -46,10 +46,15 @@ interface ProxyFormData {
   username: string;
   password: string;
   rotationLink: string;
+  provider: 'MANUAL' | 'PROXYS_IO' | 'MOBILEPROXIES_ORG' | 'PROXYGROW' | 'ILLUSORY';
+  providerApiKey: string;
+  providerExternalId: string;
+  rotationMode: 'MANUAL' | 'PER_SESSION' | 'SCHEDULED';
 }
 
 const EMPTY_FORM: ProxyFormData = {
   name: '', host: '', port: '', username: '', password: '', rotationLink: '',
+  provider: 'MANUAL', providerApiKey: '', providerExternalId: '', rotationMode: 'MANUAL',
 };
 
 export default function ProxiesPage() {
@@ -61,11 +66,12 @@ export default function ProxiesPage() {
   const [form, setForm] = useState<ProxyFormData>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
+  const [rotating, setRotating] = useState<string | null>(null);
   const [deleteModal, setDeleteModal] = useState(false);
   
   // Import state
   const [importDrawerOpen, setImportDrawerOpen] = useState(false);
-  const [importMode, setImportMode] = useState<'manual' | 'proxys_io'>('manual');
+  const [importMode, setImportMode] = useState<'manual' | 'PROXYS_IO' | 'MOBILEPROXIES_ORG' | 'PROXYGROW' | 'ILLUSORY'>('manual');
   const [importData, setImportData] = useState('');
   const [importApiKey, setImportApiKey] = useState('');
   const [importing, setImporting] = useState(false);
@@ -101,6 +107,10 @@ export default function ProxiesPage() {
       username: proxy.username,
       password: proxy.password,
       rotationLink: proxy.rotationLink || '',
+      provider: (proxy as any).provider || 'MANUAL',
+      providerApiKey: '', // hide API key
+      providerExternalId: (proxy as any).providerExternalId || '',
+      rotationMode: (proxy as any).rotationMode || 'MANUAL',
     });
     setDrawerOpen(true);
   };
@@ -154,17 +164,25 @@ export default function ProxiesPage() {
   const handleImport = async () => {
     setImporting(true);
     try {
-      await api.post('/api/proxies/import', {
-        mode: importMode,
-        data: importData,
-        apiKey: importApiKey,
-        type: 'STATIC_RESIDENTIAL'
-      });
+      if (importMode === 'manual') {
+        await api.post('/api/proxies/import', {
+          mode: 'manual',
+          data: importData,
+          type: 'STATIC_RESIDENTIAL'
+        });
+      } else {
+        await api.post('/api/proxies/import-from-provider', {
+          provider: importMode,
+          apiKey: importApiKey,
+        });
+      }
       setImportDrawerOpen(false);
       setImportData('');
+      setImportApiKey('');
       fetchProxies();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Import error:', err);
+      alert(err?.response?.data?.error ?? 'Ошибка импорта');
     } finally {
       setImporting(false);
     }
@@ -242,6 +260,25 @@ export default function ProxiesPage() {
       label: '',
       render: (item: Proxy) => (
         <div className="flex items-center gap-1">
+          <button
+            onClick={async (e) => {
+              e.stopPropagation();
+              setRotating(item.id);
+              try {
+                const r = await api.post<{ok: boolean, newIp?: string}>(`/api/proxies/${item.id}/rotate`);
+                alert(`Новый IP: ${r.newIp ?? '(не возвращён провайдером)'}`);
+              } catch (err: any) {
+                alert(err?.response?.data?.error ?? 'Ошибка ротации');
+              }
+              setRotating(null);
+              fetchProxies();
+            }}
+            disabled={rotating === item.id}
+            className="p-1.5 text-muted-gray hover:text-blue-400 transition-colors"
+            title="Ротация IP"
+          >
+            {rotating === item.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+          </button>
           <button
             onClick={(e) => { e.stopPropagation(); handleTestProxy(item.id); }}
             className="p-1.5 text-muted-gray hover:text-melon-pink transition-colors"
@@ -363,6 +400,41 @@ export default function ProxiesPage() {
         width="440px"
       >
         <div className="flex flex-col gap-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-pure-white">Провайдер</label>
+            <select
+              value={form.provider}
+              onChange={e => setForm({ ...form, provider: e.target.value as any })}
+              className="w-full px-4 py-3 rounded-xl bg-surface-dark border border-muted-gray/20 text-pure-white text-sm"
+            >
+              <option value="MANUAL">Manual (ручной ввод)</option>
+              <option value="PROXYS_IO">proxys.io / mobileproxy.space</option>
+              <option value="MOBILEPROXIES_ORG">mobileproxies.org</option>
+              <option value="PROXYGROW">proxygrow.com</option>
+              <option value="ILLUSORY">illusory.io</option>
+            </select>
+          </div>
+
+          {form.provider !== 'MANUAL' && (
+            <>
+              <Input label="API Key" type="password" value={form.providerApiKey} onChange={e => setForm({ ...form, providerApiKey: e.target.value })} />
+              <Input label="External ID (slot/modem/proxy name)" value={form.providerExternalId} onChange={e => setForm({ ...form, providerExternalId: e.target.value })} />
+            </>
+          )}
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-pure-white">Режим ротации</label>
+            <select
+              value={form.rotationMode}
+              onChange={e => setForm({ ...form, rotationMode: e.target.value as any })}
+              className="w-full px-4 py-3 rounded-xl bg-surface-dark border border-muted-gray/20 text-pure-white text-sm"
+            >
+              <option value="MANUAL">Только по кнопке</option>
+              <option value="PER_SESSION">Перед каждой сессией</option>
+              <option value="SCHEDULED">По расписанию (cooldown)</option>
+            </select>
+          </div>
+
           <Input
             label="Название"
             placeholder="Модем #1 / МТС Москва"
@@ -434,19 +506,19 @@ export default function ProxiesPage() {
         width="440px"
       >
         <div className="flex flex-col gap-4">
-          <div className="flex items-center gap-2 mb-2 p-1 bg-muted-gray/10 rounded-lg w-fit">
-            <button
-              onClick={() => setImportMode('manual')}
-              className={`px-3 py-1.5 text-sm rounded-md transition-colors ${importMode === 'manual' ? 'bg-panel-bg text-pure-white shadow-sm' : 'text-muted-gray hover:text-pure-white'}`}
+          <div className="space-y-2 mb-2">
+            <label className="text-sm font-medium text-pure-white">Провайдер</label>
+            <select
+              value={importMode}
+              onChange={e => setImportMode(e.target.value as any)}
+              className="w-full px-4 py-3 rounded-xl bg-surface-dark border border-muted-gray/20 text-pure-white text-sm"
             >
-              Ручной ввод
-            </button>
-            <button
-              onClick={() => setImportMode('proxys_io')}
-              className={`px-3 py-1.5 text-sm rounded-md transition-colors ${importMode === 'proxys_io' ? 'bg-panel-bg text-pure-white shadow-sm' : 'text-muted-gray hover:text-pure-white'}`}
-            >
-              Proxys.io API
-            </button>
+              <option value="manual">Manual (ручной ввод)</option>
+              <option value="PROXYS_IO">proxys.io / mobileproxy.space</option>
+              <option value="MOBILEPROXIES_ORG">mobileproxies.org</option>
+              <option value="PROXYGROW">proxygrow.com</option>
+              <option value="ILLUSORY">illusory.io</option>
+            </select>
           </div>
 
           {importMode === 'manual' ? (
@@ -465,10 +537,10 @@ export default function ProxiesPage() {
           ) : (
             <>
               <p className="text-sm text-muted-gray">
-                Введите API-ключ от Proxys.io для автоматической синхронизации всех прокси.
+                Введите API-ключ от провайдера для автоматической синхронизации всех прокси.
               </p>
               <Input
-                label="API-ключ Proxys.io"
+                label="API-ключ"
                 placeholder="abcdef1234567890..."
                 value={importApiKey}
                 onChange={e => setImportApiKey(e.target.value)}
