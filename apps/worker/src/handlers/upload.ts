@@ -461,6 +461,18 @@ async function _uploadToYouTube(
     logger.warn('Не удалось подтвердить публикацию (нет confirmation text), но дошли до конца flow');
   }
 
+  // Verify Shorts detection
+  const isShorts = await page.evaluate(() => {
+    return Array.from(document.querySelectorAll('a')).some(a => a.href.includes('/shorts/')) || 
+           document.body.innerHTML.includes('/shorts/');
+  });
+  
+  if (!isShorts) {
+    logger.warn('⚠️ Видео не распознано YouTube как Shorts (в DOM нет /shorts/). Возможно, YouTube пометил его как обычное видео.');
+  } else {
+    logger.info('✅ YouTube успешно распознал видео как Shorts');
+  }
+
   logger.info('YouTube Shorts загрузка завершена ✓');
 }
 
