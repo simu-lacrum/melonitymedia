@@ -150,6 +150,8 @@ model Proxy {
   rotationLink     String?     // API URL to trigger IP rotation
   rotationCooldown Int         @default(900) // seconds between rotations (15 min)
   lastRotatedAt    DateTime?   // last IP rotation timestamp
+  lastIP           String?     // last known external IP (from rotation response or test)
+  lastIPAt         DateTime?   // when lastIP was observed
 
   // Provider integration (optional)
   provider             ProxyProvider @default(MANUAL)

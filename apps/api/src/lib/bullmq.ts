@@ -43,6 +43,12 @@ export const cookiesQueue = new Queue('cookies', {
   defaultJobOptions: DEFAULT_JOB_OPTIONS,
 });
 
+/** Execute login flow for accounts with login:pass auth */
+export const loginQueue = new Queue('login', {
+  connection: redis,
+  defaultJobOptions: DEFAULT_JOB_OPTIONS,
+});
+
 /** Edit account profiles (avatar, banner, bio) */
 export const editProfileQueue = new Queue('edit-profile', {
   connection: redis,
@@ -75,12 +81,13 @@ export const shadowbanCheckQueue = new Queue('shadowban-check', {
 
 // ── Typed Job Dispatch ──────────────────────────────────────
 
-export type QueueName = 'upload' | 'warmup' | 'cookies' | 'edit-profile' | 'analytics-cron' | 'cleanup' | 'shadowban-check';
+export type QueueName = 'upload' | 'warmup' | 'cookies' | 'login' | 'edit-profile' | 'analytics-cron' | 'cleanup' | 'shadowban-check';
 
 const QUEUES: Record<QueueName, Queue> = {
   upload: uploadQueue,
   warmup: warmupQueue,
   cookies: cookiesQueue,
+  login: loginQueue,
   'edit-profile': editProfileQueue,
   'analytics-cron': analyticsCronQueue,
   cleanup: cleanupQueue,
