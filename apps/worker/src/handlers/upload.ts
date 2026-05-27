@@ -343,73 +343,123 @@ async function _uploadToYouTube(
   logger: SocketLogger,
   job: Job,
 ): Promise<void> {
+  // Pre-flight: Shorts compatibility
+  const { inspectVideo, isShortsCompatible } = await import('../core/video/inspector.js');
+  const meta = await inspectVideo(videoPath);
+  const compat = isShortsCompatible(meta);
+  if (!compat.ok) {
+    throw new Error(`[youtube-shorts] ${compat.reason}`);
+  }
+  logger.info(`Видео Shorts-валидно: ${meta.width}x${meta.height}, ${Math.round(meta.durationSec)}s`);
+
   logger.info('Переход на YouTube Studio...');
-  await page.goto('https://studio.youtube.com/channel/videos/upload', { waitUntil: 'networkidle' });
+  await page.goto('https://studio.youtube.com/', { waitUntil: 'networkidle' });
   await page.waitForTimeout(_randomDelay(3000, 5000));
 
-  // Check auth
+  // Auth check
   const bodyText = await page.textContent('body');
   if (bodyText?.includes('Sign in') || bodyText?.includes('Войти')) {
-    throw new Error('Не удалось войти в YouTube — cookies невалидны');
+    throw new Error('Не удалось войти в YouTube Studio — cookies невалидны');
   }
-
   logger.info('Авторизация YouTube успешна');
   await job.updateProgress(45);
 
-  // Upload file
-  const fileInput = await page.locator('input[type="file"]').first();
-  await fileInput.setInputFiles(videoPath);
-  logger.info('Файл загружен на YouTube');
+  // Click CREATE button → Upload video
+  try {
+    await humanClick(page, cursor, '#upload-icon, ytcp-button#create-icon-button', { postClickDelay: 500 });
+    await page.waitForTimeout(_randomDelay(500, 1000));
+    await humanClick(page, cursor, 'tp-yt-paper-item[test-id="upload-beta"], a[test-id="upload-beta"]', { postClickDelay: 1500 });
+  } catch {
+    // Fallback: direct navigation to upload URL
+    logger.warn('CREATE button not found, fallback to direct upload URL');
+    await page.goto('https://studio.youtube.com/channel/UC/videos/upload', { waitUntil: 'networkidle' });
+  }
 
-  await page.waitForTimeout(_randomDelay(5000, 10000));
+  // File upload via hidden input
+  const fileInput = await page.locator('input[type="file"][name="Filedata"], input[type="file"]').first();
+  await fileInput.setInputFiles(videoPath);
+  logger.info('Файл загружен в Studio...');
+
+  await page.waitForTimeout(_randomDelay(6000, 12000));  // Studio needs time to ingest
   await job.updateProgress(60);
 
-  // Fill title
+  // Wait for the title input to be ready (Studio dialog opens automatically after file upload)
   try {
-    const titleSelector = '#textbox[aria-label="Add a title that describes your video"]';
-    await page.waitForSelector(titleSelector, { timeout: 10_000 });
-    await humanType(page, titleSelector, data.title, { clearBefore: true });
+    await page.waitForSelector('#textbox[aria-label*="title" i], #textbox[contenteditable="true"]', { timeout: 30_000 });
   } catch {
-    logger.warn('Не удалось заполнить заголовок YouTube');
+    throw new Error('YouTube Studio upload dialog не появился');
+  }
+
+  // Fill title with #Shorts appended
+  const titleWithShorts = /#shorts/i.test(data.title) ? data.title : `${data.title} #Shorts`;
+  try {
+    const titleInput = page.locator('#textbox[aria-label*="title" i], #textbox[contenteditable="true"]').first();
+    await titleInput.click();
+    await page.keyboard.press('Control+A');
+    await page.keyboard.press('Delete');
+    await humanType(page, '#textbox[aria-label*="title" i], #textbox[contenteditable="true"]', titleWithShorts);
+    logger.info(`Заголовок (с #Shorts): "${titleWithShorts.slice(0, 60)}..."`);
+  } catch {
+    logger.warn('Не удалось заполнить заголовок');
   }
 
   // Fill description
   try {
-    const descSelector = '#textbox[aria-label="Tell viewers about your video"]';
-    await humanType(page, descSelector, data.description, { clearBefore: true });
-  } catch {
-    logger.warn('Не удалось заполнить описание YouTube');
-  }
+    const descSelectors = '#textbox[aria-label*="description" i], div[aria-label*="Tell viewers"]';
+    const descInput = page.locator(descSelectors).first();
+    if (await descInput.count() > 0) {
+      const hashtagStr = data.hashtags?.length
+        ? '\n\n' + data.hashtags.map(h => `#${h}`).join(' ')
+        : '';
+      await humanType(page, descSelectors, `${data.description}${hashtagStr}`, { clearBefore: true });
+    }
+  } catch { /* description optional */ }
 
-  await page.waitForTimeout(_randomDelay(2000, 3000));
+  await page.waitForTimeout(_randomDelay(2000, 4000));
   await job.updateProgress(75);
 
-  // Navigate through wizard steps
+  // "Made for kids?" radio — select "No, it's not made for kids"
+  try {
+    await humanClick(page, cursor, 'tp-yt-paper-radio-button[name="VIDEO_MADE_FOR_KIDS_MFK"][aria-disabled="false"]:not([checked]), tp-yt-paper-radio-button[name="VIDEO_MADE_FOR_KIDS_NOT_MFK"]', { postClickDelay: 800 });
+  } catch {
+    logger.warn('Не удалось выбрать "Not made for kids" — продолжаем');
+  }
+
+  // Click "Next" 3 times to skip through wizard (Elements, Checks, Visibility)
   for (let step = 0; step < 3; step++) {
     try {
-      await humanClick(page, cursor, '#next-button', { postClickDelay: 1500 });
+      await humanClick(page, cursor, '#next-button:not([disabled])', { postClickDelay: 2500 });
     } catch {
+      logger.warn(`Next button step ${step} not found, continuing`);
       break;
     }
   }
 
-  // Select Public visibility
+  // Public visibility
   try {
-    await humanClick(page, cursor, 'tp-yt-paper-radio-button[name="PUBLIC"]');
+    await humanClick(page, cursor, 'tp-yt-paper-radio-button[name="PUBLIC"]', { postClickDelay: 500 });
   } catch {
-    logger.warn('Не удалось выбрать публичный доступ');
+    logger.warn('Не удалось выбрать Public');
   }
 
   // Publish
   try {
-    await humanClick(page, cursor, '#done-button', { postClickDelay: 1000 });
-    logger.info('Нажата кнопка публикации YouTube');
+    await humanClick(page, cursor, '#done-button:not([disabled])', { postClickDelay: 2000 });
+    logger.info('Нажата кнопка публикации...');
   } catch {
-    throw new Error('Не найдена кнопка публикации YouTube');
+    throw new Error('Не найдена кнопка публикации Shorts');
   }
 
-  await page.waitForTimeout(_randomDelay(10000, 15000));
+  // Wait for "Video published" confirmation
+  await page.waitForTimeout(_randomDelay(8000, 15000));
   await job.updateProgress(90);
+
+  // Verify success — look for share dialog or "Video published" text
+  const afterText = await page.textContent('body');
+  const success = /published|опубликовано|video uploaded/i.test(afterText ?? '');
+  if (!success) {
+    logger.warn('Не удалось подтвердить публикацию (нет confirmation text), но дошли до конца flow');
+  }
 
   logger.info('YouTube Shorts загрузка завершена ✓');
 }

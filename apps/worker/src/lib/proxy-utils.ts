@@ -1,9 +1,12 @@
 export function buildProxyUrl(p: {
-  host: string;
+  host?: string | null;
   port?: number | null;
   username?: string | null;
   password?: string | null;
 }): string {
+  if (!p || typeof p.host !== 'string' || !p.host.trim()) {
+    throw new Error('Proxy is required');
+  }
   let hostStr = p.host.trim();
   
   let protocol = 'http://';
