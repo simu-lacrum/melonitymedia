@@ -112,10 +112,11 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
 
 #### `POST /api/accounts/import`
 ```typescript
-// Request — cookie-based import (NOT login:password!)
+// Request — cookie-based OR login:password import
 {
   platform: "TIKTOK" | "YOUTUBE";
-  cookies: string;          // Netscape .txt format OR JSON array of cookie objects
+  cookies?: string;          // Netscape .txt format OR JSON array of cookie objects
+  loginPass?: string;        // login:password OR login:password:email:emailPass format
   username?: string;        // optional display name
   nickname?: string;        // optional @handle
 }
@@ -229,6 +230,8 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
   username?: string;
   password?: string;
   rotationLink?: string;             // URL для смены IP
+  rotationMode?: "LINK" | "PROVIDER_API";
+  provider?: "MOBILEPROXY_SPACE" | "IPROXY_ONLINE";
   type?: "LTE_MOBILE" | "STATIC_RESIDENTIAL" | "DATACENTER_DEPRECATED";
   country?: string;                  // default "US"
   carrier?: string;                  // e.g., "T-Mobile", "MTS"
@@ -252,6 +255,24 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
   warning?: string       // if datacenter ASN detected (AWS, Hetzner, OVH)
 }
 // Side-effect: saves bgpPathValid flag to Proxy record in DB
+```
+
+#### `POST /api/proxies/import-from-provider`
+```typescript
+// Request
+{
+  provider: "MOBILEPROXY_SPACE" | "IPROXY_ONLINE";
+  apiKey: string;
+  proxyIds?: string[];
+}
+// Response 201
+{ created: number }
+```
+
+#### `POST /api/proxies/:id/rotate`
+```typescript
+// Response 200
+{ success: true, message: string }
 ```
 
 ---
