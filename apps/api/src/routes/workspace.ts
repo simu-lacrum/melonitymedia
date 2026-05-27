@@ -301,7 +301,7 @@ router.post('/presets', async (req: Request, res: Response) => {
     }
 
     const preset = await prisma.preset.create({
-      data: { ...parsed.data, userId: req.user!.id },
+      data: { ...parsed.data, config: parsed.data.config as any, userId: req.user!.id as string },
     });
 
     res.status(201).json({ preset });

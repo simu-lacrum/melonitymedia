@@ -50,7 +50,7 @@ router.patch('/reorder', async (req: Request, res: Response) => {
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const video = await prisma.video.findFirst({
-      where: { id: req.params.id, userId: req.user!.id },
+      where: { id: req.params.id as string, userId: req.user!.id },
     });
 
     if (!video) {
@@ -63,7 +63,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
       fs.unlinkSync(video.filepath);
     }
 
-    await prisma.video.delete({ where: { id: req.params.id } });
+    await prisma.video.delete({ where: { id: req.params.id as string } });
     res.json({ success: true });
   } catch (err) {
     console.error('[Videos] Delete error:', err);

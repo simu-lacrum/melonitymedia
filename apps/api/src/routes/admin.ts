@@ -95,7 +95,7 @@ router.patch('/users/:id', async (req: Request, res: Response) => {
   try {
     const { maxThreads, role } = req.body;
     const user = await prisma.user.update({
-      where: { id: req.params.id },
+      where: { id: req.params.id as string },
       data: {
         ...(maxThreads !== undefined && { maxThreads }),
         ...(role !== undefined && { role }),
@@ -114,14 +114,14 @@ router.post('/users/:id/ban', async (req: Request, res: Response) => {
   try {
     // Ban user
     await prisma.user.update({
-      where: { id: req.params.id },
+      where: { id: req.params.id as string },
       data: { isBanned: true, bannedAt: new Date() },
     });
 
     // Cancel all pending/running tasks for this user
     await prisma.task.updateMany({
       where: {
-        userId: req.params.id,
+        userId: req.params.id as string,
         status: { in: ['PENDING', 'RUNNING'] },
       },
       data: { status: 'CANCELLED' },
@@ -132,7 +132,7 @@ router.post('/users/:id/ban', async (req: Request, res: Response) => {
       data: {
         userId: req.user!.id,
         action: 'user.ban',
-        details: { targetUserId: req.params.id },
+        details: { targetUserId: req.params.id as string },
         ip: req.ip,
       },
     });
