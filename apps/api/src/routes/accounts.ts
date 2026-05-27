@@ -678,11 +678,13 @@ router.post('/warmup', async (req: Request, res: Response) => {
     });
 
     // Create task for BullMQ
+    const accountId = ids.length === 1 ? ids[0] : null;
     const task = await prisma.task.create({
       data: {
         userId: req.user!.id,
         type: 'WARMUP',
         config: { accountIds: ids, threads: 3, warmupDays: days },
+        accountId,
       },
     });
 
@@ -702,11 +704,13 @@ router.post('/cookies', async (req: Request, res: Response) => {
       return;
     }
 
+    const accountId = ids.length === 1 ? ids[0] : null;
     const task = await prisma.task.create({
       data: {
         userId: req.user!.id,
         type: 'COOKIES',
         config: { accountIds: ids, threads: 3 },
+        accountId,
       },
     });
 

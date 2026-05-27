@@ -127,12 +127,17 @@ router.post('/launch', async (req: Request, res: Response) => {
       return;
     }
 
+    // Derive accountId for single-account dispatches (shadowban-detector uses this)
+    const accountId =
+      accountIds.length === 1 ? accountIds[0] : null;
+
     // Create parent task record
     const task = await prisma.task.create({
       data: {
         userId: req.user!.id,
         type,
         config: { ...config, accountIds, threads },
+        accountId,
       },
     });
 
