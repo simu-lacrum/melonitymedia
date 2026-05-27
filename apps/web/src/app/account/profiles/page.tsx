@@ -34,7 +34,7 @@ interface Account {
   id: string;
   platform: 'TIKTOK' | 'YOUTUBE';
   login: string;
-  status: 'ALIVE' | 'BANNED' | 'AUTH_REQUIRED' | 'WARMING';
+  status: 'ALIVE' | 'BANNED' | 'AUTH_REQUIRED' | 'WARMING' | 'SHADOWBAN_SUSPECTED';
   followers: number;
   views: number;
   videos: number;
@@ -52,6 +52,7 @@ const STATUS_MAP = {
   BANNED: { label: 'Заблокирован', variant: 'error' as const, icon: XCircle },
   AUTH_REQUIRED: { label: 'Требуется авторизация', variant: 'warning' as const, icon: AlertTriangle },
   WARMING: { label: 'Прогрев', variant: 'info' as const, icon: Zap },
+  SHADOWBAN_SUSPECTED: { label: 'Теневой бан', variant: 'error' as const, icon: AlertTriangle },
 };
 
 const platformTabs = [
@@ -192,6 +193,7 @@ export default function ProfilesPage() {
   const alive = accounts.filter(a => a.status === 'ALIVE').length;
   const banned = accounts.filter(a => a.status === 'BANNED').length;
   const authRequired = accounts.filter(a => a.status === 'AUTH_REQUIRED').length;
+  const shadowbanned = accounts.filter(a => a.status === 'SHADOWBAN_SUSPECTED').length;
 
   const columns = [
     {
@@ -307,8 +309,8 @@ export default function ProfilesPage() {
             <AlertTriangle className="w-5 h-5 text-warning-amber" />
           </div>
           <div>
-            <p className="text-2xl font-bold text-pure-white">{authRequired}</p>
-            <p className="text-xs text-muted-gray">Требуют авторизации</p>
+            <p className="text-2xl font-bold text-pure-white">{authRequired + shadowbanned}</p>
+            <p className="text-xs text-muted-gray">Требуют внимания</p>
           </div>
         </Card>
       </div>
@@ -424,6 +426,7 @@ export default function ProfilesPage() {
               detailAccount.status === 'BANNED' && 'bg-alert-red/5 border border-alert-red/20',
               detailAccount.status === 'AUTH_REQUIRED' && 'bg-warning-amber/5 border border-warning-amber/20',
               detailAccount.status === 'WARMING' && 'bg-melon-pink/5 border border-melon-pink/20',
+              detailAccount.status === 'SHADOWBAN_SUSPECTED' && 'bg-alert-red/5 border border-alert-red/20',
             )}>
               {(() => {
                 const s = STATUS_MAP[detailAccount.status];
@@ -434,6 +437,7 @@ export default function ProfilesPage() {
                       detailAccount.status === 'BANNED' && 'text-alert-red',
                       detailAccount.status === 'AUTH_REQUIRED' && 'text-warning-amber',
                       detailAccount.status === 'WARMING' && 'text-melon-pink',
+                      detailAccount.status === 'SHADOWBAN_SUSPECTED' && 'text-alert-red',
                     )} />
                     <span className="text-sm font-medium text-pure-white">{s.label}</span>
                   </>
