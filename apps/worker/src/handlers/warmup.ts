@@ -19,6 +19,7 @@ import { launchStealthContext, closeBrowser, type StealthContext } from '../core
 import { createPageCursor, humanClick, humanScroll, humanIdleMove } from '../core/humanity/biomouse.js';
 import { humanType, humanPressEnter } from '../core/humanity/typing-emulator.js';
 import { SocketLogger } from '../lib/socket-logger.js';
+import { prisma } from '../lib/prisma.js';
 import type { AccountFingerprint } from '../core/browser/fingerprint-manager.js';
 import type { Browser, Page } from 'patchright';
 import type { GhostCursor } from 'ghost-cursor';
@@ -94,6 +95,19 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     }
 
     logger.info(`✅ Прогрев День ${data.warmupDay}/${totalDays} завершён`);
+
+    // If this was the last warmup day, mark account as fully warmed up.
+    if (data.warmupDay >= totalDays) {
+      await prisma.socialAccount.update({
+        where: { id: data.accountId },
+        data: {
+          warmupCompletedAt: new Date(),
+          status: 'ALIVE',
+        },
+      });
+      logger.info(`🎉 Прогрев завершён! Аккаунт ${data.accountId} готов к загрузкам.`);
+    }
+
     await job.updateProgress(100);
 
   } catch (err: unknown) {
@@ -244,7 +258,7 @@ async function _activeEngagement(
     // Save (bookmark) occasionally
     if (Math.random() < 0.15 && data.platform === 'TIKTOK') {
       try {
-        await humanClick(page, cursor, '[data-e2e="undefined-icon"]', { postClickDelay: 500 });
+        await humanClick(page, cursor, '[data-e2e="browse-icon"]', { postClickDelay: 500 });
         logger.info(`  🔖 Сохранено видео ${i + 1}`);
       } catch { /* skip */ }
     }
