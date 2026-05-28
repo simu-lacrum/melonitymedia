@@ -201,6 +201,20 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
 // Override: POST /api/accounts/bulk-proxy?force=true (ADMIN only) → logs AuditLog row
 ```
 
+#### `POST /api/accounts/bulk-update`
+```typescript
+// Request — bulk update account fields
+{
+  accountIds: string[];
+  status?: string;
+  defaultDescription?: string;
+  warmupDays?: number;
+}
+
+// Response 200
+{ updated: number }
+```
+
 #### `POST /api/accounts/warmup`
 ```typescript
 // Request — start warmup curriculum (3-21 days, default 10)
@@ -279,20 +293,58 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
 
 ### Workspace (`/api/workspace`)
 
+#### `POST /api/workspace/upload`
+```typescript
+// Request — upload a single video file (multipart/form-data)
+// Form data fields:
+// - video: File
+// - description?: string
+// - hashtags?: string | string[]
+
+// Response 201
+{ video: Video }
+```
+
 #### `POST /api/workspace/launch`
 ```typescript
 // Request — dispatch job to BullMQ
 {
-  mode: "upload" | "warmup" | "cookies" | "edit-profile",
+  type: "UPLOAD" | "WARMUP" | "COOKIES" | "EDIT_PROFILE", // Matches 'type' enum
   accountIds: string[],
+  applyToAll?: boolean,
   config: UploadConfig | WarmupConfig | CookiesConfig | EditProfileConfig,
   threads: number,          // Количество параллельных потоков
   delayMin: number,         // Минимальная задержка старта (сек)
   delayMax: number          // Максимальная задержка старта (сек)
 }
 
-// Response 202
-{ success: true, data: { jobIds: string[] } }
+// Response 201
+{ 
+  task: Task,
+  dispatched: number,
+  skipped: number,
+  failures: Array<{ accountId: string, reason: string }> 
+}
+```
+
+#### `POST /api/workspace/queue/add`
+```typescript
+// Request — dynamically add videos to a running UPLOAD task
+{
+  taskId: string;
+  videoIds: string[];
+}
+
+// Response 201
+{ success: true, added: number }
+```
+
+#### `GET /api/workspace/cookies/export`
+```typescript
+// Request
+// Query params: ?accountIds=id1,id2
+// Response 200 — ZIP archive containing cookies in Netscape format
+// Content-Type: application/zip
 ```
 
 #### `GET /api/workspace/jobs`
