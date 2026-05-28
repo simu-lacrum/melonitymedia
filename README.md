@@ -224,7 +224,6 @@ MelonityMedia/
 │
 ├── docker-compose.yml          # PostgreSQL + Redis + API + Web + Worker + Cookies Volume
 ├── design.md                   # Design system reference
-├── instructions.md             # Source of Truth (ТЗ)
 ├── tsconfig.base.json          # Shared TypeScript config
 ├── .env.example                # Environment template (includes MASTER_KEY)
 └── package.json                # Root monorepo
@@ -634,11 +633,12 @@ gitGraph
 
 ---
 
-## 📚 Документация
+## 📄 Документация
 
-| Документ | Описание |
-|----------|----------|
-| [`instructions.md`](instructions.md) | Source of Truth — полное ТЗ проекта |
+В директории `docs/` и корне проекта собрана исчерпывающая документация:
+
+| Файл / Директория | Описание |
+|-------------------|----------|
 | [`design.md`](design.md) | Дизайн-система: цвета, типографика, отступы |
 | [`docs/guides/local-development.md`](docs/guides/local-development.md) | Инструкция по локальному запуску (секции 6.1-6.5: прокси → cookies → pin → warmup → залив) |
 | [`docs/guides/repository-map.md`](docs/guides/repository-map.md) | «Что где лежит» — архитектура папок, все модули |
