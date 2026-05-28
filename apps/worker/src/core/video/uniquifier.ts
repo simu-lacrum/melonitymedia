@@ -159,20 +159,27 @@ export async function uniquifyVideo(opts: UniquifyOptions): Promise<UniquifyResu
 
   transforms.push('metadata: stripped');
 
+  const ac = new AbortController();
+
   try {
     await execFileAsync('ffmpeg', args, {
       timeout: 300_000, // 5 minutes max
       maxBuffer: 10 * 1024 * 1024,
+      signal: ac.signal
     });
 
     console.log(`[Uniquifier] Created: ${outputPath}`);
     console.log(`[Uniquifier] Transforms: ${transforms.join(' | ')}`);
 
     return { outputPath, transforms };
-  } catch (err) {
+  } catch (err: any) {
     // Clean up partial output
     try { await fs.unlink(outputPath); } catch { /* ignore */ }
-    throw new Error(`FFmpeg uniquification failed: ${(err as Error).message}`);
+    
+    if (err.name === 'AbortError') {
+      throw new Error('FFmpeg process was aborted');
+    }
+    throw new Error(`FFmpeg uniquification failed: ${err.message}`);
   }
 }
 

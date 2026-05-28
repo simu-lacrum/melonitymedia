@@ -29,7 +29,7 @@ export default function ResetPasswordPage() {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, ease: "easeOut" }}
-      className="liquid-glass-elevated p-10 flex flex-col space-y-8"
+      className="liquid-glass p-10 flex flex-col space-y-8"
     >
       <div className="text-center space-y-2">
         <h1 className="text-display-md">Новый пароль</h1>
@@ -77,3 +77,4 @@ export default function ResetPasswordPage() {
     </motion.div>
   )
 }
+

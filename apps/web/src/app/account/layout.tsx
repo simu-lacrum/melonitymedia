@@ -58,7 +58,7 @@ export default function AccountLayout({
   return (
     <div className="min-h-screen flex flex-col">
       {/* Top Navigation */}
-      <header className="sticky top-0 z-50 liquid-glass-surface border-b border-white/5 px-6 h-16 flex items-center justify-between">
+      <header className="sticky top-0 z-50 liquid-glass border-b border-white/5 px-6 h-16 flex items-center justify-between">
         <div className="flex items-center space-x-8">
           <Link href="/account/dashboard" className="text-heading-md text-white">
             Melonity<span className="text-melon-pink">Media</span>
@@ -113,3 +113,4 @@ export default function AccountLayout({
     </div>
   )
 }
+

@@ -7,22 +7,95 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { SegmentedControl } from "@/components/ui/segmented-control"
 import { LiveTerminal } from "@/components/ui/live-terminal"
-import { Play, Settings2, Users } from "lucide-react"
+import { Play, Settings2, Users, Save, Download } from "lucide-react"
 
 export default function WorkspacePage() {
-  const [mode, setMode] = React.useState("warming")
+  const [mode, setMode] = React.useState("WARMUP")
   const [loading, setLoading] = React.useState(false)
+  const [presets, setPresets] = React.useState<any[]>([])
+  const [selectedPresetId, setSelectedPresetId] = React.useState<string>("")
+  const [configStr, setConfigStr] = React.useState(`{
+  "mode": "WARMUP",
+  "concurrency": 5,
+  "useRotation": true,
+  "headless": true,
+  "warmupDays": 10,
+  "hashtags": ["dota2", "dota2highlights"]
+}`)
+
+  React.useEffect(() => {
+    fetch('/api/workspace/presets', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
+      .then(r => r.json())
+      .then(data => {
+        if (data.presets) setPresets(data.presets)
+      }).catch(console.error)
+  }, [])
+
+  const handleSavePreset = async () => {
+    const name = prompt("Введите имя пресета:");
+    if (!name) return;
+    try {
+      const config = JSON.parse(configStr);
+      const res = await fetch('/api/workspace/presets', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ name, config })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPresets([data.preset, ...presets]);
+        setSelectedPresetId(data.preset.id);
+      }
+    } catch (err) {
+      alert("Ошибка сохранения: Невалидный JSON");
+    }
+  }
+
+  const handleLoadPreset = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const id = e.target.value;
+    setSelectedPresetId(id);
+    if (!id) return;
+    const preset = presets.find(p => p.id === id);
+    if (preset) {
+      setConfigStr(JSON.stringify(preset.config, null, 2));
+    }
+  }
 
   const modes = [
-    { id: "warming", label: "Прогрев" },
-    { id: "commenting", label: "Спам коммент." },
-    { id: "follow", label: "Массфолловинг" },
-    { id: "upload", label: "Автозалив" },
+    { id: "WARMUP", label: "Прогрев" },
+    { id: "COOKIES", label: "Сбор кук" },
+    { id: "EDIT_PROFILE", label: "Ред. профиля" },
+    { id: "UPLOAD", label: "Автозалив" },
   ]
 
-  const handleLaunch = () => {
+  const handleLaunch = async () => {
     setLoading(true)
-    setTimeout(() => setLoading(false), 2000)
+    try {
+      const config = JSON.parse(configStr);
+      await fetch('/api/workspace/launch', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({
+          type: mode,
+          accountIds: [], // Will be handled by applyToAll on backend for now if empty
+          applyToAll: true,
+          config,
+          threads: config.concurrency || 3,
+          delayMin: config.delays?.min || 2000,
+          delayMax: config.delays?.max || 8000
+        })
+      });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -72,24 +145,28 @@ export default function WorkspacePage() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <Label className="mb-0">Настройки (JSON)</Label>
-                  <Button variant="ghost" size="sm" className="h-8 text-text-muted">
-                    <Settings2 className="w-4 h-4 mr-2" />
-                    Расширенные
-                  </Button>
+                  <div className="flex gap-2">
+                    <select 
+                      className="bg-white/5 border border-white/10 rounded px-2 text-xs text-white"
+                      value={selectedPresetId}
+                      onChange={handleLoadPreset}
+                    >
+                      <option value="">-- Выбрать пресет --</option>
+                      {presets.map(p => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                    <Button variant="ghost" size="sm" className="h-8 text-text-muted" onClick={handleSavePreset}>
+                      <Save className="w-4 h-4 mr-2" />
+                      Сохранить пресет
+                    </Button>
+                  </div>
                 </div>
-                <div className="bg-[#0A0A0A] border border-white/10 rounded-input p-4 font-mono text-body-sm text-white/80 h-[200px] overflow-auto">
-                  {`{
-  "mode": "${mode}",
-  "concurrency": 5,
-  "useRotation": true,
-  "headless": true,
-  "capsolverEnabled": true,
-  "delays": {
-    "min": 2000,
-    "max": 8000
-  }
-}`}
-                </div>
+                <textarea
+                  className="w-full bg-[#0A0A0A] border border-white/10 rounded-input p-4 font-mono text-body-sm text-white/80 h-[250px] overflow-auto outline-none resize-none focus:border-melon-pink"
+                  value={configStr}
+                  onChange={(e) => setConfigStr(e.target.value)}
+                />
               </div>
 
               <Button

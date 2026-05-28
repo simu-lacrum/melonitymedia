@@ -196,7 +196,7 @@ export default function AccountsPage() {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 20 }}
-                  className="absolute bottom-4 left-1/2 -translate-x-1/2 liquid-glass-elevated px-6 py-3 rounded-pill flex items-center space-x-4 border border-white/10"
+                  className="absolute bottom-4 left-1/2 -translate-x-1/2 liquid-glass px-6 py-3 rounded-pill flex items-center space-x-4 border border-white/10"
                 >
                   <span className="text-body-sm font-medium">Выбрано: {selectedIds.length}</span>
                   <div className="w-[1px] h-4 bg-white/10" />
@@ -217,3 +217,4 @@ export default function AccountsPage() {
     </motion.div>
   )
 }
+

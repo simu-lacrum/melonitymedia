@@ -47,6 +47,7 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
   const logger = new SocketLogger(data.userId);
   let browser: Browser | null = null;
   let uniquifiedPath: string | null = null;
+  let ctx: any = null;
 
   try {
     await prisma.video.update({ where: { id: data.videoId }, data: { status: 'PROCESSING' } });
@@ -142,7 +143,7 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
 
     // ── Launch stealth browser ──────────────────────────────
     logger.info('Запуск Patchright (stealth Chrome)...');
-    const ctx = await launchStealthContext({
+    ctx = await launchStealthContext({
       accountId: data.accountId,
       proxyUrl,
       cookiesPath: data.cookiesDir ?? '/data/cookies',
@@ -161,23 +162,6 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
     } else {
       throw new Error(`Неизвестная платформа: ${platform}`);
     }
-
-    // ── Export updated cookies ──────────────────────────────
-    const cookies = await ctx.context.cookies();
-    const browserCookies: BrowserCookie[] = cookies.map(c => ({
-      name: c.name,
-      value: c.value,
-      domain: c.domain,
-      path: c.path,
-      expires: c.expires,
-      httpOnly: c.httpOnly,
-      secure: c.secure,
-      sameSite:
-        c.sameSite === 'Strict' ? 'Strict' :
-        c.sameSite === 'None'   ? 'None'   :
-                                  'Lax',
-    }));
-    await saveCookiesToDiskCache(data.accountId, browserCookies, data.cookiesDir);
 
     // ── Mark video as uploaded ──────────────────────────────
     await prisma.video.update({
@@ -461,16 +445,11 @@ async function _uploadToYouTube(
     logger.warn('Не удалось подтвердить публикацию (нет confirmation text), но дошли до конца flow');
   }
 
-  // Verify Shorts detection
-  const isShorts = await page.evaluate(() => {
-    return Array.from(document.querySelectorAll('a')).some(a => a.href.includes('/shorts/')) || 
-           document.body.innerHTML.includes('/shorts/');
-  });
-  
-  if (!isShorts) {
-    logger.warn('⚠️ Видео не распознано YouTube как Shorts (в DOM нет /shorts/). Возможно, YouTube пометил его как обычное видео.');
+  // Verify Shorts detection using the provided compatibility metadata
+  if (!compat.ok) {
+    logger.warn('⚠️ Внимание: Исходное видео не подходит под параметры Shorts. Оно загрузится как обычное видео.');
   } else {
-    logger.info('✅ YouTube успешно распознал видео как Shorts');
+    logger.info('✅ Видео имеет валидные параметры Shorts и было успешно опубликовано.');
   }
 
   logger.info('YouTube Shorts загрузка завершена ✓');

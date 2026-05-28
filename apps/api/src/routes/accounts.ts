@@ -61,8 +61,20 @@ router.post('/:id/regenerate-fingerprint', async (req: Request, res: Response) =
       return;
     }
 
-    // Generate new fingerprint based on requested deviceClass
-    const geo = { country: 'US', city: 'New York' };  // TODO: derive from pinned proxy carrier when available
+    let geo = { country: 'US', city: 'New York' };
+    if (account.pinnedProxyId) {
+      const proxy = await prisma.proxy.findUnique({
+        where: { id: account.pinnedProxyId },
+        select: { country: true }
+      });
+      if (proxy && proxy.country) {
+        geo.country = proxy.country;
+        if (proxy.country === 'DE') geo.city = 'Berlin';
+        else if (proxy.country === 'GB') geo.city = 'London';
+        else geo.city = '';
+      }
+    }
+    
     const newFp = parsed.data.deviceClass === 'mobile'
       ? generateMobileFingerprint(account.id, geo)
       : generateFingerprint(account.id, geo);

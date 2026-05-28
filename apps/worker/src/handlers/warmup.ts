@@ -32,6 +32,8 @@ interface WarmupJobData {
   cookiesDir?: string;
   /** Optional override of warmupDay for replays; normally derived from warmupStartedAt */
   warmupDay?: number;
+  /** Hashtags to use for warmup (e.g. ['dota2', 'gaming']) */
+  hashtags?: string[];
 }
 
 /** Inline context shim passed to phase helpers (replaces WarmupJobData). */
@@ -39,6 +41,7 @@ interface WarmupPhaseContext {
   warmupDay: number;
   warmupDays: number;
   platform: 'TIKTOK' | 'YOUTUBE';
+  hashtags: string[];
 }
 
 // ── Warmup Comments Pool ────────────────────────────────────
@@ -99,10 +102,16 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     const passiveEnd = Math.max(1, Math.ceil(totalDays * 0.3));
     const lightEnd = Math.max(passiveEnd + 1, Math.ceil(totalDays * 0.6));
 
+    // Default Dota 2 hashtags mixed with user provided hashtags
+    const userHashtags = Array.isArray(data.hashtags) ? data.hashtags : [];
+    const baseHashtags = ['dota2', 'dota', 'dotawtf', 'dota2highlights'];
+    const mergedHashtags = [...new Set([...baseHashtags, ...userHashtags])];
+
     const phaseCtx: WarmupPhaseContext = {
       warmupDay,
       warmupDays: totalDays,
       platform: ctxAcc.platform,
+      hashtags: mergedHashtags,
     };
 
     if (warmupDay <= passiveEnd) {
@@ -188,6 +197,18 @@ async function _lightEngagement(
   logger.info(`Day ${data.warmupDay}: Лёгкая активность (${watchCount} видео, like ~${Math.round(likeProb * 100)}%)`);
 
   for (let i = 0; i < watchCount; i++) {
+    // Occasionally go to a hashtag page to watch videos related to the topic
+    if (data.platform === 'TIKTOK' && Math.random() < 0.2 && data.hashtags.length > 0) {
+      const randomTag = data.hashtags[Math.floor(Math.random() * data.hashtags.length)];
+      logger.info(`  🔍 Переход по хештегу #${randomTag}`);
+      try {
+        await page.goto(`https://www.tiktok.com/tag/${randomTag}`, { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(_randomDelay(2000, 4000));
+        // Click on the first video in the tag page
+        await humanClick(page, cursor, '[data-e2e="challenge-item"] a', { postClickDelay: 2000 });
+      } catch { /* fallback to fyp if failed */ }
+    }
+
     // Watch video
     const watchTime = _randomDelay(8000, 25000);
     await page.waitForTimeout(watchTime);
@@ -246,6 +267,17 @@ async function _activeEngagement(
   logger.info(`Day ${data.warmupDay}: Активная активность (${watchCount} видео, like ~${Math.round(likeProb * 100)}%)`);
 
   for (let i = 0; i < watchCount; i++) {
+    // Navigating to hashtag pages more frequently during active engagement
+    if (data.platform === 'TIKTOK' && Math.random() < 0.3 && data.hashtags.length > 0) {
+      const randomTag = data.hashtags[Math.floor(Math.random() * data.hashtags.length)];
+      logger.info(`  🔍 Поиск и переход по хештегу #${randomTag}`);
+      try {
+        await page.goto(`https://www.tiktok.com/tag/${randomTag}`, { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(_randomDelay(2000, 4000));
+        await humanClick(page, cursor, '[data-e2e="challenge-item"] a', { postClickDelay: 2000 });
+      } catch { /* fallback to fyp if failed */ }
+    }
+
     const watchTime = _randomDelay(6000, 20000);
     await page.waitForTimeout(watchTime);
 
