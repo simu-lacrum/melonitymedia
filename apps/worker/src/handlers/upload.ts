@@ -183,6 +183,21 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
     logger.error(`❌ Ошибка загрузки: ${message}`);
     throw err;
   } finally {
+    // Save updated session cookies BEFORE closing browser (M-1 fix)
+    // Cookies like tt_webid, s_v_web_id get refreshed during sessions.
+    // Without saving them, accounts get logged out frequently.
+    if (ctx?.context) {
+      try {
+        const cookies = await ctx.context.cookies() as BrowserCookie[];
+        if (cookies.length > 0) {
+          await saveCookiesToDiskCache(data.accountId, cookies, data.cookiesDir ?? '/data/cookies');
+        }
+      } catch (cookieErr) {
+        // Non-critical — don't fail the job over cookie save
+        console.warn('[Upload] Failed to save session cookies:', cookieErr);
+      }
+    }
+
     // ALWAYS close browser and cleanup temp files
     await closeBrowser(browser);
 

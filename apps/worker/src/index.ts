@@ -8,7 +8,7 @@
 // - curl-impersonate (TLS fingerprint impersonation binary)
 // - ffmpeg (video uniquification pipeline)
 //
-// It consumes jobs from 7 BullMQ queues and dispatches them
+// It consumes jobs from 8 BullMQ queues and dispatches them
 // to the appropriate handler. All browser tasks use Patchright
 // with per-account fingerprints and cookie-only auth.
 //

@@ -180,7 +180,7 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
 // Override: PATCH /api/accounts/:id?force=true (ADMIN only) → logs AuditLog row
 ```
 
-#### `POST /api/accounts/bulk-proxy`
+#### `PATCH /api/accounts/bulk/proxy`
 ```typescript
 // Request — bulk proxy binding
 { accountIds: string[], pinnedProxyId: string }
@@ -198,10 +198,10 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
   blockedAccountIds: string[],
   details: { oldCarrier?: string, newCarrier?: string, daysRemaining?: number }
 }
-// Override: POST /api/accounts/bulk-proxy?force=true (ADMIN only) → logs AuditLog row
+// Override: PATCH /api/accounts/bulk/proxy?force=true (ADMIN only) → logs AuditLog row
 ```
 
-#### `POST /api/accounts/bulk-update`
+#### `PATCH /api/accounts/bulk`
 ```typescript
 // Request — bulk update account fields
 {
@@ -271,7 +271,7 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
 // Side-effect: saves bgpPathValid flag to Proxy record in DB
 ```
 
-#### `POST /api/proxies/import-from-provider`
+#### `POST /api/proxies/import/provider`
 ```typescript
 // Request
 {
@@ -309,7 +309,7 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
 ```typescript
 // Request — dispatch job to BullMQ
 {
-  type: "UPLOAD" | "WARMUP" | "COOKIES" | "EDIT_PROFILE", // Matches 'type' enum
+  type: "UPLOAD" | "WARMUP" | "COOKIES" | "EDIT_PROFILE" | "LOGIN", // Matches 'type' enum
   accountIds: string[],
   applyToAll?: boolean,
   config: UploadConfig | WarmupConfig | CookiesConfig | EditProfileConfig,
@@ -327,7 +327,7 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
 }
 ```
 
-#### `POST /api/workspace/queue/add`
+#### `POST /api/workspace/queue`
 ```typescript
 // Request — dynamically add videos to a running UPLOAD task
 {
@@ -693,7 +693,7 @@ Pinning policy: один аккаунт = один прокси на 14+ дне�
 //    Frequent rotations within window are themselves a signal.
 
 // Override mechanism:
-//   POST /api/accounts/bulk-proxy?force=true       (ADMIN role only)
+//   PATCH /api/accounts/bulk/proxy?force=true       (ADMIN role only)
 //   PATCH /api/accounts/:id?force=true             (ADMIN role only)
 // Every force-override writes an AuditLog row with the violation code.
 

@@ -19,11 +19,9 @@ export async function firewallMiddleware(
   res: Response,
   next: NextFunction,
 ): Promise<void> {
-  // Get real client IP (works behind nginx/load balancer)
-  const clientIp =
-    (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
-    req.socket.remoteAddress ||
-    '';
+  // Use req.ip which respects app.set('trust proxy', 1) configuration.
+  // Raw x-forwarded-for header is user-controllable and can be spoofed (M-5).
+  const clientIp = req.ip || req.socket.remoteAddress || '';
 
   try {
     const isBlocked = await redis.sismember(BLOCKED_IPS_KEY, clientIp);

@@ -13,7 +13,5 @@
   "engines": {
     "node": ">=20.0.0"
   },
-  "devDependencies": {
-    "@next/swc-wasm-nodejs": "^15.5.18"
-  }
+  "devDependencies": {}
 }

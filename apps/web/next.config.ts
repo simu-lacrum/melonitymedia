@@ -1,6 +1,8 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+  // Standalone output for Docker deployment
+  output: 'standalone',
   // Proxy API requests to the Express backend
   async rewrites() {
     return [

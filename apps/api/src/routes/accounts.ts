@@ -398,8 +398,30 @@ router.post('/:id/cookies', async (req: Request, res: Response) => {
 });
 
 // ── PATCH /:id — update single account ──────────────────────
+const patchAccountSchema = z.object({
+  username: z.string().min(1).optional(),
+  nickname: z.string().optional(),
+  bio: z.string().optional(),
+  defaultDescription: z.string().optional(),
+  avatarUrl: z.string().url().optional(),
+  bannerUrl: z.string().url().optional(),
+  pinnedProxyId: z.string().optional(),
+  status: z.enum([
+    'ACTIVE', 'PAUSED', 'BANNED', 'EXPIRED_COOKIES',
+    'WARMING_UP', 'SHADOWBAN_SUSPECTED', 'AUTH_NEEDED',
+  ]).optional(),
+  secUid: z.string().optional(),
+  warmupDays: z.number().int().min(3).max(21).optional(),
+}).strict();
+
 router.patch('/:id', async (req: Request, res: Response) => {
   try {
+    const parsed = patchAccountSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.errors[0].message });
+      return;
+    }
+
     const existing = await prisma.socialAccount.findFirst({
       where: { id: (req.params.id as string), userId: req.user!.id },
     });
@@ -409,14 +431,8 @@ router.patch('/:id', async (req: Request, res: Response) => {
       return;
     }
 
-    // Whitelist allowed update fields
-    const allowedFields = ['username', 'nickname', 'bio', 'defaultDescription', 'avatarUrl', 'bannerUrl', 'pinnedProxyId', 'status', 'secUid', 'warmupDays'];
-    const updateData: Record<string, unknown> = {};
-    for (const field of allowedFields) {
-      if (req.body[field] !== undefined) {
-        updateData[field] = req.body[field];
-      }
-    }
+    // Build update data from validated fields
+    const updateData: Record<string, unknown> = { ...parsed.data };
 
     // Clamp warmupDays to valid range (3-21)
     if (updateData.warmupDays !== undefined) {
@@ -528,7 +544,7 @@ const bulkUpdateSchema = z.object({
   }),
 });
 
-router.post('/bulk-update', async (req: Request, res: Response) => {
+router.patch('/bulk', async (req: Request, res: Response) => {
   try {
     const parsed = bulkUpdateSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -553,13 +569,13 @@ router.post('/bulk-update', async (req: Request, res: Response) => {
   }
 });
 
-// ── POST /bulk-proxy — dedicated bulk proxy binding ─────────
+// ── PATCH /bulk/proxy — dedicated bulk proxy binding ─────────
 const bulkProxySchema = z.object({
   accountIds: z.array(z.string()).min(1, 'Выберите хотя бы один аккаунт'),
   proxyId: z.string().min(1, 'Выберите прокси'),
 });
 
-router.post('/bulk-proxy', async (req: Request, res: Response) => {
+router.patch('/bulk/proxy', async (req: Request, res: Response) => {
   try {
     const parsed = bulkProxySchema.safeParse(req.body);
     if (!parsed.success) {

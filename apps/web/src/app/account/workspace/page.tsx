@@ -7,13 +7,24 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { SegmentedControl } from "@/components/ui/segmented-control"
 import { LiveTerminal } from "@/components/ui/live-terminal"
-import { Play, Settings2, Users, Save, Download } from "lucide-react"
+import { Play, Users, Save, Loader2, CheckCircle, AlertCircle } from "lucide-react"
+import { api, ApiError } from "@/lib/api"
+
+interface Preset {
+  id: string
+  name: string
+  config: Record<string, unknown>
+}
+
+type LaunchStatus = "idle" | "launching" | "success" | "error"
 
 export default function WorkspacePage() {
   const [mode, setMode] = React.useState("WARMUP")
-  const [loading, setLoading] = React.useState(false)
-  const [presets, setPresets] = React.useState<any[]>([])
+  const [launchStatus, setLaunchStatus] = React.useState<LaunchStatus>("idle")
+  const [statusMsg, setStatusMsg] = React.useState("")
+  const [presets, setPresets] = React.useState<Preset[]>([])
   const [selectedPresetId, setSelectedPresetId] = React.useState<string>("")
+  const [accountCount, setAccountCount] = React.useState(0)
   const [configStr, setConfigStr] = React.useState(`{
   "mode": "WARMUP",
   "concurrency": 5,
@@ -23,44 +34,39 @@ export default function WorkspacePage() {
   "hashtags": ["dota2", "dota2highlights"]
 }`)
 
+  // Load presets + account count on mount
   React.useEffect(() => {
-    fetch('/api/workspace/presets', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
-      .then(r => r.json())
-      .then(data => {
+    api.get<{ presets: Preset[] }>("/api/workspace/presets")
+      .then((data) => {
         if (data.presets) setPresets(data.presets)
-      }).catch(console.error)
+      })
+      .catch(console.error)
+
+    api.get<{ accounts: any[] }>("/api/accounts")
+      .then((data) => setAccountCount(data.accounts?.length ?? 0))
+      .catch(() => {})
   }, [])
 
   const handleSavePreset = async () => {
-    const name = prompt("Введите имя пресета:");
-    if (!name) return;
+    const name = prompt("Введите имя пресета:")
+    if (!name) return
     try {
-      const config = JSON.parse(configStr);
-      const res = await fetch('/api/workspace/presets', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({ name, config })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setPresets([data.preset, ...presets]);
-        setSelectedPresetId(data.preset.id);
-      }
-    } catch (err) {
-      alert("Ошибка сохранения: Невалидный JSON");
+      const config = JSON.parse(configStr)
+      const data = await api.post<{ preset: Preset }>("/api/workspace/presets", { name, config })
+      setPresets([data.preset, ...presets])
+      setSelectedPresetId(data.preset.id)
+    } catch {
+      alert("Ошибка сохранения: Невалидный JSON")
     }
   }
 
   const handleLoadPreset = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const id = e.target.value;
-    setSelectedPresetId(id);
-    if (!id) return;
-    const preset = presets.find(p => p.id === id);
+    const id = e.target.value
+    setSelectedPresetId(id)
+    if (!id) return
+    const preset = presets.find((p) => p.id === id)
     if (preset) {
-      setConfigStr(JSON.stringify(preset.config, null, 2));
+      setConfigStr(JSON.stringify(preset.config, null, 2))
     }
   }
 
@@ -69,32 +75,33 @@ export default function WorkspacePage() {
     { id: "COOKIES", label: "Сбор кук" },
     { id: "EDIT_PROFILE", label: "Ред. профиля" },
     { id: "UPLOAD", label: "Автозалив" },
+    { id: "LOGIN", label: "Логин" },
   ]
 
   const handleLaunch = async () => {
-    setLoading(true)
+    setLaunchStatus("launching")
+    setStatusMsg("")
     try {
-      const config = JSON.parse(configStr);
-      await fetch('/api/workspace/launch', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          type: mode,
-          accountIds: [], // Will be handled by applyToAll on backend for now if empty
-          applyToAll: true,
-          config,
-          threads: config.concurrency || 3,
-          delayMin: config.delays?.min || 2000,
-          delayMax: config.delays?.max || 8000
-        })
-      });
+      const config = JSON.parse(configStr)
+      await api.post("/api/workspace/launch", {
+        type: mode,
+        accountIds: [],
+        applyToAll: true,
+        config,
+        threads: config.concurrency || 3,
+        delayMin: config.delays?.min || 2000,
+        delayMax: config.delays?.max || 8000,
+      })
+      setLaunchStatus("success")
+      setStatusMsg("Задача запущена!")
+      setTimeout(() => setLaunchStatus("idle"), 3000)
     } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
+      setLaunchStatus("error")
+      if (err instanceof ApiError) {
+        setStatusMsg(err.message)
+      } else {
+        setStatusMsg("Ошибка запуска задачи")
+      }
     }
   }
 
@@ -136,8 +143,8 @@ export default function WorkspacePage() {
                 <div className="bg-white/5 border border-white/10 rounded-input p-4 flex items-center space-x-3">
                   <Users className="w-5 h-5 text-text-muted" />
                   <div>
-                    <div className="font-medium text-white">12 аккаунтов</div>
-                    <div className="text-caption text-text-muted">Группа: All TikTok</div>
+                    <div className="font-medium text-white">{accountCount} аккаунтов</div>
+                    <div className="text-caption text-text-muted">Все активные (ALIVE)</div>
                   </div>
                 </div>
               </div>
@@ -169,15 +176,34 @@ export default function WorkspacePage() {
                 />
               </div>
 
+              {/* Status message */}
+              {statusMsg && (
+                <div className={`flex items-center gap-2 p-3 rounded-lg text-body-sm ${
+                  launchStatus === "success"
+                    ? "bg-[#00d287]/10 text-[#00d287] border border-[#00d287]/20"
+                    : "bg-[#F43F5E]/10 text-[#F43F5E] border border-[#F43F5E]/20"
+                }`}>
+                  {launchStatus === "success" ? (
+                    <CheckCircle className="w-4 h-4 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                  )}
+                  <span>{statusMsg}</span>
+                </div>
+              )}
+
               <Button
                 variant="primary"
                 size="lg"
                 className="w-full"
                 onClick={handleLaunch}
-                disabled={loading}
+                disabled={launchStatus === "launching"}
               >
-                {loading ? (
-                  "Подготовка..."
+                {launchStatus === "launching" ? (
+                  <>
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    Подготовка...
+                  </>
                 ) : (
                   <>
                     <Play className="w-5 h-5 mr-2" />

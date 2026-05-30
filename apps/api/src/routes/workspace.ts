@@ -98,13 +98,16 @@ router.post('/upload', upload.single('video'), async (req: Request, res: Respons
 
 // ── POST /launch — start automation task ────────────────────
 const launchSchema = z.object({
-  type: z.enum(['UPLOAD', 'WARMUP', 'COOKIES', 'EDIT_PROFILE']),
+  type: z.enum(['UPLOAD', 'WARMUP', 'COOKIES', 'EDIT_PROFILE', 'LOGIN']),
   accountIds: z.array(z.string()),
   applyToAll: z.boolean().optional().default(false),
   config: z.any(),
   threads: z.number().int().min(1).max(50),
   delayMin: z.number().int().min(0),
   delayMax: z.number().int().min(0),
+}).refine(data => data.delayMax >= data.delayMin, {
+  message: 'delayMax должен быть >= delayMin',
+  path: ['delayMax'],
 });
 
 router.post('/launch', async (req: Request, res: Response) => {
@@ -115,7 +118,7 @@ router.post('/launch', async (req: Request, res: Response) => {
       return;
     }
 
-    const { type, config, threads } = parsed.data;
+    const { type, config, threads, delayMin, delayMax } = parsed.data;
     const force = req.query.force === "true" && req.user!.role === "ADMIN";
 
     let targetAccountIds = parsed.data.accountIds;
@@ -163,6 +166,7 @@ router.post('/launch', async (req: Request, res: Response) => {
       WARMUP: 'warmup',
       COOKIES: 'cookies',
       EDIT_PROFILE: 'edit-profile',
+      LOGIN: 'login',
     } as const;
     const queueName = queueMap[type];
 
@@ -187,16 +191,21 @@ router.post('/launch', async (req: Request, res: Response) => {
       };
     };
 
-    // Dispatch one job per account
+    // Dispatch one job per account with staggered delay (M-4)
     const results = await Promise.all(
-      targetAccountIds.map(async (accountId) => {
+      targetAccountIds.map(async (accountId, index) => {
         const extra = await buildExtra(accountId);
+        // Calculate per-account delay: each subsequent account gets additional delay
+        const perAccountDelay = delayMin + Math.floor(Math.random() * (delayMax - delayMin + 1));
+        const totalDelay = index * perAccountDelay;
+
         return dispatchAccountJob({
           queueName,
           userId: req.user!.id,
           accountId,
           extra,
           forceSkipWarmup: force,
+          delay: totalDelay > 0 ? totalDelay : undefined,
         });
       }),
     );
@@ -241,9 +250,19 @@ router.post('/launch', async (req: Request, res: Response) => {
 });
 
 // ── POST /queue/add — dynamically add videos to running task ─
-router.post('/queue/add', async (req: Request, res: Response) => {
+const queueAddSchema = z.object({
+  taskId: z.string().min(1, 'taskId обязателен'),
+  videoIds: z.array(z.string().min(1)).min(1, 'videoIds не может быть пустым'),
+});
+
+router.post('/queue', async (req: Request, res: Response) => {
   try {
-    const { taskId, videoIds } = req.body;
+    const parsed = queueAddSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.errors[0].message });
+      return;
+    }
+    const { taskId, videoIds } = parsed.data;
 
     // Verify task belongs to user
     const task = await prisma.task.findFirst({
@@ -311,19 +330,21 @@ router.post('/presets', async (req: Request, res: Response) => {
   }
 });
 
-// ── GET /cookies/export — download cookies as ZIP ───────────
+// ── GET /cookies/export — download decrypted cookies as JSON ─
 router.get('/cookies/export', async (req: Request, res: Response) => {
   try {
-    // Fetch all accounts with cookies for this user
+    // Fetch all accounts with encrypted cookies for this user
     const accounts = await prisma.socialAccount.findMany({
       where: {
         userId: req.user!.id,
-        cookiesPath: { not: null },
+        cookiesEncrypted: { not: null },
       },
       select: {
         username: true,
         platform: true,
-        cookiesPath: true,
+        cookiesEncrypted: true,
+        cookiesIv: true,
+        cookiesAuthTag: true,
       },
     });
 
@@ -332,12 +353,43 @@ router.get('/cookies/export', async (req: Request, res: Response) => {
       return;
     }
 
-    // Build JSON manifest for cookie files
-    const cookiesData = accounts.map((a: typeof accounts[number]) => ({
-      username: a.username,
-      platform: a.platform,
-      cookiesPath: a.cookiesPath,
-    }));
+    const masterKeyBuf = Buffer.from(process.env.MASTER_KEY ?? '', 'base64');
+    if (masterKeyBuf.length !== 32) {
+      res.status(500).json({ error: 'MASTER_KEY невалиден — расшифровка невозможна' });
+      return;
+    }
+
+    // Decrypt and build JSON manifest
+    const cookiesData = accounts.map((a: typeof accounts[number]) => {
+      let decryptedCookies: unknown = null;
+      try {
+        if (a.cookiesEncrypted && a.cookiesIv && a.cookiesAuthTag) {
+          const decipher = crypto.createDecipheriv(
+            'aes-256-gcm',
+            masterKeyBuf,
+            Buffer.from(a.cookiesIv),
+          );
+          decipher.setAuthTag(Buffer.from(a.cookiesAuthTag));
+          const decrypted = Buffer.concat([
+            decipher.update(Buffer.from(a.cookiesEncrypted)),
+            decipher.final(),
+          ]);
+          decryptedCookies = JSON.parse(decrypted.toString('utf8'));
+        }
+      } catch {
+        decryptedCookies = null; // skip corrupted entries
+      }
+      return {
+        username: a.username,
+        platform: a.platform,
+        cookies: decryptedCookies,
+      };
+    }).filter((a: { cookies: unknown }) => a.cookies !== null);
+
+    if (cookiesData.length === 0) {
+      res.status(500).json({ error: 'Не удалось расшифровать ни одного набора cookies' });
+      return;
+    }
 
     const jsonPayload = JSON.stringify(cookiesData, null, 2);
     const filename = `cookies_${Date.now()}.json`;

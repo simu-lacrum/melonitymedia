@@ -94,7 +94,7 @@ MelonityMedia/
 
 | Путь | Описание |
 |------|----------|
-| `src/index.ts` | Точка входа: подключение **7 BullMQ очередей**, MASTER_KEY валидация |
+| `src/index.ts` | Точка входа: подключение **8 BullMQ очередей**, MASTER_KEY валидация |
 | `src/handlers/upload.ts` | Залив уникализированного видео через Patchright + ghost-cursor |
 | `src/handlers/warmup.ts` | **10-day progressive curriculum**: passive → light → active engagement |
 | `src/handlers/cookies.ts` | Export/refresh cookies через Patchright session |

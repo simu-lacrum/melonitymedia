@@ -155,8 +155,8 @@ router.get('/firewall', async (_req: Request, res: Response) => {
   }
 });
 
-// ── POST /firewall/block — add IP to blacklist ──────────────
-router.post('/firewall/block', async (req: Request, res: Response) => {
+// ── POST /firewall — add IP to blacklist ──────────────────
+router.post('/firewall', async (req: Request, res: Response) => {
   try {
     const { ip } = req.body;
     if (!ip) {
@@ -182,8 +182,8 @@ router.post('/firewall/block', async (req: Request, res: Response) => {
   }
 });
 
-// ── DELETE /firewall/unblock — remove IP from blacklist ─────
-router.delete('/firewall/unblock', async (req: Request, res: Response) => {
+// ── DELETE /firewall — remove IP from blacklist ─────────
+router.delete('/firewall', async (req: Request, res: Response) => {
   try {
     const { ip } = req.body;
     await redis.srem(BLOCKED_IPS_KEY, ip);

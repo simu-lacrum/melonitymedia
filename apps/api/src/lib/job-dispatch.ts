@@ -53,13 +53,15 @@ export interface DispatchedJob {
  *   - "WARMUP_REQUIRED"  — upload requested but warmupCompletedAt is null
  */
 export async function dispatchAccountJob(args: {
-  queueName: "upload" | "warmup" | "cookies" | "edit-profile" | "shadowban-check";
+  queueName: "upload" | "warmup" | "cookies" | "edit-profile" | "shadowban-check" | "login";
   userId: string;
   accountId: string;
   /** Job-type-specific extra fields (video paths, etc.) */
   extra: Record<string, unknown>;
   /** Allow upload even without warmup (user acknowledged risk via ?force=true ADMIN flow) */
   forceSkipWarmup?: boolean;
+  /** BullMQ delay in ms before the job becomes processable */
+  delay?: number;
 }): Promise<DispatchedJob> {
   const account = await prisma.socialAccount.findFirst({
     where: { id: args.accountId, userId: args.userId },
@@ -83,7 +85,7 @@ export async function dispatchAccountJob(args: {
     return { accountId: args.accountId, jobId: null, error: "NO_FINGERPRINT" };
   }
 
-  if (!account.cookiesEncrypted) {
+  if (!account.cookiesEncrypted && args.queueName !== 'login') {
     return { accountId: args.accountId, jobId: null, error: "NO_COOKIES" };
   }
 
@@ -98,6 +100,6 @@ export async function dispatchAccountJob(args: {
     ...args.extra,
   };
 
-  const jobId = await addJob(args.queueName as QueueName, payload as Record<string, unknown>);
+  const jobId = await addJob(args.queueName as QueueName, payload as Record<string, unknown>, args.delay ? { delay: args.delay } : undefined);
   return { accountId: account.id, jobId: jobId ?? null };
 }

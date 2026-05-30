@@ -8,50 +8,58 @@ import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Search, Plus, Trash2, Shield, Signal, SignalHigh, SignalMedium, SignalLow } from "lucide-react"
+import { Search, Plus, Trash2, Shield, SignalHigh, SignalMedium, SignalLow, Loader2, RefreshCw } from "lucide-react"
+import { api, ApiError } from "@/lib/api"
 
-const PROXIES = [
-  {
-    id: "1",
-    ip: "192.168.1.1",
-    port: 8080,
-    type: "MOBILE",
-    provider: "AstroProxy",
-    status: "ACTIVE",
-    latency: 120,
-    accountsLinked: 5,
-  },
-  {
-    id: "2",
-    ip: "10.0.0.1",
-    port: 3128,
-    type: "ISP",
-    provider: "SpaceProxies",
-    status: "ERROR",
-    latency: 1500,
-    accountsLinked: 2,
-  },
-  {
-    id: "3",
-    ip: "US-Mobile-1.proxy.net",
-    port: 9000,
-    type: "MOBILE",
-    provider: "IPRoyal",
-    status: "ACTIVE",
-    latency: 45,
-    accountsLinked: 12,
-  },
-]
+interface Proxy {
+  id: string
+  host: string
+  port: number
+  type: string
+  carrier?: string
+  country?: string
+  status: string
+  latencyMs?: number
+  _count?: { accounts: number }
+}
 
 export default function ProxiesPage() {
+  const [proxies, setProxies] = React.useState<Proxy[]>([])
+  const [loading, setLoading] = React.useState(true)
+  const [error, setError] = React.useState<string | null>(null)
   const [selectedIds, setSelectedIds] = React.useState<string[]>([])
   const [search, setSearch] = React.useState("")
 
+  const fetchProxies = React.useCallback(async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const data = await api.get<{ proxies: Proxy[] }>("/api/proxies")
+      setProxies(data.proxies)
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.message)
+      } else {
+        setError("Не удалось загрузить прокси")
+      }
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  React.useEffect(() => {
+    fetchProxies()
+  }, [fetchProxies])
+
+  const filtered = proxies.filter((p) =>
+    `${p.host}:${p.port} ${p.carrier || ""} ${p.country || ""}`.toLowerCase().includes(search.toLowerCase())
+  )
+
   const toggleAll = () => {
-    if (selectedIds.length === PROXIES.length) {
+    if (selectedIds.length === filtered.length) {
       setSelectedIds([])
     } else {
-      setSelectedIds(PROXIES.map((p) => p.id))
+      setSelectedIds(filtered.map((p) => p.id))
     }
   }
 
@@ -63,7 +71,21 @@ export default function ProxiesPage() {
     }
   }
 
-  const renderLatency = (ms: number) => {
+  const handleDelete = async () => {
+    if (!confirm(`Удалить ${selectedIds.length} прокси?`)) return
+    try {
+      for (const id of selectedIds) {
+        await api.delete(`/api/proxies/${id}`)
+      }
+      setSelectedIds([])
+      fetchProxies()
+    } catch {
+      setError("Ошибка удаления")
+    }
+  }
+
+  const renderLatency = (ms?: number) => {
+    if (!ms) return <span className="text-text-muted">—</span>
     if (ms < 100) return <div className="flex items-center text-[#00D287]"><SignalHigh className="w-4 h-4 mr-2" />{ms}ms</div>
     if (ms < 500) return <div className="flex items-center text-[#F59E0B]"><SignalMedium className="w-4 h-4 mr-2" />{ms}ms</div>
     return <div className="flex items-center text-[#F43F5E]"><SignalLow className="w-4 h-4 mr-2" />{ms}ms</div>
@@ -79,15 +101,25 @@ export default function ProxiesPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-display-sm">Управление прокси</h1>
-          <p className="text-body-md text-text-muted">Всего: {PROXIES.length} прокси</p>
+          <p className="text-body-md text-text-muted">Всего: {proxies.length} прокси</p>
         </div>
         <div className="flex items-center space-x-3">
+          <Button variant="secondary" onClick={fetchProxies} disabled={loading}>
+            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+            Обновить
+          </Button>
           <Button variant="primary">
             <Plus className="w-4 h-4 mr-2" />
             Добавить прокси
           </Button>
         </div>
       </div>
+
+      {error && (
+        <div className="p-4 rounded-lg bg-[#F43F5E]/10 text-[#F43F5E] border border-[#F43F5E]/20">
+          {error}
+        </div>
+      )}
 
       <Card>
         <CardContent className="p-0">
@@ -103,66 +135,87 @@ export default function ProxiesPage() {
             </div>
             
             {selectedIds.length > 0 && (
-              <Button variant="ghost" size="sm" className="text-[#F43F5E] hover:text-[#FF1469] hover:bg-[#FF1469]/10">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-[#F43F5E] hover:text-[#FF1469] hover:bg-[#FF1469]/10"
+                onClick={handleDelete}
+              >
                 <Trash2 className="w-4 h-4 mr-2" />
                 Удалить выбранные ({selectedIds.length})
               </Button>
             )}
           </div>
 
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[40px] pl-6">
-                  <Checkbox
-                    checked={selectedIds.length === PROXIES.length && PROXIES.length > 0}
-                    onChange={toggleAll}
-                  />
-                </TableHead>
-                <TableHead>IP : Порт</TableHead>
-                <TableHead>Тип</TableHead>
-                <TableHead>Провайдер</TableHead>
-                <TableHead>Статус</TableHead>
-                <TableHead>Задержка</TableHead>
-                <TableHead>Аккаунтов</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {PROXIES.map((proxy) => (
-                <TableRow key={proxy.id} data-state={selectedIds.includes(proxy.id) ? "selected" : undefined}>
-                  <TableCell className="pl-6">
+          {loading && proxies.length === 0 ? (
+            <div className="flex items-center justify-center py-20 text-text-muted">
+              <Loader2 className="w-6 h-6 animate-spin mr-3" />
+              <span>Загрузка прокси...</span>
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-text-muted">
+              <span className="text-body-md">Прокси не найдены</span>
+              <span className="text-caption mt-1">Добавьте прокси для работы с аккаунтами</span>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[40px] pl-6">
                     <Checkbox
-                      checked={selectedIds.includes(proxy.id)}
-                      onChange={() => toggleOne(proxy.id)}
+                      checked={selectedIds.length === filtered.length && filtered.length > 0}
+                      onChange={toggleAll}
                     />
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center space-x-3">
-                      <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center">
-                        <Shield className="w-4 h-4 text-text-muted" />
-                      </div>
-                      <div className="font-mono text-body-md text-white">
-                        {proxy.ip}:{proxy.port}
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="neutral">{proxy.type}</Badge>
-                  </TableCell>
-                  <TableCell>{proxy.provider}</TableCell>
-                  <TableCell>
-                    {proxy.status === "ACTIVE" ? (
-                      <Badge variant="active" showDot>Активен</Badge>
-                    ) : (
-                      <Badge variant="error" showDot>Ошибка</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>{renderLatency(proxy.latency)}</TableCell>
-                  <TableCell>{proxy.accountsLinked}</TableCell>
+                  </TableHead>
+                  <TableHead>IP : Порт</TableHead>
+                  <TableHead>Тип</TableHead>
+                  <TableHead>Оператор</TableHead>
+                  <TableHead>Страна</TableHead>
+                  <TableHead>Статус</TableHead>
+                  <TableHead>Задержка</TableHead>
+                  <TableHead>Аккаунтов</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {filtered.map((proxy) => (
+                  <TableRow key={proxy.id} data-state={selectedIds.includes(proxy.id) ? "selected" : undefined}>
+                    <TableCell className="pl-6">
+                      <Checkbox
+                        checked={selectedIds.includes(proxy.id)}
+                        onChange={() => toggleOne(proxy.id)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center space-x-3">
+                        <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center">
+                          <Shield className="w-4 h-4 text-text-muted" />
+                        </div>
+                        <div className="font-mono text-body-md text-white">
+                          {proxy.host}:{proxy.port}
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="neutral">{proxy.type}</Badge>
+                    </TableCell>
+                    <TableCell>{proxy.carrier || "—"}</TableCell>
+                    <TableCell>{proxy.country || "—"}</TableCell>
+                    <TableCell>
+                      {proxy.status === "ACTIVE" ? (
+                        <Badge variant="active" showDot>Активен</Badge>
+                      ) : proxy.status === "DEAD" ? (
+                        <Badge variant="error" showDot>Мёртв</Badge>
+                      ) : (
+                        <Badge variant="warning" showDot>{proxy.status}</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>{renderLatency(proxy.latencyMs)}</TableCell>
+                    <TableCell>{proxy._count?.accounts ?? 0}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
     </motion.div>

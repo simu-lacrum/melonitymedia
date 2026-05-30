@@ -343,7 +343,7 @@ const providerImportSchema = z.object({
   apiKey: z.string().min(1),
 });
 
-router.post('/import-from-provider', async (req: Request, res: Response) => {
+router.post('/import/provider', async (req: Request, res: Response) => {
   try {
     const parsed = providerImportSchema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: parsed.error.errors[0].message }); return; }

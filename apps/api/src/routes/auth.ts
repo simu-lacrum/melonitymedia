@@ -15,10 +15,11 @@ import ms from 'ms';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { authRateLimit } from '../middleware/rate-limit.js';
 
 const router = Router();
 
-const JWT_SECRET = process.env.JWT_SECRET || 'change-me';
+const JWT_SECRET = process.env.JWT_SECRET!; // validated at startup (M-3)
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 // Parse the duration string to seconds for jwt.sign()
 // ms('7d') returns 604800000 (ms), so we divide by 1000 for seconds
@@ -54,7 +55,7 @@ function issueToken(res: Response, payload: { id: string; email: string; role: s
 }
 
 // ── POST /register ──────────────────────────────────────────
-router.post('/register', async (req: Request, res: Response) => {
+router.post('/register', authRateLimit, async (req: Request, res: Response) => {
   try {
     const parsed = registerSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -94,7 +95,7 @@ router.post('/register', async (req: Request, res: Response) => {
 });
 
 // ── POST /login ─────────────────────────────────────────────
-router.post('/login', async (req: Request, res: Response) => {
+router.post('/login', authRateLimit, async (req: Request, res: Response) => {
   try {
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) {

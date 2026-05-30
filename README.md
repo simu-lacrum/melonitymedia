@@ -195,7 +195,7 @@ MelonityMedia/
 │   │
 │   └── worker/                 # BullMQ worker pool
 │       ├── src/
-│       │   ├── index.ts        # Worker entrypoint (7 queues)
+│       │   ├── index.ts        # Worker entrypoint (8 queues)
 │       │   ├── core/
 │       │   │   ├── browser/    # patchright-launcher.ts, fingerprint-manager.ts
 │       │   │   ├── auth/       # cookie-store.ts (AES-256-GCM), session-validator.ts
@@ -374,7 +374,7 @@ graph TD
 
 ```mermaid
 graph LR
-    subgraph Queues["7 BullMQ Queues"]
+    subgraph Queues["8 BullMQ Queues"]
         Q1["upload<br/>Залив видео"]
         Q2["warmup<br/>10-day curriculum"]
         Q3["cookies<br/>Export cookies"]
@@ -382,6 +382,7 @@ graph LR
         Q5["analytics-cron<br/>JSON API stats"]
         Q6["cleanup<br/>Очистка файлов"]
         Q7["shadowban-check<br/>Детекция шэдоубана"]
+        Q8["login<br/>Авторизация login:pass"]
     end
 
     API[API Server] -->|dispatch| Queues
@@ -406,6 +407,7 @@ graph LR
 | `analytics-cron` | `analytics.ts` | Cron (1 раз/ночь) | curl-impersonate JSON API (~200ms/профиль) |
 | `cleanup` | `cleanup.ts` | Автоматически | Удаление файлов после загрузки |
 | `shadowban-check` | `shadowban-detector.ts` | Cron (каждые 12ч) | 3+ видео <100 views → SHADOWBAN_SUSPECTED |
+| `login` | `login.ts` | Кнопка | Авторизация по login:pass через Patchright |
 
 ---
 
@@ -481,8 +483,8 @@ graph LR
 
 | Метод | Эндпоинт | Описание |
 |-------|----------|----------|
-| `POST` | `/api/auth/register` | Регистрация (email, password) |
-| `POST` | `/api/auth/login` | Вход (JWT → HttpOnly Cookie) |
+| `POST` | `/api/auth/register` | Регистрация (email, password). Rate limit: 10 req / 15 мин |
+| `POST` | `/api/auth/login` | Вход (JWT → HttpOnly Cookie). Rate limit: 10 req / 15 мин |
 | `POST` | `/api/auth/logout` | Выход (очистка cookie) |
 | `GET` | `/api/auth/me` | Текущий пользователь |
 
@@ -493,8 +495,8 @@ graph LR
 | `GET` | `/api/accounts` | Список аккаунтов (cookies stripped, hasCookies flag) |
 | `POST` | `/api/accounts/import` | **Импорт** (Netscape/JSON cookies или `login:pass`) |
 | `POST` | `/api/accounts/:id/cookies` | Повторный импорт cookies для аккаунта |
-| `POST` | `/api/accounts/bulk-proxy` | Массовая привязка прокси к аккаунтам |
-| `POST` | `/api/accounts/bulk-update` | Массовое обновление полей |
+| `PATCH` | `/api/accounts/bulk/proxy` | Массовая привязка прокси к аккаунтам |
+| `PATCH` | `/api/accounts/bulk` | Массовое обновление полей |
 | `POST` | `/api/accounts/warmup` | Запуск 10-day warmup curriculum |
 | `PATCH` | `/api/accounts/:id` | Обновить (привязать прокси, статус) |
 | `DELETE` | `/api/accounts/:id` | Удалить аккаунт |
@@ -505,7 +507,7 @@ graph LR
 |-------|----------|----------|
 | `GET` | `/api/proxies` | Список прокси (с type, carrier, ASN) |
 | `POST` | `/api/proxies` | Добавить (host, port, type, rotation link, carrier) |
-| `POST` | `/api/proxies/import-from-provider`| Массовый импорт прокси по API-ключу провайдера |
+| `POST` | `/api/proxies/import/provider` | Массовый импорт прокси по API-ключу провайдера |
 | `PATCH` | `/api/proxies/:id` | Обновить |
 | `DELETE` | `/api/proxies/:id` | Удалить |
 | `POST` | `/api/proxies/:id/test` | Проверить коннект |
@@ -517,7 +519,7 @@ graph LR
 |-------|----------|----------|
 | `POST` | `/api/workspace/launch` | Запуск задачи (dispatch в BullMQ) |
 | `POST` | `/api/workspace/upload` | Загрузка видео (multipart/form-data) |
-| `POST` | `/api/workspace/queue/add` | Добавление видео к работающей задаче |
+| `POST` | `/api/workspace/queue` | Добавление видео к работающей задаче |
 | `GET` | `/api/workspace/presets` | Список пресетов пользователя |
 | `POST` | `/api/workspace/presets` | Сохранить пресет |
 | `GET` | `/api/workspace/cookies/export` | Скачать cookies аккаунтов (JSON) |
@@ -531,8 +533,10 @@ graph LR
 | `GET` | `/api/admin/runtime` | Здоровье системы (DB, Redis, BullMQ) |
 | `GET` | `/api/admin/users` | Список вебмастеров |
 | `PATCH` | `/api/admin/users/:id` | Изменить лимиты / soft-ban |
+| `POST` | `/api/admin/users/:id/ban` | Забанить пользователя |
 | `GET` | `/api/admin/firewall` | Заблокированные IP |
 | `POST` | `/api/admin/firewall` | Добавить IP в blacklist |
+| `DELETE` | `/api/admin/firewall` | Удалить IP из blacklist |
 
 ---
 
@@ -546,6 +550,7 @@ graph LR
 | **RBAC** | Middleware `requireAdmin` для `/admin/*` маршрутов |
 | **Firewall** | IP blacklist через Redis → 403 Forbidden |
 | **Tenant Isolation** | Все модели Prisma имеют `userId` FK — пользователь видит только свои данные |
+| **Rate Limiting** | 10 запросов / 15 мин на `/auth/register` и `/auth/login` (Redis-backed) |
 | **CORS** | Strict origin через `CORS_ORIGIN` переменную |
 | **Helmet** | Security headers на всех API-ответах |
 | **ESLint Banned Imports** | puppeteer, selenium, cheerio заблокированы на уровне lint |
@@ -560,10 +565,14 @@ graph LR
 
 ```bash
 # ── Database ──────────────────────────────────────────
-DATABASE_URL=postgresql://melonity:***@localhost:5432/melonitymedia
+DATABASE_URL=postgresql://melonity:***@db:5432/melonitymedia
 
 # ── Redis (BullMQ + Cache + Firewall) ─────────────────
-REDIS_URL=redis://localhost:6379
+REDIS_URL=redis://redis:6379
+
+# ── Docker Port Mapping (host ports, to avoid conflicts) ──
+PORT_DB=5433
+PORT_REDIS=6380
 
 # ── JWT Auth ──────────────────────────────────────────
 JWT_SECRET=replace_me_64_hex_chars

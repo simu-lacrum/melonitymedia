@@ -45,6 +45,8 @@ export interface UniquifyResult {
   outputPath: string;
   /** Applied transforms for logging */
   transforms: string[];
+  /** Abort controller to cancel the ffmpeg process */
+  abort: () => void;
 }
 
 // ── Deterministic Random from Account Seed ──────────────────
@@ -171,7 +173,7 @@ export async function uniquifyVideo(opts: UniquifyOptions): Promise<UniquifyResu
     console.log(`[Uniquifier] Created: ${outputPath}`);
     console.log(`[Uniquifier] Transforms: ${transforms.join(' | ')}`);
 
-    return { outputPath, transforms };
+    return { outputPath, transforms, abort: () => ac.abort() };
   } catch (err: any) {
     // Clean up partial output
     try { await fs.unlink(outputPath); } catch { /* ignore */ }

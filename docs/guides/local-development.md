@@ -62,10 +62,14 @@ docker-compose ps
 
 Ожидаемый вывод:
 ```
-NAME           STATUS       PORTS
-mm-db          Up           0.0.0.0:5432->5432/tcp
-mm-redis       Up           0.0.0.0:6379->6379/tcp
+NAME                    STATUS              PORTS
+melonitymedia-db-1      Up (healthy)        0.0.0.0:5433->5432/tcp
+melonitymedia-redis-1   Up (healthy)        0.0.0.0:6380->6379/tcp
 ```
+
+> [!NOTE]
+> Host-порты настраиваются через `PORT_DB` и `PORT_REDIS` в `.env` (по умолчанию 5433 и 6380).
+> Внутри Docker-сети сервисы всегда используют стандартные порты (5432, 6379).
 
 ## 3. Установка зависимостей
 

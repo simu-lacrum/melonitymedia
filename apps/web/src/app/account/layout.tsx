@@ -53,6 +53,10 @@ export default function AccountLayout({
     { href: "/account/proxies", icon: Shield, label: "Прокси" },
     { href: "/account/workspace", icon: Server, label: "Воркспейс" },
     { href: "/account/settings", icon: Settings, label: "Настройки" },
+    // Admin link — only shown for ADMIN role
+    ...(user?.user?.role === "ADMIN"
+      ? [{ href: "/account/admin", icon: Shield, label: "Админ" }]
+      : []),
   ]
 
   return (
@@ -95,8 +99,8 @@ export default function AccountLayout({
         <div className="flex items-center space-x-4">
           <div className="flex items-center space-x-3 text-right">
             <div className="hidden sm:block">
-              <div className="text-body-sm font-medium">{user?.username}</div>
-              <div className="text-caption text-text-muted">{user?.email}</div>
+              <div className="text-body-sm font-medium">{user?.user?.name || user?.user?.email}</div>
+              <div className="text-caption text-text-muted">{user?.user?.email}</div>
             </div>
             <Avatar size="sm" />
           </div>

@@ -1,5 +1,7 @@
 # MelonityMedia — Style Reference
 
+> **⚠️ Implementation Note:** The current frontend (`apps/web`) uses **JetBrains Mono** via `next/font/google` instead of the Roboto Flex described below. This design doc describes the *intended* design system. To align, either update the code to use Roboto Flex, or update this doc to match JetBrains Mono.
+
 **Theme:** dark
 
 MelonityMedia employs a high-contrast, premium dark aesthetic inspired by elite gaming software and cutting-edge automation platforms. The UI is built on a foundation of deep, immersive dark tones (`#1c2026`), specifically designed to reduce eye strain during long sessions of traffic arbitrage and data monitoring. Typography relies entirely on the highly adaptable variable font **Roboto Flex**, utilizing extreme `font-stretch` and `font-variation-settings` for bold, ultra-wide headings that immediately command attention. Primary interactive elements are punctuated by a signature vibrant neon pink, accompanied by frosted glassmorphism headers and custom scrollbars.

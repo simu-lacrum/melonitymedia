@@ -9,7 +9,7 @@
 //                          │                 │
 //                     ┌────▼─────┐     ┌────▼─────┐
 //                     │ PostgreSQL│    │  Worker   │
-//                     │ (Prisma) │    │(Puppeteer)│
+//                     │ (Prisma) │    │(Patchright)│
 //                     └──────────┘    └──────────┘
 //
 // The API server handles HTTP requests and WebSocket connections.
@@ -33,6 +33,33 @@ import workspaceRoutes from './routes/workspace.js';
 import videosRoutes from './routes/videos.js';
 import analyticsRoutes from './routes/analytics.js';
 import adminRoutes from './routes/admin.js';
+
+// ── Fail-fast: Validate critical secrets at startup ────────
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET || JWT_SECRET.length < 16) {
+  console.error(
+    '\n╔══════════════════════════════════════════════════════════════╗\n' +
+    '║  FATAL: JWT_SECRET must be set and at least 16 characters  ║\n' +
+    '║  Set it in .env: JWT_SECRET=your-secure-random-string      ║\n' +
+    '╚══════════════════════════════════════════════════════════════╝\n',
+  );
+  process.exit(1);
+}
+
+const MASTER_KEY = process.env.MASTER_KEY;
+if (MASTER_KEY) {
+  const masterKeyBuf = Buffer.from(MASTER_KEY, 'base64');
+  if (masterKeyBuf.length !== 32) {
+    console.error(
+      '\n╔══════════════════════════════════════════════════════════════╗\n' +
+      '║  FATAL: MASTER_KEY must be 32 bytes (base64 encoded)       ║\n' +
+      '║  Generate: node -e "console.log(require(\'crypto\')         ║\n' +
+      '║    .randomBytes(32).toString(\'base64\'))"                   ║\n' +
+      '╚══════════════════════════════════════════════════════════════╝\n',
+    );
+    process.exit(1);
+  }
+}
 
 const PORT = parseInt(process.env.PORT_API || '4000', 10);
 
