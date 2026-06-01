@@ -508,9 +508,10 @@ graph LR
 | `GET` | `/api/proxies` | Список прокси (с type, carrier, ASN) |
 | `POST` | `/api/proxies` | Добавить (host, port, type, rotation link, carrier) |
 | `POST` | `/api/proxies/import/provider` | Массовый импорт прокси по API-ключу провайдера |
-| `PATCH` | `/api/proxies/:id` | Обновить |
+| `PATCH` | `/api/proxies/:id` | Обновить (host, port, type, country, carrier, rotationCooldown) |
+| `POST` | `/api/proxies/bulk-delete` | Массовое удаление прокси |
 | `DELETE` | `/api/proxies/:id` | Удалить |
-| `POST` | `/api/proxies/:id/test` | Проверить коннект |
+| `POST` | `/api/proxies/:id/test` | Проверить коннект (реальный TCP-тест через undici ProxyAgent) |
 | `POST` | `/api/proxies/:id/rotate` | Вызвать ротацию IP через API-ссылку / провайдера |
 
 ### Рабочая область
@@ -532,11 +533,11 @@ graph LR
 |-------|----------|----------|
 | `GET` | `/api/admin/runtime` | Здоровье системы (DB, Redis, BullMQ) |
 | `GET` | `/api/admin/users` | Список вебмастеров |
-| `PATCH` | `/api/admin/users/:id` | Изменить лимиты / soft-ban |
-| `POST` | `/api/admin/users/:id/ban` | Забанить пользователя |
+| `PATCH` | `/api/admin/users/:id` | Изменить лимиты / роль (Zod-валидация) |
+| `POST` | `/api/admin/users/:id/ban` | Забанить пользователя (self-ban protection) |
 | `GET` | `/api/admin/firewall` | Заблокированные IP |
 | `POST` | `/api/admin/firewall` | Добавить IP в blacklist |
-| `DELETE` | `/api/admin/firewall` | Удалить IP из blacklist |
+| `POST` | `/api/admin/firewall/unblock` | Удалить IP из blacklist |
 
 ---
 
@@ -544,7 +545,7 @@ graph LR
 
 | Мера | Реализация |
 |------|-----------|
-| **JWT Auth** | HttpOnly Cookies, 7-day expiry, bcrypt hashing |
+| **JWT Auth** | HttpOnly Cookies, TTL synced with JWT_EXPIRES_IN, bcrypt hashing |
 | **Cookie Encryption** | AES-256-GCM с MASTER_KEY (32 bytes base64), fail-fast при невалидном ключе |
 | **Key Rotation** | `scripts/rotate-master-key.mjs` — zero-downtime ротация шифрования |
 | **RBAC** | Middleware `requireAdmin` для `/admin/*` маршрутов |
@@ -557,7 +558,10 @@ graph LR
 | **Fingerprint Consistency** | 7 правил валидации: OS↔platform, GPU↔OS, screen≥viewport, locale↔timezone, hardware bounds, Chrome version pinning, touch coherence |
 | **Carrier Stability Rule** | 14-day proxy pin window для TikTok: блокировка смены carrier/country, LTE-only для свежих аккаунтов |
 | **Shadowban 24h Gate** | Детекция shadowban только по видео старше 24ч (предотвращение ложных срабатываний) |
-| **No Secrets in Response** | Encrypted cookies никогда не отправляются на фронтенд |
+| **No Secrets in Response** | Encrypted cookies никогда не отправляются на фронтенд, `address` field (credentials) stripped из proxy responses |
+| **Platform-Aware Validation** | Session validator использует platform-specific URLs (TikTok API vs YouTube /account) |
+| **Geo-Based Fingerprint** | Timezone в fingerprints привязан к geo-данным прокси (не серверному timezone) |
+| **MASTER_KEY Required** | API и Worker делают hard fail (`process.exit(1)`) при отсутствии или невалидном MASTER_KEY |
 
 ---
 

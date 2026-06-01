@@ -29,6 +29,21 @@ router.patch('/reorder', async (req: Request, res: Response) => {
   try {
     const { items } = req.body as { items: { id: string; order: number }[] };
 
+    if (!Array.isArray(items) || items.length === 0) {
+      res.status(400).json({ error: 'items обязателен' });
+      return;
+    }
+
+    // Verify all videos belong to current user
+    const videoIds = items.map(i => i.id);
+    const ownedCount = await prisma.video.count({
+      where: { id: { in: videoIds }, userId: req.user!.id },
+    });
+    if (ownedCount !== videoIds.length) {
+      res.status(403).json({ error: 'Нет доступа к одному или нескольким видео' });
+      return;
+    }
+
     // Transaction: update all orders atomically
     await prisma.$transaction(
       items.map(({ id, order }) =>

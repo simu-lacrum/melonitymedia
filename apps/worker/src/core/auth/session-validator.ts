@@ -22,6 +22,7 @@ export type CookieStatus = 'alive' | 'expired' | 'banned';
 export async function validateCookies(
   accountId: string,
   fingerprint: { userAgent: string; locale: string },
+  platform: 'TIKTOK' | 'YOUTUBE',
   proxyUrl?: string,
   cookiesDir?: string,
 ): Promise<CookieStatus> {
@@ -33,28 +34,46 @@ export async function validateCookies(
 
   const cookieHeader = formatCookieHeader(cookies);
 
+  // Platform-specific validation URL and success check
+  const validationUrl = platform === 'TIKTOK'
+    ? 'https://www.tiktok.com/api/user/detail/?aid=1988'
+    : 'https://www.youtube.com/account';
+
+  const referer = platform === 'TIKTOK'
+    ? 'https://www.tiktok.com/'
+    : 'https://www.youtube.com/';
+
   try {
     const resp = await impersonatedFetch({
-      url: 'https://www.tiktok.com/api/user/detail/?aid=1988',
+      url: validationUrl,
       impersonate: 'chrome116',
       cookies: cookieHeader,
       proxy: proxyUrl,
       headers: {
         'User-Agent': fingerprint.userAgent,
-        'Accept': 'application/json',
+        'Accept': 'application/json, text/html',
         'Accept-Language': `${fingerprint.locale},en;q=0.9`,
-        'Referer': 'https://www.tiktok.com/',
+        'Referer': referer,
       },
       timeoutMs: 15_000,
     });
 
     if (resp.status === 200) {
-      try {
-        const data = JSON.parse(resp.body);
-        if (data.userInfo) return 'alive';
-        return 'expired'; // 200 but no user data = anonymous
-      } catch {
-        return 'expired';
+      if (platform === 'TIKTOK') {
+        try {
+          const data = JSON.parse(resp.body);
+          if (data.userInfo) return 'alive';
+          return 'expired'; // 200 but no user data = anonymous
+        } catch {
+          return 'expired';
+        }
+      } else {
+        // YouTube: if we get 200 on /account, cookies are valid
+        // If redirected to login, cookies expired
+        if (resp.body.includes('accounts.google.com/ServiceLogin')) {
+          return 'expired';
+        }
+        return 'alive';
       }
     }
 
@@ -65,11 +84,9 @@ export async function validateCookies(
       return 'expired';
     }
 
-    // TikTok returns 502/503 when suspicious — treat as expired
     return 'expired';
   } catch (err) {
     console.warn(`[SessionValidator] Failed to validate cookies for ${accountId}:`, err);
-    // Network error — don't ban the account, just mark expired
     return 'expired';
   }
 }

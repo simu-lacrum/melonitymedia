@@ -1,5 +1,19 @@
 import crypto from 'crypto';
 
+const timezoneByCountry: Record<string, string> = {
+  US: 'America/New_York',
+  GB: 'Europe/London',
+  DE: 'Europe/Berlin',
+  FR: 'Europe/Paris',
+  RU: 'Europe/Moscow',
+  KZ: 'Asia/Almaty',
+  UA: 'Europe/Kyiv',
+  JP: 'Asia/Tokyo',
+  BR: 'America/Sao_Paulo',
+  IN: 'Asia/Kolkata',
+  AU: 'Australia/Sydney',
+};
+
 export function generateFingerprint(accountId: string, geo?: { country?: string; city?: string }) {
   const hash = crypto.createHash('sha256').update(accountId).digest();
 
@@ -57,7 +71,7 @@ export function generateFingerprint(accountId: string, geo?: { country?: string;
     BR: 'pt-BR', IN: 'en-IN', AU: 'en-AU',
   };
   const locale = localeByCountry[geo?.country ?? 'US'] ?? 'en-US';
-  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const timezone = timezoneByCountry[geo?.country ?? 'US'] ?? 'America/New_York';
 
   // --- UA (Chrome version from env, with sane default) ---
   const chromeMajor = parseInt(process.env.EXPECTED_CHROME_MAJOR ?? '148', 10);
@@ -141,7 +155,7 @@ export function generateMobileFingerprint(accountId: string, geo?: { country?: s
     BR: 'pt-BR', IN: 'en-IN', AU: 'en-AU',
   };
   const locale = localeByCountry[geo?.country ?? 'US'] ?? 'en-US';
-  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const timezone = timezoneByCountry[geo?.country ?? 'US'] ?? 'America/New_York';
 
   const chromeMajor = parseInt(process.env.EXPECTED_CHROME_MAJOR ?? '148', 10);
   const iosUA =

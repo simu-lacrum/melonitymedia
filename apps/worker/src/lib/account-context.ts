@@ -8,6 +8,7 @@
 
 import { prisma } from './prisma.js';
 import type { AccountFingerprint } from '../core/browser/fingerprint-manager.js';
+import { buildProxyUrl } from './proxy-utils.js';
 
 export interface AccountContext {
   accountId: string;
@@ -68,4 +69,3 @@ export async function loadAccountContext(accountId: string): Promise<AccountCont
   };
 }
 
-import { buildProxyUrl } from './proxy-utils.js';

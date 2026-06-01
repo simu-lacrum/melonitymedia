@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+
 
 export type ProxyProvider = 'MANUAL' | 'PROXYS_IO' | 'MOBILEPROXIES_ORG' | 'PROXYGROW' | 'ILLUSORY';
 
@@ -61,7 +61,7 @@ export async function rotateProxy(input: RotateProxyInput): Promise<RotateProxyR
       case 'PROXYGROW': {
         if (!input.apiKey) return { ok: false, error: 'apiKey missing' };
         if (!input.externalId) return { ok: false, error: 'externalId (modemId) missing' };
-        const url = `http://api.proxygrow.com/rotate?key=${encodeURIComponent(input.apiKey)}&modem=${encodeURIComponent(input.externalId)}`;
+        const url = `https://api.proxygrow.com/rotate?key=${encodeURIComponent(input.apiKey)}&modem=${encodeURIComponent(input.externalId)}`;
         const res = await fetch(url, { headers: { 'User-Agent': DEFAULT_UA } });
         if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
         const json = (await res.json()) as { status?: string; new_ip?: string; error?: string };

@@ -171,7 +171,7 @@ router.post('/launch', async (req: Request, res: Response) => {
     const queueName = queueMap[type];
 
     // Build per-job extras (UPLOAD needs videoId/path/title/description/hashtags)
-    const buildExtra = async (_accountId: string) => {
+    const buildExtra = async () => {
       if (type !== 'UPLOAD') return { taskId: task.id, config };
 
       const videoId = (config as Record<string, unknown>).videoId as string | undefined;
@@ -194,7 +194,7 @@ router.post('/launch', async (req: Request, res: Response) => {
     // Dispatch one job per account with staggered delay (M-4)
     const results = await Promise.all(
       targetAccountIds.map(async (accountId, index) => {
-        const extra = await buildExtra(accountId);
+        const extra = await buildExtra();
         // Calculate per-account delay: each subsequent account gets additional delay
         const perAccountDelay = delayMin + Math.floor(Math.random() * (delayMax - delayMin + 1));
         const totalDelay = index * perAccountDelay;
@@ -353,7 +353,7 @@ router.get('/cookies/export', async (req: Request, res: Response) => {
       return;
     }
 
-    const masterKeyBuf = Buffer.from(process.env.MASTER_KEY ?? '', 'base64');
+    const masterKeyBuf = Buffer.from(process.env.MASTER_KEY!, 'base64');
     if (masterKeyBuf.length !== 32) {
       res.status(500).json({ error: 'MASTER_KEY невалиден — расшифровка невозможна' });
       return;

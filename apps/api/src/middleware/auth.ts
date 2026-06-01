@@ -13,7 +13,7 @@ import jwt from 'jsonwebtoken';
 import { prisma } from '../lib/prisma.js';
 import type { JwtPayload } from '../types/index.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'change-me';
+const JWT_SECRET = process.env.JWT_SECRET!; // validated at startup (index.ts)
 
 export async function authMiddleware(
   req: Request,

@@ -47,7 +47,7 @@ let _masterKey: Buffer | null = null;
 function getMasterKey(): Buffer {
   if (_masterKey) return _masterKey;
 
-  const keyStr = process.env.MASTER_KEY ?? '';
+  const keyStr = process.env.MASTER_KEY!;
   const key = Buffer.from(keyStr, 'base64');
 
   if (key.length !== 32) {

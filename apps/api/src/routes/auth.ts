@@ -47,7 +47,7 @@ function issueToken(res: Response, payload: { id: string; email: string; role: s
     httpOnly: true,         // JS can't read this cookie
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'strict',     // CSRF protection
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
+    maxAge: ms(JWT_EXPIRES_IN as ms.StringValue), // synced with JWT TTL
     path: '/',
   });
 

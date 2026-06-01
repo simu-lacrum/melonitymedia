@@ -7,6 +7,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { Router, Request, Response } from 'express';
+import { z } from 'zod';
 import os from 'os';
 import { prisma } from '../lib/prisma.js';
 import { redis } from '../lib/redis.js';
@@ -91,15 +92,21 @@ router.get('/users', async (_req: Request, res: Response) => {
 });
 
 // ── PATCH /users/:id — update user settings ─────────────────
+const updateUserSchema = z.object({
+  maxThreads: z.number().int().min(1).max(100).optional(),
+  role: z.enum(['ADMIN', 'USER']).optional(),
+}).strict();
+
 router.patch('/users/:id', async (req: Request, res: Response) => {
   try {
-    const { maxThreads, role } = req.body;
+    const parsed = updateUserSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.errors[0].message });
+      return;
+    }
     const user = await prisma.user.update({
       where: { id: req.params.id as string },
-      data: {
-        ...(maxThreads !== undefined && { maxThreads }),
-        ...(role !== undefined && { role }),
-      },
+      data: parsed.data,
       select: { id: true, email: true, name: true, role: true, maxThreads: true },
     });
     res.json({ user });
@@ -112,6 +119,12 @@ router.patch('/users/:id', async (req: Request, res: Response) => {
 // ── POST /users/:id/ban — soft-ban (cancel tasks + kick) ────
 router.post('/users/:id/ban', async (req: Request, res: Response) => {
   try {
+    // Prevent admin from banning themselves
+    if (req.params.id === req.user!.id) {
+      res.status(400).json({ error: 'Нельзя заблокировать самого себя' });
+      return;
+    }
+
     // Ban user
     await prisma.user.update({
       where: { id: req.params.id as string },
@@ -182,10 +195,14 @@ router.post('/firewall', async (req: Request, res: Response) => {
   }
 });
 
-// ── DELETE /firewall — remove IP from blacklist ─────────
-router.delete('/firewall', async (req: Request, res: Response) => {
+// ── POST /firewall/unblock — remove IP from blacklist ─────────
+router.post('/firewall/unblock', async (req: Request, res: Response) => {
   try {
     const { ip } = req.body;
+    if (!ip) {
+      res.status(400).json({ error: 'IP обязателен' });
+      return;
+    }
     await redis.srem(BLOCKED_IPS_KEY, ip);
     res.json({ success: true });
   } catch (err) {

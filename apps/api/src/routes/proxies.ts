@@ -5,13 +5,6 @@
 // v3 changes:
 // 1. Proxy type classification (LTE_MOBILE, STATIC_RESIDENTIAL, DATACENTER)
 // 2. Carrier/ASN tracking fields
-// ─────────────────────────────────────────────────────────────
-// Proxy Management Routes v3
-// CRUD for mobile/static proxies with carrier validation.
-//
-// v3 changes:
-// 1. Proxy type classification (LTE_MOBILE, STATIC_RESIDENTIAL, DATACENTER)
-// 2. Carrier/ASN tracking fields
 // 3. Rotation cooldown (seconds between IP rotations)
 // 4. POST /:id/validate-carrier endpoint
 // 5. host/port stored directly (no more compose/decompose)
@@ -35,7 +28,7 @@ const createProxySchema = z.object({
   username: z.string().optional(),
   password: z.string().optional(),
   rotationLink: z.string().url().optional().or(z.literal('')),
-  type: z.enum(['LTE_MOBILE', 'STATIC_RESIDENTIAL', 'DATACENTER_DEPRECATED']).optional(),
+  type: z.enum(['LTE_MOBILE', 'STATIC_RESIDENTIAL']).optional(),
   country: z.string().optional(),
   carrier: z.string().optional(),
   dma: z.string().optional(),
@@ -54,11 +47,15 @@ function composeAddress(host: string, port: number, username?: string, password?
 function decomposeAddress(address: string) {
   let host = '', port = 0, username = '', password = '';
   if (address.includes('@')) {
-    const [auth, hostPort] = address.split('@');
-    [username, password] = auth.split(':');
-    const parts = hostPort.split(':');
-    host = parts[0];
-    port = parseInt(parts[1] || '0', 10);
+    const atIdx = address.lastIndexOf('@');
+    const auth = address.substring(0, atIdx);
+    const hostPort = address.substring(atIdx + 1);
+    const colonIdx = auth.indexOf(':');
+    username = colonIdx >= 0 ? auth.substring(0, colonIdx) : auth;
+    password = colonIdx >= 0 ? auth.substring(colonIdx + 1) : '';
+    const hpParts = hostPort.split(':');
+    host = hpParts[0];
+    port = parseInt(hpParts[1] || '0', 10);
   } else {
     const parts = address.split(':');
     host = parts[0];
@@ -69,17 +66,20 @@ function decomposeAddress(address: string) {
 
 // Helper: enrich proxy record with decomposed fields for frontend
 function enrichProxy(proxy: any) {
-  const { host, port, username, password } = decomposeAddress(proxy.address);
+  const decomposed = proxy.host && proxy.port
+    ? { host: proxy.host, port: proxy.port, username: proxy.username ?? '', password: proxy.password ?? '' }
+    : decomposeAddress(proxy.address);
   return {
     ...proxy,
     name: proxy.label || '',
-    host,
-    port,
-    username,
-    password,
+    host: decomposed.host,
+    port: decomposed.port,
+    username: decomposed.username,
+    password: decomposed.password,
     isActive: proxy.status === 'ACTIVE',
-    lastCheckedAt: null,
-    lastIP: null,
+    lastCheckedAt: proxy.lastIPAt ?? null,
+    lastIP: proxy.lastIP ?? null,
+    address: undefined,
   };
 }
 
@@ -158,6 +158,10 @@ router.patch('/:id', async (req: Request, res: Response) => {
 
     // Handle full edit (host/port/username/password)
     if (req.body.host && req.body.port) {
+      updateData.host = req.body.host;
+      updateData.port = req.body.port;
+      updateData.username = req.body.username ?? existing.username;
+      updateData.password = req.body.password ?? existing.password;
       updateData.address = composeAddress(
         req.body.host, req.body.port,
         req.body.username, req.body.password,
@@ -168,6 +172,10 @@ router.patch('/:id', async (req: Request, res: Response) => {
       updateData.rotationLink = req.body.rotationLink || null;
       updateData.isRotating = !!req.body.rotationLink;
     }
+    if (req.body.type !== undefined) updateData.type = req.body.type;
+    if (req.body.country !== undefined) updateData.country = req.body.country;
+    if (req.body.carrier !== undefined) updateData.carrier = req.body.carrier;
+    if (req.body.rotationCooldown !== undefined) updateData.rotationCooldown = req.body.rotationCooldown;
 
     const proxy = await prisma.proxy.update({
       where: { id: req.params.id as string },
@@ -177,6 +185,29 @@ router.patch('/:id', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[Proxies] Update error:', err);
     res.status(500).json({ error: 'Ошибка при обновлении прокси' });
+  }
+});
+
+// ── POST /bulk-delete — bulk delete proxies ────────────────────
+router.post('/bulk-delete', async (req: Request, res: Response) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      res.status(400).json({ error: 'Выберите хотя бы один прокси' });
+      return;
+    }
+
+    const result = await prisma.proxy.deleteMany({
+      where: {
+        id: { in: ids },
+        userId: req.user!.id,
+      },
+    });
+
+    res.json({ deleted: result.count });
+  } catch (err) {
+    console.error('[Proxies] Bulk delete error:', err);
+    res.status(500).json({ error: 'Ошибка при массовом удалении' });
   }
 });
 
@@ -199,29 +230,6 @@ router.delete('/:id', async (req: Request, res: Response) => {
   }
 });
 
-// ── POST /bulk — bulk delete proxies ────────────────────────
-router.delete('/bulk', async (req: Request, res: Response) => {
-  try {
-    const { ids } = req.body;
-    if (!Array.isArray(ids) || ids.length === 0) {
-      res.status(400).json({ error: 'Выберите хотя бы один прокси' });
-      return;
-    }
-
-    const result = await prisma.proxy.deleteMany({
-      where: {
-        id: { in: ids },
-        userId: req.user!.id,
-      },
-    });
-
-    res.json({ deleted: result.count });
-  } catch (err) {
-    console.error('[Proxies] Bulk delete error:', err);
-    res.status(500).json({ error: 'Ошибка при массовом удалении' });
-  }
-});
-
 // ── POST /:id/test — test proxy connectivity ────────────────
 router.post('/:id/test', async (req: Request, res: Response) => {
   try {
@@ -233,12 +241,55 @@ router.post('/:id/test', async (req: Request, res: Response) => {
       return;
     }
 
-    // In production: actually test TCP connection through the proxy
-    // For now: verify record exists and return status
+    // Real connectivity test via HTTP request through the proxy
+    let testResult = { reachable: false, latencyMs: 0, externalIp: '' };
+    try {
+      const proxyUrl = proxy.username && proxy.password
+        ? `http://${encodeURIComponent(proxy.username)}:${encodeURIComponent(proxy.password)}@${proxy.host}:${proxy.port}`
+        : `http://${proxy.host}:${proxy.port}`;
+
+      const start = Date.now();
+      const { ProxyAgent } = await import('undici');
+      const agent = new ProxyAgent(proxyUrl);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10_000);
+
+      const resp = await fetch('https://api.ipify.org?format=json', {
+        signal: controller.signal,
+        // @ts-ignore — undici dispatcher
+        dispatcher: agent,
+      });
+      clearTimeout(timeout);
+
+      if (resp.ok) {
+        const data = await resp.json() as { ip?: string };
+        testResult = {
+          reachable: true,
+          latencyMs: Date.now() - start,
+          externalIp: data.ip ?? '',
+        };
+      }
+    } catch {
+      testResult = { reachable: false, latencyMs: 0, externalIp: '' };
+    }
+
+    // Update DB with test results
+    if (testResult.reachable) {
+      await prisma.proxy.update({
+        where: { id: proxy.id },
+        data: {
+          status: 'ACTIVE',
+          lastIP: testResult.externalIp || null,
+          lastIPAt: new Date(),
+        },
+      });
+    }
+
     res.json({
-      success: true,
-      status: proxy.status,
-      address: proxy.address,
+      success: testResult.reachable,
+      status: testResult.reachable ? 'ACTIVE' : 'DEAD',
+      latencyMs: testResult.latencyMs,
+      externalIp: testResult.externalIp || null,
     });
   } catch (err) {
     console.error('[Proxies] Test error:', err);

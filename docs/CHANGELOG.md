@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.2.1] - 2026-06-01
+
+### Fixed (Technical Audit — 34 issues resolved)
+
+#### 🔴 CRITICAL
+- **CRIT-01**: Removed duplicate header comment in `proxies.ts` (merge artifact).
+- **CRIT-02**: `PATCH /proxies/:id` now updates `host`, `port`, `username`, `password` individually (was only updating `address` composite field, leaving worker using stale values).
+- **CRIT-03**: Moved `DELETE /bulk` before `DELETE /:id` route and changed to `POST /bulk-delete` to fix Express route ordering collision and HTTP semantics.
+- **CRIT-04**: `POST /accounts/warmup` now dispatches BullMQ jobs via `dispatchAccountJob()` (was only creating DB Task without actual queue dispatch).
+- **CRIT-05**: `POST /accounts/cookies` now dispatches BullMQ jobs via `dispatchAccountJob()` (same issue as CRIT-04).
+- **CRIT-06**: ProxyGrow rotation URL changed from `http://` to `https://` (API key was being sent in plaintext). Removed unused `crypto` import.
+
+#### 🟠 HIGH
+- **HIGH-01/02**: Fixed ALIVE/ACTIVE enum mismatch — `patchAccountSchema` now uses `ALIVE` (matching Prisma enum and all handler code).
+- **HIGH-03**: Rewrote `decomposeAddress()` to handle passwords containing `:` or `@` using `lastIndexOf('@')` and `indexOf(':')`.
+- **HIGH-05**: Replaced proxy test stub with real TCP connectivity test via `undici.ProxyAgent` → `api.ipify.org`. Removes credential leak from response.
+- **HIGH-06**: Changed `DELETE /admin/firewall` → `POST /admin/firewall/unblock` (DELETE with body violates HTTP semantics).
+- **HIGH-07**: `enrichProxy()` now uses DB values for `lastIP`/`lastIPAt` instead of hardcoding `null`.
+- **HIGH-08**: Video reorder endpoint now verifies `userId` ownership before updating order (IDOR fix).
+- **HIGH-09**: `warmupDay` clamp fixed — was `warmupDays + 1`, now correctly caps at `warmupDays`.
+
+#### 🟡 MEDIUM
+- **MED-01**: PRNG entropy in `uniquifier.ts` — changed `idx % 28` to proper `idx >= 32` check with SHA-256 re-hashing to extend sequence.
+- **MED-02**: Video end trim now uses `ffprobe` to get actual duration and calculates `effectiveDuration = duration - trimStart - trimEnd`.
+- **MED-04**: Fingerprint timezone now geo-based (11-country lookup map) instead of using server timezone.
+- **MED-05**: Session validator now accepts `platform` parameter and uses platform-specific validation URLs (TikTok API vs YouTube /account).
+- **MED-06**: Added Zod `updateUserSchema` with `.strict()` to `PATCH /admin/users/:id`.
+- **MED-07**: Socket.io cookie parsing now uses `.replace()` instead of `.split('=')[1]` to handle JWT Base64 `=` padding.
+- **MED-08**: Warmup handler now saves session cookies in `finally` block before closing browser.
+- **MED-09**: Admin self-ban prevention — `POST /users/:id/ban` now rejects if target matches current user.
+
+#### 🔵 LOW
+- **LOW-01**: Removed `'change-me'` JWT_SECRET fallback from `auth.ts` middleware and `socket.ts`.
+- **LOW-02**: Cookie `maxAge` now synced with `JWT_EXPIRES_IN` via `ms()` instead of hardcoded 7 days.
+- **LOW-03**: MASTER_KEY now required at API startup (was optional, causing runtime errors on encrypt/decrypt).
+- **LOW-04**: Moved inline `import { buildProxyUrl }` from end of `account-context.ts` to top of file.
+- **LOW-05**: Removed unused `_accountId` parameter from `buildExtra()` in `workspace.ts`.
+- **LOW-06**: MASTER_KEY validation added to login handler's `decryptField()` function.
+- **LOW-07**: Removed `DATACENTER_DEPRECATED` from `createProxySchema` Zod enum.
+- **LOW-08**: Removed dead `compat.ok` re-check in YouTube upload handler (already throws on line 349).
+- **LOW-09**: `enrichProxy()` now strips `address` field from API responses (was leaking proxy credentials).
+
+### Changed
+- **Analytics**: `days` query parameter capped to `1-365` range with NaN protection.
+- **Upload handler**: Passes `platform` to `validateCookies()` for platform-aware session validation.
+- **Worker index.ts**: MASTER_KEY validation split into existence check + length check for clearer error messages.
+
 ## [0.2.0] - 2026-05-30
 
 ### Added

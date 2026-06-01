@@ -22,6 +22,7 @@ import { prisma } from '../lib/prisma.js';
 import { authMiddleware } from '../middleware/auth.js';
 import crypto from 'crypto';
 import { generateFingerprint, generateMobileFingerprint } from '../lib/fingerprint.js';
+import { dispatchAccountJob } from '../lib/job-dispatch.js';
 
 const router = Router();
 router.use(authMiddleware);
@@ -129,7 +130,7 @@ router.get('/', async (req: Request, res: Response) => {
     const sanitized = accounts.map((a: typeof accounts[number]) => {
       const warmupDay = a.warmupStartedAt
         ? Math.min(
-            (a.warmupDays ?? 10) + 1,
+            a.warmupDays ?? 10,
             Math.ceil((Date.now() - new Date(a.warmupStartedAt).getTime()) / 86_400_000),
           )
         : null;
@@ -407,7 +408,7 @@ const patchAccountSchema = z.object({
   bannerUrl: z.string().url().optional(),
   pinnedProxyId: z.string().optional(),
   status: z.enum([
-    'ACTIVE', 'PAUSED', 'BANNED', 'EXPIRED_COOKIES',
+    'ALIVE', 'PAUSED', 'BANNED', 'EXPIRED_COOKIES',
     'WARMING_UP', 'SHADOWBAN_SUSPECTED', 'AUTH_NEEDED',
   ]).optional(),
   secUid: z.string().optional(),
@@ -748,7 +749,29 @@ router.post('/warmup', async (req: Request, res: Response) => {
       },
     });
 
-    res.status(201).json({ task });
+    // Dispatch warmup jobs to BullMQ for each account
+    const results = await Promise.all(
+      ids.map(async (accountId: string, index: number) =>
+        dispatchAccountJob({
+          queueName: 'warmup',
+          userId: req.user!.id,
+          accountId,
+          extra: { taskId: task.id, warmupDays: days },
+          delay: index * 5000, // stagger 5s between accounts
+        }),
+      ),
+    );
+
+    const dispatched = results.filter(r => r.jobId).length;
+    await prisma.task.update({
+      where: { id: task.id },
+      data: {
+        bullmqJobId: results.find(r => r.jobId)?.jobId ?? null,
+        status: dispatched > 0 ? 'PENDING' : 'FAILED',
+      },
+    });
+
+    res.status(201).json({ task, dispatched, skipped: results.filter(r => !r.jobId).length });
   } catch (err) {
     console.error('[Accounts] Quick warmup error:', err);
     res.status(500).json({ error: 'Ошибка при запуске прогрева' });
@@ -774,7 +797,28 @@ router.post('/cookies', async (req: Request, res: Response) => {
       },
     });
 
-    res.status(201).json({ task });
+    const results = await Promise.all(
+      ids.map(async (accountId: string, index: number) =>
+        dispatchAccountJob({
+          queueName: 'cookies',
+          userId: req.user!.id,
+          accountId,
+          extra: { taskId: task.id },
+          delay: index * 3000,
+        }),
+      ),
+    );
+
+    const dispatched = results.filter(r => r.jobId).length;
+    await prisma.task.update({
+      where: { id: task.id },
+      data: {
+        bullmqJobId: results.find(r => r.jobId)?.jobId ?? null,
+        status: dispatched > 0 ? 'PENDING' : 'FAILED',
+      },
+    });
+
+    res.status(201).json({ task, dispatched, skipped: results.filter(r => !r.jobId).length });
   } catch (err) {
     console.error('[Accounts] Quick cookies error:', err);
     res.status(500).json({ error: 'Ошибка при запуске обновления cookies' });

@@ -48,7 +48,8 @@ router.get('/summary', async (req: Request, res: Response) => {
 router.get('/views-chart', async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
-    const days = parseInt(req.query.days as string) || 30;
+    const rawDays = parseInt(req.query.days as string);
+    const days = Number.isNaN(rawDays) ? 30 : Math.max(1, Math.min(rawDays, 365));
 
     // For now, return account-level data
     // In production, a separate ViewsHistory model would store daily snapshots

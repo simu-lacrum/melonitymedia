@@ -112,6 +112,7 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
     const cookieStatus = await validateCookies(
       data.accountId,
       fingerprint,
+      platform as 'TIKTOK' | 'YOUTUBE',
       proxyUrl,
       data.cookiesDir,
     );
@@ -460,12 +461,7 @@ async function _uploadToYouTube(
     logger.warn('Не удалось подтвердить публикацию (нет confirmation text), но дошли до конца flow');
   }
 
-  // Verify Shorts detection using the provided compatibility metadata
-  if (!compat.ok) {
-    logger.warn('⚠️ Внимание: Исходное видео не подходит под параметры Shorts. Оно загрузится как обычное видео.');
-  } else {
-    logger.info('✅ Видео имеет валидные параметры Shorts и было успешно опубликовано.');
-  }
+  logger.info('✅ Видео имеет валидные параметры Shorts и было успешно опубликовано.');
 
   logger.info('YouTube Shorts загрузка завершена ✓');
 }

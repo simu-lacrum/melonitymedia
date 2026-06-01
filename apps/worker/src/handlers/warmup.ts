@@ -139,6 +139,25 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     logger.error(`❌ Ошибка прогрева: ${message}`);
     throw err;
   } finally {
+    // Save updated session cookies before closing browser
+    if (browser) {
+      try {
+        const contexts = browser.contexts();
+        if (contexts.length > 0) {
+          const { saveCookiesToDiskCache } = await import('../core/auth/cookie-store.js');
+          const freshCookies = await contexts[0].cookies();
+          const browserCookies = freshCookies.map(c => ({
+            name: c.name, value: c.value, domain: c.domain, path: c.path,
+            expires: c.expires, httpOnly: c.httpOnly, secure: c.secure,
+            sameSite: c.sameSite === 'Strict' ? 'Strict' as const : c.sameSite === 'None' ? 'None' as const : 'Lax' as const,
+          }));
+          await saveCookiesToDiskCache(data.accountId, browserCookies, data.cookiesDir);
+          logger.info('Cookies сохранены после прогрева');
+        }
+      } catch (cookieErr) {
+        logger.warn(`Не удалось сохранить cookies: ${cookieErr}`);
+      }
+    }
     await closeBrowser(browser);
     logger.disconnect();
   }

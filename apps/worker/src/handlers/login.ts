@@ -34,7 +34,10 @@ interface LoginJobData {
 }
 
 function decryptField(encrypted: Buffer, iv: Buffer, authTag: Buffer): string {
-  const keyBuf = Buffer.from(process.env.MASTER_KEY ?? '', 'base64');
+  const masterKey = process.env.MASTER_KEY;
+  if (!masterKey) throw new Error('MASTER_KEY not set');
+  const keyBuf = Buffer.from(masterKey, 'base64');
+  if (keyBuf.length !== 32) throw new Error('MASTER_KEY must be 32 bytes');
   const decipher = crypto.createDecipheriv('aes-256-gcm', keyBuf, iv);
   decipher.setAuthTag(authTag);
   const out = Buffer.concat([decipher.update(encrypted), decipher.final()]);
@@ -158,7 +161,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
 
     // Store encrypted in DB
     const jsonStr = JSON.stringify(browserCookies);
-    const keyBuf = Buffer.from(process.env.MASTER_KEY ?? '', 'base64');
+    const keyBuf = Buffer.from(process.env.MASTER_KEY!, 'base64');
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv('aes-256-gcm', keyBuf, iv);
     const encrypted = Buffer.concat([cipher.update(jsonStr, 'utf8'), cipher.final()]);

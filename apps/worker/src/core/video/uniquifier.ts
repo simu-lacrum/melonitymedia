@@ -56,13 +56,18 @@ export interface UniquifyResult {
  * Same accountId always produces same transforms — deterministic.
  */
 function createSeededRandom(accountId: string): () => number {
-  const hash = crypto.createHash('sha256').update(accountId).digest();
+  let hash = crypto.createHash('sha256').update(accountId).digest();
   let idx = 0;
 
   return (): number => {
-    const val = hash.readUInt32BE(idx % 28); // 32 bytes, 4 bytes per read = 7 reads
-    idx = (idx + 4) % 28;
-    return (val / 0xFFFFFFFF);
+    if (idx >= 32) {
+      // Re-hash to extend the sequence when we've exhausted the current hash
+      hash = crypto.createHash('sha256').update(hash).digest();
+      idx = 0;
+    }
+    const val = hash.readUInt32BE(idx);
+    idx += 4;
+    return val / 0xFFFFFFFF;
   };
 }
 
@@ -133,6 +138,23 @@ export async function uniquifyVideo(opts: UniquifyOptions): Promise<UniquifyResu
   const trimEnd = seededRange(rng, 0.05, 0.3);
   transforms.push(`trim: start=${trimStart.toFixed(2)}s, end=-${trimEnd.toFixed(2)}s`);
 
+    // Get video duration via ffprobe for end trim
+    let duration = 99999;
+    try {
+      const { stdout } = await execFileAsync('ffprobe', [
+        '-v', 'error',
+        '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1',
+        inputPath,
+      ]);
+      duration = parseFloat(stdout.trim());
+    } catch {
+      // If ffprobe fails, use the full video without end trim
+    }
+
+    // Calculate effective duration: total - trimStart - trimEnd
+    const effectiveDuration = Math.max(1, duration - trimStart - trimEnd);
+
   // Build FFmpeg command
   const args: string[] = [
     '-y',                      // overwrite output
@@ -154,8 +176,8 @@ export async function uniquifyVideo(opts: UniquifyOptions): Promise<UniquifyResu
     '-crf', '23',
     '-c:a', 'aac',
     '-b:a', '128k',
-    // Trim from end (negative duration)
-    '-t', `99999`,  // We'll handle end trim via filter if needed
+    // Trim from end using calculated effective duration
+    '-t', effectiveDuration.toFixed(3),
     outputPath,
   ];
 

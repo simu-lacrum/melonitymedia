@@ -11,7 +11,7 @@ import { Server as HttpServer } from 'http';
 import { Server as SocketServer } from 'socket.io';
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'change-me';
+const JWT_SECRET = process.env.JWT_SECRET!; // validated at startup (index.ts)
 
 interface TokenPayload {
   id: string;
@@ -37,7 +37,7 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
       socket.handshake.headers?.cookie
         ?.split(';')
         .find((c: string) => c.trim().startsWith('melonity_token='))
-        ?.split('=')[1];
+        ?.replace(/^\s*melonity_token=/, '');
 
     if (!token) {
       return next(new Error('Authentication required'));
