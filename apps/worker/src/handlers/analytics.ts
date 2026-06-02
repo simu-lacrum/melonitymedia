@@ -16,6 +16,7 @@ import { Job } from 'bullmq';
 import { impersonatedFetch } from '../core/tls/curl-impersonate-client.js';
 import { loadCookiesFromEncryptedStore, type BrowserCookie } from '../core/auth/cookie-store.js';
 import { SocketLogger } from '../lib/socket-logger.js';
+import { loadAccountContext } from '../lib/account-context.js';
 import type { AccountFingerprint } from '../core/browser/fingerprint-manager.js';
 
 // ── Types ───────────────────────────────────────────────────
@@ -23,9 +24,7 @@ import type { AccountFingerprint } from '../core/browser/fingerprint-manager.js'
 interface AnalyticsJobData {
   userId: string;
   accountId: string;
-  platform: 'TIKTOK' | 'YOUTUBE';
-  fingerprint: AccountFingerprint;
-  proxyUrl?: string;
+  // platform, fingerprint, proxyUrl resolved from DB via loadAccountContext()
   cookiesDir?: string;
   /** TikTok secUid for API requests */
   secUid?: string;
@@ -42,6 +41,13 @@ export interface ProfileStats {
   snapshotAt: Date;
 }
 
+/** Internal type with DB-resolved context merged in */
+type ResolvedAnalyticsData = AnalyticsJobData & {
+  platform: 'TIKTOK' | 'YOUTUBE';
+  fingerprint: AccountFingerprint;
+  proxyUrl?: string;
+};
+
 // ── Main ────────────────────────────────────────────────────
 
 export async function analyticsHandler(job: Job<AnalyticsJobData>): Promise<ProfileStats> {
@@ -49,14 +55,21 @@ export async function analyticsHandler(job: Job<AnalyticsJobData>): Promise<Prof
   const logger = new SocketLogger(data.userId);
 
   try {
-    logger.info(`📊 Сбор аналитики для ${data.accountId} (${data.platform})...`);
+    // Resolve fresh account context from DB (not stale job payload)
+    const ctxAcc = await loadAccountContext(data.accountId);
+    const { platform, fingerprint, proxyUrl } = ctxAcc;
+
+    logger.info(`📊 Сбор аналитики для ${data.accountId} (${platform})...`);
+
+    // Merge resolved context with job-specific data
+    const resolvedData = { ...data, platform, fingerprint, proxyUrl };
 
     let stats: ProfileStats;
 
-    if (data.platform === 'TIKTOK') {
-      stats = await _fetchTikTokStats(data, logger);
+    if (platform === 'TIKTOK') {
+      stats = await _fetchTikTokStats(resolvedData, logger);
     } else {
-      stats = await _fetchYouTubeStats(data, logger);
+      stats = await _fetchYouTubeStats(resolvedData, logger);
     }
 
     logger.info(
@@ -80,7 +93,7 @@ export async function analyticsHandler(job: Job<AnalyticsJobData>): Promise<Prof
 // ── TikTok Stats via JSON API ───────────────────────────────
 
 async function _fetchTikTokStats(
-  data: AnalyticsJobData,
+  data: ResolvedAnalyticsData,
   logger: SocketLogger,
 ): Promise<ProfileStats> {
   const cookies = await loadCookiesFromEncryptedStore(data.accountId, data.cookiesDir);
@@ -141,7 +154,7 @@ async function _fetchTikTokStats(
 // ── YouTube Stats via curl-impersonate ──────────────────────
 
 async function _fetchYouTubeStats(
-  data: AnalyticsJobData,
+  data: ResolvedAnalyticsData,
   logger: SocketLogger,
 ): Promise<ProfileStats> {
   const cookies = await loadCookiesFromEncryptedStore(data.accountId, data.cookiesDir);
