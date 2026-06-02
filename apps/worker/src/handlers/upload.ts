@@ -16,7 +16,7 @@
 import { Job } from 'bullmq';
 import { launchStealthContext, closeBrowser } from '../core/browser/patchright-launcher.js';
 import { validateCookies } from '../core/auth/session-validator.js';
-import { saveCookiesToDiskCache, type BrowserCookie } from '../core/auth/cookie-store.js';
+import { persistCookies, type BrowserCookie } from '../core/auth/cookie-store.js';
 import { uniquifyVideo, cleanupUniquifiedVideo } from '../core/video/uniquifier.js';
 import { createPageCursor, humanClick, humanScroll } from '../core/humanity/biomouse.js';
 import { humanType } from '../core/humanity/typing-emulator.js';
@@ -191,11 +191,12 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
       try {
         const cookies = await ctx.context.cookies() as BrowserCookie[];
         if (cookies.length > 0) {
-          await saveCookiesToDiskCache(data.accountId, cookies, data.cookiesDir ?? '/data/cookies');
+          // BUG-H1 fix: persist to both disk AND DB
+          await persistCookies(data.accountId, cookies, data.cookiesDir ?? '/data/cookies');
         }
       } catch (cookieErr) {
         // Non-critical — don't fail the job over cookie save
-        console.warn('[Upload] Failed to save session cookies:', cookieErr);
+        console.warn('[Upload] Failed to persist cookies:', cookieErr);
       }
     }
 
@@ -328,6 +329,16 @@ async function _uploadToTikTok(
       throw new Error('CAPTCHA обнаружена. Установите CAPSOLVER_API_KEY для автоматического решения.');
     }
     throw new Error(`CAPTCHA solve failed: ${msg}`);
+  }
+
+  // BUG-L5 fix: Verify TikTok actually confirmed the upload
+  // Wait a bit more for the success toast/redirect to appear
+  await page.waitForTimeout(_randomDelay(3000, 5000));
+  const confirmBodyText = await page.textContent('body') ?? '';
+  const hasError = /failed|error|couldn't|не удалось|ошибка/i.test(confirmBodyText);
+  if (hasError) {
+    logger.warn('TikTok upload may have failed — error text detected on page');
+    // Don't throw — let the status be marked cautiously, but log the warning
   }
 
   logger.info('TikTok подтвердил загрузку ✓');

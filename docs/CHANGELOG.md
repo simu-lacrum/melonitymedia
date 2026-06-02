@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.2.2] - 2026-06-02
+
+### Fixed (Technical Audit 02-06 — 21 issues resolved)
+
+#### 🔴 CRITICAL
+- **BUG-C1**: `cookies.ts` handler now uses `loadAccountContext()` instead of stale BullMQ payload for proxy/fingerprint/platform.
+- **BUG-C2**: `edit-profile.ts` handler now uses `loadAccountContext()` — same fix as C1.
+- **BUG-C3**: `isShortsCompatible()` threshold tightened from 0.85 to 0.75 (3:4 max aspect ratio for Shorts).
+- **BUG-C5**: `warmup.ts` now saves cookies to DB via centralized `persistCookies()` (was disk-only, cookies lost on container restart).
+
+#### 🟠 HIGH
+- **BUG-H1**: `upload.ts` now persists cookies to DB via `persistCookies()` (was disk-only).
+- **BUG-H2**: `edit-profile.ts` now persists cookies to DB after session close.
+- **BUG-H3**: `cookies.ts` handler now persists cookies to DB (ironic — the "cookies" handler wasn't saving cookies to DB).
+- **BUG-H4**: `_lightEngagement` comment trigger — `_randomDelay()` now called once outside loop as `commentAtIndex` instead of regenerating each iteration.
+- **BUG-H5**: PATCH account status now blocks BANNED/SHADOWBAN_SUSPECTED→ALIVE transitions without admin force-override.
+- **BUG-H7**: `buildProxyUrl()` now throws explicit Error on invalid URL construction instead of silent fallback to garbage URL.
+
+#### 🟡 MEDIUM
+- **BUG-M1**: Documented fingerprint generator divergence (API vs Worker) with warning header — intentional design, different PRNG strategies.
+- **BUG-M3**: Removed hardcoded dota2 hashtags from warmup — now uses only user-provided hashtags.
+- **BUG-M6**: `/queue` POST now dispatches BullMQ jobs for added videos (was only updating DB config without creating actual jobs).
+- **BUG-M7**: Sequential warmup via `lastWarmupDay` field — prevents phase-skipping when server was offline for multiple days.
+
+#### 🟢 LOW
+- **BUG-L1**: curl-impersonate default profile changed from `chrome131` (non-existent) to `chrome116`.
+- **BUG-L3**: Shadowban detector video query now includes `userId` scope for consistency with project conventions.
+- **BUG-L4**: Fingerprint generator now warns when `geo.country` is not in locale/timezone lookup table.
+- **BUG-L5**: TikTok upload now checks for error text on page after publishing (was blindly assuming success).
+- **BUG-L8**: YouTube session validator now handles HTTP 302/303 redirects to Google login page.
+- **BUG-L9**: Imported account IDs now use full UUID (32 hex chars) instead of truncated 25-char UUID.
+
+### Added
+- **`persistCookies()`**: Centralized cookie persistence function in `cookie-store.ts` — writes to disk cache AND encrypted DB in one atomic operation. All handlers now use this instead of ad-hoc disk-only saves.
+- **`lastWarmupDay`**: New `Int` field in `SocialAccount` Prisma schema for sequential warmup day tracking.
+- **Status Transition Guard**: `accounts.ts` PATCH endpoint now validates status transitions to prevent anti-fraud bypass.
+
+### Changed
+- **Prisma schema**: Added `lastWarmupDay Int @default(0)` to `SocialAccount` model.
+- **Session validator**: YouTube validation now detects empty body responses and HTTP 302/303 redirects.
+- **Fingerprint generator**: Geo-unrecognized countries now produce console warning instead of silent US defaults.
+
 ## [0.2.1] - 2026-06-01
 
 ### Fixed (Technical Audit — 34 issues resolved)

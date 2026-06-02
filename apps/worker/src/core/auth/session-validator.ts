@@ -73,7 +73,21 @@ export async function validateCookies(
         if (resp.body.includes('accounts.google.com/ServiceLogin')) {
           return 'expired';
         }
+        // BUG-L8 fix: Also check for empty body (possible redirect that
+        // curl-impersonate didn't follow since we don't use -L flag)
+        if (resp.body.trim().length === 0) {
+          return 'expired';
+        }
         return 'alive';
+      }
+    }
+
+    // BUG-L8 fix: Handle HTTP 302/303 redirects to Google login
+    // curl-impersonate without -L flag returns the redirect response
+    if (resp.status === 302 || resp.status === 303) {
+      const location = resp.headers['location'] ?? '';
+      if (location.includes('accounts.google.com') || location.includes('ServiceLogin')) {
+        return 'expired';
       }
     }
 

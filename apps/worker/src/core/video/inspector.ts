@@ -32,12 +32,20 @@ export async function inspectVideo(filepath: string): Promise<VideoMetadata> {
   };
 }
 
-export function isShortsCompatible(meta: VideoMetadata): { ok: boolean; reason?: string } {
+export function isShortsCompatible(meta: VideoMetadata): { ok: boolean; reason?: string; warning?: string } {
   if (meta.durationSec > 180) {
     return { ok: false, reason: `Длительность ${Math.round(meta.durationSec)}s > 180s (3 минуты)` };
   }
-  if (meta.aspectRatio > 0.85) {
-    return { ok: false, reason: `Соотношение сторон ${meta.aspectRatio.toFixed(2)} не вертикальное (нужно ≤ 0.5625 = 9:16)` };
+  // Hard reject: anything wider than 3:4 (0.75) is not vertical
+  if (meta.aspectRatio > 0.75) {
+    return { ok: false, reason: `Соотношение сторон ${meta.aspectRatio.toFixed(2)} не вертикальное (нужно ≤ 0.75 = 3:4, идеал 0.5625 = 9:16)` };
+  }
+  // Soft warning: between 9:16 and 3:4 — works but suboptimal distribution
+  if (meta.aspectRatio > 0.5625) {
+    return {
+      ok: true,
+      warning: `Соотношение ${meta.aspectRatio.toFixed(2)} допустимо, но идеальное для Shorts = 0.5625 (9:16). Текущее может снизить охват.`,
+    };
   }
   return { ok: true };
 }

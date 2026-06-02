@@ -20,7 +20,7 @@ import { launchStealthContext, closeBrowser } from '../core/browser/patchright-l
 import { createPageCursor, humanClick } from '../core/humanity/biomouse.js';
 import { humanType } from '../core/humanity/typing-emulator.js';
 import { handleTikTokCaptcha } from '../core/captcha/tiktok-captcha-handler.js';
-import { saveCookiesToDiskCache, type BrowserCookie } from '../core/auth/cookie-store.js';
+import { persistCookies, type BrowserCookie } from '../core/auth/cookie-store.js';
 import { SocketLogger } from '../lib/socket-logger.js';
 import { prisma } from '../lib/prisma.js';
 import { loadAccountContext } from '../lib/account-context.js';
@@ -157,27 +157,14 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
       expires: c.expires, httpOnly: c.httpOnly, secure: c.secure,
       sameSite: c.sameSite === 'Strict' ? 'Strict' : c.sameSite === 'None' ? 'None' : 'Lax',
     }));
-    await saveCookiesToDiskCache(data.accountId, browserCookies, data.cookiesDir);
 
-    // Store encrypted in DB
-    const jsonStr = JSON.stringify(browserCookies);
-    const keyBuf = Buffer.from(process.env.MASTER_KEY!, 'base64');
-    const iv = crypto.randomBytes(12);
-    const cipher = crypto.createCipheriv('aes-256-gcm', keyBuf, iv);
-    const encrypted = Buffer.concat([cipher.update(jsonStr, 'utf8'), cipher.final()]);
-    const authTag = cipher.getAuthTag();
+    // Persist to both disk AND DB via centralized helper
+    await persistCookies(data.accountId, browserCookies, data.cookiesDir ?? '/data/cookies');
 
+    // Update account status to ALIVE
     await prisma.socialAccount.update({
       where: { id: data.accountId },
-      data: {
-        cookiesEncrypted: encrypted,
-        cookiesIv: iv,
-        cookiesAuthTag: authTag,
-        cookiesUpdatedAt: new Date(),
-        status: 'ALIVE',
-        // Optional: clear plaintext password backup once cookies are confirmed working
-        // passwordEncrypted: null, passwordIv: null, passwordAuthTag: null,
-      },
+      data: { status: 'ALIVE' },
     });
 
     await job.updateProgress(100);

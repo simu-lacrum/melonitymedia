@@ -48,7 +48,11 @@ export function buildProxyUrl(p: {
     const portStr = port ? `:${port}` : '';
     const u = new URL(`${protocol}${auth}${ip}${portStr}`);
     return u.toString().replace(/\/$/, '');
-  } catch {
-    return `${protocol}${ip}`;
+  } catch (err) {
+    // BUG-H7 fix: throw instead of silently returning an invalid URL
+    // A broken proxy URL causes all downstream requests to fail silently
+    throw new Error(
+      `[proxy-utils] Failed to build proxy URL from host=${ip} port=${port} user=${user ? '***' : '(none)'}: ${err}`,
+    );
   }
 }

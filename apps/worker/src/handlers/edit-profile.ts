@@ -1,17 +1,20 @@
 // ─────────────────────────────────────────────────────────────
-// Edit Profile Handler v2 — Uses Patchright + ghost-cursor
+// Edit Profile Handler v3 — Uses Patchright + ghost-cursor
 //
-// Same function, new browser engine. All interactions use
-// human-like mouse movements and typing patterns.
+// CHANGES in v3 (audit fix):
+// 1. Uses loadAccountContext() instead of stale BullMQ payload
+//    for platform, fingerprint, proxyUrl (BUG-C2 fix)
+// 2. Persists updated cookies to BOTH disk AND DB via
+//    persistCookies() (BUG-H2 fix)
 // ─────────────────────────────────────────────────────────────
 
 import { Job } from 'bullmq';
 import { launchStealthContext, closeBrowser } from '../core/browser/patchright-launcher.js';
 import { createPageCursor, humanClick } from '../core/humanity/biomouse.js';
 import { humanType } from '../core/humanity/typing-emulator.js';
-import { saveCookiesToDiskCache, type BrowserCookie } from '../core/auth/cookie-store.js';
+import { persistCookies, type BrowserCookie } from '../core/auth/cookie-store.js';
 import { SocketLogger } from '../lib/socket-logger.js';
-import type { AccountFingerprint } from '../core/browser/fingerprint-manager.js';
+import { loadAccountContext } from '../lib/account-context.js';
 import type { Browser } from 'patchright';
 
 // ── Types ───────────────────────────────────────────────────
@@ -19,14 +22,12 @@ import type { Browser } from 'patchright';
 interface EditProfileJobData {
   userId: string;
   accountId: string;
-  platform: 'TIKTOK' | 'YOUTUBE';
-  fingerprint: AccountFingerprint;
-  proxyUrl?: string;
   cookiesDir?: string;
   changes: {
     name?: string;
     bio?: string;
   };
+  // platform, fingerprint, proxyUrl are resolved from DB via loadAccountContext()
 }
 
 // ── Main ────────────────────────────────────────────────────
@@ -35,22 +36,26 @@ export async function editProfileHandler(job: Job<EditProfileJobData>): Promise<
   const data = job.data;
   const logger = new SocketLogger(data.userId);
   let browser: Browser | null = null;
+  let ctx: any = null;
 
   try {
     logger.info(`Редактирование профиля ${data.accountId}...`);
 
-    const ctx = await launchStealthContext({
+    // Resolve everything fresh from DB — never trust BullMQ payload
+    const ctxAcc = await loadAccountContext(data.accountId);
+
+    ctx = await launchStealthContext({
       accountId: data.accountId,
-      proxyUrl: data.proxyUrl,
+      proxyUrl: ctxAcc.proxyUrl,
       cookiesPath: data.cookiesDir ?? '/data/cookies',
-      fingerprint: data.fingerprint,
+      fingerprint: ctxAcc.fingerprint,
     });
     browser = ctx.browser;
     const page = ctx.page;
     const cursor = await createPageCursor(page);
 
     // Navigate to profile settings
-    if (data.platform === 'TIKTOK') {
+    if (ctxAcc.platform === 'TIKTOK') {
       await page.goto('https://www.tiktok.com/setting', { waitUntil: 'networkidle' });
     } else {
       await page.goto('https://studio.youtube.com/channel/editing', { waitUntil: 'networkidle' });
@@ -100,20 +105,6 @@ export async function editProfileHandler(job: Job<EditProfileJobData>): Promise<
       }
     }
 
-    // Save updated cookies
-    const cookies = await ctx.context.cookies();
-    const browserCookies: BrowserCookie[] = cookies.map(c => ({
-      name: c.name,
-      value: c.value,
-      domain: c.domain,
-      path: c.path,
-      expires: c.expires,
-      httpOnly: c.httpOnly,
-      secure: c.secure,
-      sameSite: c.sameSite === 'Strict' ? 'Strict' : c.sameSite === 'None' ? 'None' : 'Lax',
-    }));
-    await saveCookiesToDiskCache(data.accountId, browserCookies, data.cookiesDir);
-
     await job.updateProgress(100);
 
   } catch (err: unknown) {
@@ -121,6 +112,20 @@ export async function editProfileHandler(job: Job<EditProfileJobData>): Promise<
     logger.error(`❌ Ошибка редактирования: ${message}`);
     throw err;
   } finally {
+    // Persist cookies to BOTH disk AND DB (BUG-H2 fix)
+    if (ctx?.context) {
+      try {
+        const cookies = await ctx.context.cookies();
+        const browserCookies: BrowserCookie[] = cookies.map((c: any) => ({
+          name: c.name, value: c.value, domain: c.domain, path: c.path,
+          expires: c.expires, httpOnly: c.httpOnly, secure: c.secure,
+          sameSite: c.sameSite === 'Strict' ? 'Strict' : c.sameSite === 'None' ? 'None' : 'Lax',
+        }));
+        await persistCookies(data.accountId, browserCookies, data.cookiesDir ?? '/data/cookies');
+      } catch (cookieErr) {
+        console.warn('[EditProfile] Failed to persist cookies:', cookieErr);
+      }
+    }
     await closeBrowser(browser);
     logger.disconnect();
   }

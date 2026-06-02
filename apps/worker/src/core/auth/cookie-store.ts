@@ -246,6 +246,45 @@ export async function saveCookiesToDiskCache(
   }));
 }
 
+// ── Dual-persist: Disk + DB ─────────────────────────────────
+
+/**
+ * Persist cookies to BOTH disk cache AND database.
+ *
+ * This is the ONLY function handlers should call after a browser session.
+ * It ensures cookies survive container restarts (DB) while also being
+ * fast to load on next launch (disk cache).
+ *
+ * login.ts previously did inline crypto for DB persist — that logic is
+ * now centralized here (single source of truth for cookie encryption).
+ */
+export async function persistCookies(
+  accountId: string,
+  cookies: BrowserCookie[],
+  cookiesDir: string = '/data/cookies',
+): Promise<void> {
+  if (cookies.length === 0) return;
+
+  const { encrypted, iv, authTag } = encryptCookies(cookies);
+
+  // Write to both stores in parallel for speed
+  await Promise.all([
+    // Disk cache (fast path for next launch)
+    saveCookiesToDiskCache(accountId, cookies, cookiesDir),
+    // DB (source of truth, survives container restarts)
+    // Prisma Bytes fields expect Uint8Array, not Buffer
+    prisma.socialAccount.update({
+      where: { id: accountId },
+      data: {
+        cookiesEncrypted: new Uint8Array(encrypted),
+        cookiesIv: new Uint8Array(iv),
+        cookiesAuthTag: new Uint8Array(authTag),
+        cookiesUpdatedAt: new Date(),
+      },
+    }),
+  ]);
+}
+
 // ── DB-backed Cookie Loader ─────────────────────────────────
 
 import { prisma } from '../../lib/prisma.js';

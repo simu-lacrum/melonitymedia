@@ -93,6 +93,7 @@ model SocialAccount {
   warmupDays        Int         @default(10)  // user-configurable warmup duration (3-21)
   warmupStartedAt   DateTime?   // when warmup began (null = not started)
   warmupCompletedAt DateTime?   // when warmup finished (null = in progress)
+  lastWarmupDay     Int?        // last completed warmup day (1-based, BUG-M7 fix)
 
   // Profile metadata
   cookiesPath   String?       // legacy path to cookies file (deprecated)

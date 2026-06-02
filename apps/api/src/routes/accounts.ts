@@ -260,7 +260,9 @@ router.post('/import', async (req: Request, res: Response) => {
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i];
       try {
-        const accountId = crypto.randomUUID().replace(/-/g, '').substring(0, 25);
+        // BUG-L9 fix: Use full UUID (no truncation) to preserve full entropy
+        // Prisma @default(cuid()) handles auto-created accounts; imported accounts get UUID format
+        const accountId = crypto.randomUUID().replace(/-/g, '');
         const data_: any = {
           id: accountId,
           userId: req.user!.id,
@@ -438,6 +440,30 @@ router.patch('/:id', async (req: Request, res: Response) => {
     // Clamp warmupDays to valid range (3-21)
     if (updateData.warmupDays !== undefined) {
       updateData.warmupDays = Math.max(3, Math.min(21, Math.floor(Number(updateData.warmupDays))));
+    }
+
+    // BUG-H5 fix: Guard dangerous status transitions
+    // Prevent resetting BANNED/SHADOWBAN_SUSPECTED to ALIVE without admin force
+    if (updateData.status) {
+      const dangerousOrigins = ['BANNED', 'SHADOWBAN_SUSPECTED'];
+      const safeTargets = ['PAUSED']; // Users can pause a banned account
+      const currentStatus = existing.status;
+
+      if (
+        dangerousOrigins.includes(currentStatus) &&
+        !safeTargets.includes(updateData.status as string) &&
+        updateData.status !== currentStatus
+      ) {
+        const isAdminForce = req.query.force === 'true' && req.user!.role === 'ADMIN';
+        if (!isAdminForce) {
+          res.status(409).json({
+            error: `Cannot change status from ${currentStatus} to ${updateData.status}. ` +
+              `Use admin force override (?force=true) or re-verify account cookies first.`,
+            code: 'DANGEROUS_STATUS_TRANSITION',
+          });
+          return;
+        }
+      }
     }
 
     // If pinning a new proxy, validate against carrier stability rules

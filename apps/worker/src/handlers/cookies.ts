@@ -1,22 +1,21 @@
 // ─────────────────────────────────────────────────────────────
-// Cookies Handler v2 — Export cookies from existing sessions
+// Cookies Handler v3 — Refresh cookies from existing sessions
 //
-// In v2, this handler's role is EXPORT only:
-// 1. Launch browser with current cookies
-// 2. Navigate to platform to refresh session
-// 3. Export updated cookies back to encrypted store
-//
-// It does NOT do "cookie warmup" (visiting donor sites).
-// That practice was a myth from 2020 that never worked.
+// CHANGES in v3 (audit fix):
+// 1. Uses loadAccountContext() instead of stale BullMQ payload
+//    for platform, fingerprint, proxyUrl (BUG-C1 fix)
+// 2. Persists updated cookies to BOTH disk AND DB via
+//    persistCookies() (BUG-H3 fix)
 //
 // Cookie IMPORT is handled by the API (accounts.ts POST endpoint).
 // ─────────────────────────────────────────────────────────────
 
 import { Job } from 'bullmq';
 import { launchStealthContext, closeBrowser } from '../core/browser/patchright-launcher.js';
-import { saveCookiesToDiskCache, type BrowserCookie } from '../core/auth/cookie-store.js';
+import { persistCookies, type BrowserCookie } from '../core/auth/cookie-store.js';
 import { SocketLogger } from '../lib/socket-logger.js';
-import type { AccountFingerprint } from '../core/browser/fingerprint-manager.js';
+import { loadAccountContext } from '../lib/account-context.js';
+import { prisma } from '../lib/prisma.js';
 import type { Browser } from 'patchright';
 
 // ── Types ───────────────────────────────────────────────────
@@ -24,10 +23,8 @@ import type { Browser } from 'patchright';
 interface CookiesJobData {
   userId: string;
   accountId: string;
-  platform: 'TIKTOK' | 'YOUTUBE';
-  fingerprint: AccountFingerprint;
-  proxyUrl?: string;
   cookiesDir?: string;
+  // platform, fingerprint, proxyUrl are resolved from DB via loadAccountContext()
 }
 
 // ── Main ────────────────────────────────────────────────────
@@ -40,18 +37,21 @@ export async function cookiesHandler(job: Job<CookiesJobData>): Promise<string> 
   try {
     logger.info(`Обновление cookies для ${data.accountId}...`);
 
+    // Resolve everything fresh from DB — never trust BullMQ payload
+    const ctxAcc = await loadAccountContext(data.accountId);
+
     // Launch browser with existing cookies
     const ctx = await launchStealthContext({
       accountId: data.accountId,
-      proxyUrl: data.proxyUrl,
+      proxyUrl: ctxAcc.proxyUrl,
       cookiesPath: data.cookiesDir ?? '/data/cookies',
-      fingerprint: data.fingerprint,
+      fingerprint: ctxAcc.fingerprint,
     });
     browser = ctx.browser;
     const page = ctx.page;
 
     // Navigate to platform to refresh session
-    const baseUrl = data.platform === 'TIKTOK'
+    const baseUrl = ctxAcc.platform === 'TIKTOK'
       ? 'https://www.tiktok.com'
       : 'https://www.youtube.com';
 
@@ -67,6 +67,10 @@ export async function cookiesHandler(job: Job<CookiesJobData>): Promise<string> 
 
     if (isLoggedOut) {
       logger.warn('Cookies истекли — требуется импорт новых cookies через UI');
+      await prisma.socialAccount.update({
+        where: { id: data.accountId },
+        data: { status: 'EXPIRED_COOKIES' },
+      });
       throw new Error('COOKIES_EXPIRED');
     }
 
@@ -83,10 +87,10 @@ export async function cookiesHandler(job: Job<CookiesJobData>): Promise<string> 
       sameSite: c.sameSite === 'Strict' ? 'Strict' : c.sameSite === 'None' ? 'None' : 'Lax',
     }));
 
-    // Save updated cookies to encrypted store
-    await saveCookiesToDiskCache(data.accountId, browserCookies, data.cookiesDir);
+    // Persist to BOTH disk cache AND database (BUG-H3 fix)
+    await persistCookies(data.accountId, browserCookies, data.cookiesDir ?? '/data/cookies');
 
-    logger.info(`✅ Cookies обновлены (${browserCookies.length} шт)`);
+    logger.info(`✅ Cookies обновлены и сохранены в DB (${browserCookies.length} шт)`);
     await job.updateProgress(100);
 
     return JSON.stringify({ count: browserCookies.length, updatedAt: new Date().toISOString() });

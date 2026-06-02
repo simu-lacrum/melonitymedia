@@ -1,3 +1,21 @@
+// ─────────────────────────────────────────────────────────────
+// Fingerprint Generator (API-side) — lightweight variant
+//
+// ⚠️ BUG-M1 NOTE: This generator uses a DIFFERENT seeding algorithm
+// than the worker's fingerprint-manager.ts:
+//   - API: hash[n] (raw byte at index n)
+//   - Worker: parseInt(seedHex.slice(n*4, n*4+8), 16) (4-byte hex slices)
+//
+// Both produce valid, deterministic fingerprints for a given accountId,
+// but they will NOT produce IDENTICAL outputs for the same accountId.
+//
+// This is safe because fingerprints are generated ONCE at account
+// creation time and stored in DB. The worker always loads from DB
+// via loadAccountContext() — it never regenerates.
+//
+// DO NOT use the worker's generateFingerprintForAccount() from the API
+// or vice versa. If you need to change the algorithm, create a migration.
+// ─────────────────────────────────────────────────────────────
 import crypto from 'crypto';
 
 const timezoneByCountry: Record<string, string> = {
@@ -72,6 +90,16 @@ export function generateFingerprint(accountId: string, geo?: { country?: string;
   };
   const locale = localeByCountry[geo?.country ?? 'US'] ?? 'en-US';
   const timezone = timezoneByCountry[geo?.country ?? 'US'] ?? 'America/New_York';
+
+  // BUG-L4 fix: Warn if geo.country is not in our lookup tables.
+  // This prevents silent GEO_COHERENCE violations at worker launch time.
+  const country = geo?.country ?? 'US';
+  if (!localeByCountry[country]) {
+    console.warn(
+      `[fingerprint] Country "${country}" not in locale lookup table. ` +
+      `Defaulting to en-US/America/New_York. Add this country to avoid GEO_COHERENCE violations.`,
+    );
+  }
 
   // --- UA (Chrome version from env, with sane default) ---
   const chromeMajor = parseInt(process.env.EXPECTED_CHROME_MAJOR ?? '148', 10);

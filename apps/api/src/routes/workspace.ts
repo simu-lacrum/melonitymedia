@@ -284,7 +284,35 @@ router.post('/queue', async (req: Request, res: Response) => {
       data: { config: { ...currentConfig, videoIds: updatedVideos } },
     });
 
-    res.json({ added: true, totalVideos: updatedVideos.length });
+    // BUG-M6 fix: Dispatch BullMQ jobs for the newly added videos
+    // Previously only the config was updated but no jobs were created,
+    // so videos sat in the config but never got processed.
+    const accountId = currentConfig.accountId as string | undefined;
+    if (accountId && task.type === 'UPLOAD') {
+      for (const videoId of videoIds) {
+        const video = await prisma.video.findUnique({
+          where: { id: videoId },
+          select: { id: true, filepath: true, description: true, hashtags: true },
+        });
+        if (video) {
+          await dispatchAccountJob({
+            queueName: 'upload',
+            accountId,
+            userId: req.user!.id,
+            extra: {
+              taskId,
+              videoId: video.id,
+              videoPath: video.filepath,
+              title: video.description ?? '',
+              description: video.description ?? '',
+              hashtags: (video.hashtags as string[]) ?? [],
+            },
+          });
+        }
+      }
+    }
+
+    res.json({ added: true, totalVideos: updatedVideos.length, jobsDispatched: videoIds.length });
   } catch (err) {
     console.error('[Workspace] Queue add error:', err);
     res.status(500).json({ error: 'Ошибка при добавлении в очередь' });

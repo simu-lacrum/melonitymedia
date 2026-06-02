@@ -125,6 +125,7 @@ export async function detectShadowbanForAccount(accountId: string): Promise<{
   const candidates = await prisma.video.findMany({
     where: {
       accountId,
+      userId: account.userId, // BUG-L3 fix: userId scope for consistency
       uploadedAt: {
         lte: ageGateThreshold,   // CRITICAL: video must be >= 24h old
         gte: lookbackThreshold,

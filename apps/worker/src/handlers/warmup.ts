@@ -16,6 +16,7 @@
 
 import { Job } from 'bullmq';
 import { launchStealthContext, closeBrowser } from '../core/browser/patchright-launcher.js';
+import { persistCookies } from '../core/auth/cookie-store.js';
 import { createPageCursor, humanClick, humanScroll, humanIdleMove } from '../core/humanity/biomouse.js';
 import { humanType, humanPressEnter } from '../core/humanity/typing-emulator.js';
 import { SocketLogger } from '../lib/socket-logger.js';
@@ -71,10 +72,21 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     }
 
     const totalDays = ctxAcc.warmupDays;
-    const ageDays = Math.ceil(
-      (Date.now() - ctxAcc.warmupStartedAt.getTime()) / 86_400_000,
-    );
-    const warmupDay = data.warmupDay ?? Math.min(ageDays, totalDays);
+
+    // BUG-M7 fix: use sequential day progression instead of calendar-based.
+    // If the worker was offline for 3 days, we should NOT skip phases 3→6.
+    // Instead, we increment from the last completed warmup day + 1.
+    // data.warmupDay override is still supported for admin re-runs.
+    let warmupDay: number;
+    if (data.warmupDay !== undefined) {
+      warmupDay = data.warmupDay;
+    } else {
+      const acc = await prisma.socialAccount.findUniqueOrThrow({
+        where: { id: data.accountId },
+        select: { lastWarmupDay: true },
+      });
+      warmupDay = Math.min((acc.lastWarmupDay ?? 0) + 1, totalDays);
+    }
 
     logger.info(
       `🔥 Прогрев аккаунта — День ${warmupDay}/${totalDays} (${ctxAcc.platform})`,
@@ -102,10 +114,12 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     const passiveEnd = Math.max(1, Math.ceil(totalDays * 0.3));
     const lightEnd = Math.max(passiveEnd + 1, Math.ceil(totalDays * 0.6));
 
-    // Default Dota 2 hashtags mixed with user provided hashtags
-    const userHashtags = Array.isArray(data.hashtags) ? data.hashtags : [];
-    const baseHashtags = ['dota2', 'dota', 'dotawtf', 'dota2highlights'];
-    const mergedHashtags = [...new Set([...baseHashtags, ...userHashtags])];
+    // Use user-provided hashtags for warmup — no hardcoded defaults
+    // Warmup browsing should match the account's actual content niche
+    // to train TikTok's recommendation model correctly (BUG-M3 fix)
+    const mergedHashtags = Array.isArray(data.hashtags) && data.hashtags.length > 0
+      ? [...new Set(data.hashtags)]
+      : [];  // No hashtags = pure FYP browsing, which is also valid
 
     const phaseCtx: WarmupPhaseContext = {
       warmupDay,
@@ -124,12 +138,19 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
 
     logger.info(`✅ Прогрев День ${warmupDay}/${totalDays} завершён`);
 
+    // Save the completed warmup day for sequential tracking (BUG-M7 fix)
     if (warmupDay >= totalDays) {
       await prisma.socialAccount.update({
         where: { id: data.accountId },
-        data: { warmupCompletedAt: new Date(), status: 'ALIVE' },
+        data: { warmupCompletedAt: new Date(), status: 'ALIVE', lastWarmupDay: warmupDay },
       });
       logger.info(`🎉 Прогрев завершён! Аккаунт ${data.accountId} готов к загрузкам.`);
+    } else {
+      // Save progress for intermediate days
+      await prisma.socialAccount.update({
+        where: { id: data.accountId },
+        data: { lastWarmupDay: warmupDay },
+      });
     }
 
     await job.updateProgress(100);
@@ -139,20 +160,19 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     logger.error(`❌ Ошибка прогрева: ${message}`);
     throw err;
   } finally {
-    // Save updated session cookies before closing browser
+    // Persist cookies to BOTH disk AND DB before closing browser (BUG-C5 fix)
     if (browser) {
       try {
         const contexts = browser.contexts();
         if (contexts.length > 0) {
-          const { saveCookiesToDiskCache } = await import('../core/auth/cookie-store.js');
           const freshCookies = await contexts[0].cookies();
           const browserCookies = freshCookies.map(c => ({
             name: c.name, value: c.value, domain: c.domain, path: c.path,
             expires: c.expires, httpOnly: c.httpOnly, secure: c.secure,
             sameSite: c.sameSite === 'Strict' ? 'Strict' as const : c.sameSite === 'None' ? 'None' as const : 'Lax' as const,
           }));
-          await saveCookiesToDiskCache(data.accountId, browserCookies, data.cookiesDir);
-          logger.info('Cookies сохранены после прогрева');
+          await persistCookies(data.accountId, browserCookies, data.cookiesDir ?? '/data/cookies');
+          logger.info('Cookies сохранены (disk + DB) после прогрева');
         }
       } catch (cookieErr) {
         logger.warn(`Не удалось сохранить cookies: ${cookieErr}`);
@@ -215,6 +235,11 @@ async function _lightEngagement(
 
   logger.info(`Day ${data.warmupDay}: Лёгкая активность (${watchCount} видео, like ~${Math.round(likeProb * 100)}%)`);
 
+  // BUG-H4 fix: compute comment target index ONCE before the loop
+  // Previously _randomDelay was called on every iteration inside the loop,
+  // making comment placement non-deterministic per iteration.
+  const commentAtIndex = data.warmupDay >= 5 ? _randomDelay(3, Math.max(3, watchCount - 2)) : -1;
+
   for (let i = 0; i < watchCount; i++) {
     // Occasionally go to a hashtag page to watch videos related to the topic
     if (data.platform === 'TIKTOK' && Math.random() < 0.2 && data.hashtags.length > 0) {
@@ -242,7 +267,7 @@ async function _lightEngagement(
     }
 
     // One comment per session (day 5+)
-    if (!commented && data.warmupDay >= 5 && i === _randomDelay(3, watchCount - 2)) {
+    if (!commented && i === commentAtIndex) {
       const comment = COMMENT_POOL[Math.floor(Math.random() * COMMENT_POOL.length)];
       try {
         if (data.platform === 'TIKTOK') {

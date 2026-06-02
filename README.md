@@ -559,9 +559,15 @@ graph LR
 | **Carrier Stability Rule** | 14-day proxy pin window для TikTok: блокировка смены carrier/country, LTE-only для свежих аккаунтов |
 | **Shadowban 24h Gate** | Детекция shadowban только по видео старше 24ч (предотвращение ложных срабатываний) |
 | **No Secrets in Response** | Encrypted cookies никогда не отправляются на фронтенд, `address` field (credentials) stripped из proxy responses |
-| **Platform-Aware Validation** | Session validator использует platform-specific URLs (TikTok API vs YouTube /account) |
-| **Geo-Based Fingerprint** | Timezone в fingerprints привязан к geo-данным прокси (не серверному timezone) |
+| **Platform-Aware Validation** | Session validator использует platform-specific URLs (TikTok API vs YouTube /account) с HTTP redirect detection |
+| **Geo-Based Fingerprint** | Timezone в fingerprints привязан к geo-данным прокси с warning при неизвестных странах |
 | **MASTER_KEY Required** | API и Worker делают hard fail (`process.exit(1)`) при отсутствии или невалидном MASTER_KEY |
+| **Centralized Cookie Persist** | `persistCookies()` — единая функция для всех handlers: одновременная запись на диск И в DB |
+| **Status Transition Guard** | PATCH account status запрещает переход BANNED/SHADOWBAN→ALIVE без admin force-override |
+| **Sequential Warmup** | `lastWarmupDay` в DB обеспечивает последовательный прогрев даже при простое сервера (не скачет по дням) |
+| **Proxy URL Validation** | `buildProxyUrl()` бросает ошибку при невалидном URL вместо silent fallback |
+| **Upload Confirmation** | TikTok upload проверяет наличие ошибок на странице после публикации |
+| **YouTube Redirect Detection** | Session validator обрабатывает HTTP 302/303 редиректы на Google login |
 
 ---
 
