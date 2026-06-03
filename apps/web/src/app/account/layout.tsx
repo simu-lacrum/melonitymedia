@@ -42,7 +42,7 @@ export default function AccountLayout({
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-melon-pink border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-2 border-melon-pink border-t-transparent rounded-full animate-spin-fast" />
       </div>
     )
   }
@@ -75,7 +75,7 @@ export default function AccountLayout({
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`relative px-4 py-2 text-body-sm font-medium rounded-pill transition-colors ${
+                  className={`relative px-4 py-2 text-body-sm font-medium rounded-pill transition-[color,background-color] duration-150 ease-out ${
                     isActive ? "text-white" : "text-text-muted hover:text-white hover:bg-white/5"
                   }`}
                 >
@@ -83,7 +83,7 @@ export default function AccountLayout({
                     <motion.div
                       layoutId="activeNav"
                       className="absolute inset-0 bg-white/10 rounded-pill"
-                      transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                      transition={{ type: "spring", duration: 0.35, bounce: 0.12 }}
                     />
                   )}
                   <span className="relative z-10 flex items-center space-x-2">

@@ -30,7 +30,7 @@ export function Card({
     header:
       "bg-[rgba(28,32,38,0.72)] backdrop-blur-xl shadow-[0_4px_24px_rgba(0,0,0,0.32)]",
     interactive:
-      "bg-[var(--color-surface-dark)] shadow-[0_8px_30px_rgba(0,0,0,0.2)] hover:bg-[var(--color-surface-elevated)] transition-colors cursor-pointer",
+      "bg-[var(--color-surface-dark)] shadow-[0_8px_30px_rgba(0,0,0,0.2)] hover:bg-[var(--color-surface-elevated)] transition-[background-color,transform] duration-[180ms] ease-[cubic-bezier(0.23,1,0.32,1)] cursor-pointer active:scale-[0.995]",
   };
 
   return (

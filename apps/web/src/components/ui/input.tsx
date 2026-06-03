@@ -24,7 +24,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           id={inputId}
           className={cn(
             'w-full h-12 px-4 rounded-lg bg-surface-dark text-pure-white text-sm font-medium',
-            'border border-pure-white/[0.1] transition-all duration-300',
+            'border border-pure-white/[0.1] transition-[border-color,background-color,box-shadow] duration-200 ease-out',
             'placeholder:text-muted-gray/50',
             'focus:border-pure-white/[0.4] focus:outline-none focus:bg-night-base',
             error && 'border-alert-red focus:border-alert-red',

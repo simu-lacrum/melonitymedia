@@ -34,7 +34,6 @@
   --font-display: 'Roboto Flex', sans-serif;
   --font-mono: var(--font-jetbrains-mono), monospace;
 
-
   --radius-input: 12px;
   --radius-card-base: 20px;
   --radius-card-elevated: 28px;
@@ -48,6 +47,21 @@
   --color-surface-dark: #181C24;
   --color-surface-elevated: #2A2F3D;
   --color-night-base: #0E1014;
+
+  /* ── Emil Kowalski: Custom Easing Curves ──────────────── */
+  /* Strong ease-out for UI interactions */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  /* Strong ease-in-out for on-screen movement */
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  /* iOS-like drawer curve (from Ionic Framework) */
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* ── Duration Tokens ──────────────────────────────────── */
+  --dur-press: 160ms;
+  --dur-tooltip: 150ms;
+  --dur-dropdown: 200ms;
+  --dur-modal: 250ms;
+  --dur-drawer: 280ms;
 }
 
 @layer base {
@@ -63,6 +77,16 @@
     min-height: 100vh;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* ── Accessibility: Reduced Motion ─────────────────── */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 
   /* Custom Scrollbar */
@@ -196,17 +220,25 @@
     mix-blend-mode: screen;
   }
 
-  /* Button Variants */
+  /* ── Button Variants ──────────────────────────────────── */
   .btn-primary-strict {
     background: linear-gradient(135deg, var(--color-melon-pink) 0%, var(--color-coral) 100%);
     color: var(--color-pure-white);
     box-shadow: 0 4px 12px var(--color-melon-glow), inset 0 1px 0 rgba(255,255,255,0.2);
     border: none;
     border-radius: 999px;
+    transition: transform var(--dur-press) var(--ease-out),
+                filter 200ms ease,
+                box-shadow 200ms ease;
   }
-  .btn-primary-strict:hover {
-    filter: brightness(1.1);
-    box-shadow: 0 6px 16px var(--color-melon-glow), inset 0 1px 0 rgba(255,255,255,0.3);
+  .btn-primary-strict:active {
+    transform: scale(0.97);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .btn-primary-strict:hover {
+      filter: brightness(1.1);
+      box-shadow: 0 6px 16px var(--color-melon-glow), inset 0 1px 0 rgba(255,255,255,0.3);
+    }
   }
 
   .btn-accent-strict {
@@ -215,10 +247,18 @@
     box-shadow: 0 4px 12px rgba(126, 232, 250, 0.3), inset 0 1px 0 rgba(255,255,255,0.4);
     border: none;
     border-radius: 999px;
+    transition: transform var(--dur-press) var(--ease-out),
+                filter 200ms ease,
+                box-shadow 200ms ease;
   }
-  .btn-accent-strict:hover {
-    filter: brightness(1.1);
-    box-shadow: 0 6px 16px rgba(126, 232, 250, 0.4), inset 0 1px 0 rgba(255,255,255,0.5);
+  .btn-accent-strict:active {
+    transform: scale(0.97);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .btn-accent-strict:hover {
+      filter: brightness(1.1);
+      box-shadow: 0 6px 16px rgba(126, 232, 250, 0.4), inset 0 1px 0 rgba(255,255,255,0.5);
+    }
   }
 
   .btn-outline-strict {
@@ -227,15 +267,54 @@
     border: 1px solid var(--glass-stroke);
     backdrop-filter: blur(10px);
     border-radius: 999px;
+    transition: transform var(--dur-press) var(--ease-out),
+                background-color 200ms ease,
+                border-color 200ms ease;
   }
-  .btn-outline-strict:hover {
-    background: var(--color-glass-surface);
-    border-color: rgba(255, 255, 255, 0.2);
+  .btn-outline-strict:active {
+    transform: scale(0.97);
   }
+  @media (hover: hover) and (pointer: fine) {
+    .btn-outline-strict:hover {
+      background: var(--color-glass-surface);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+  }
+
+  /* ── Stagger Entry Animation ──────────────────────────── */
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .stagger-enter {
+    opacity: 0;
+    animation: fadeInUp 300ms var(--ease-out) forwards;
+  }
+  .stagger-enter:nth-child(1) { animation-delay: 0ms; }
+  .stagger-enter:nth-child(2) { animation-delay: 50ms; }
+  .stagger-enter:nth-child(3) { animation-delay: 100ms; }
+  .stagger-enter:nth-child(4) { animation-delay: 150ms; }
+  .stagger-enter:nth-child(5) { animation-delay: 200ms; }
+  .stagger-enter:nth-child(6) { animation-delay: 250ms; }
 
   @keyframes shimmer {
     100% {
       transform: translateX(100%);
     }
+  }
+
+  /* ── Faster Spinner (perceived performance) ───────────── */
+  @keyframes spin-fast {
+    to { transform: rotate(360deg); }
+  }
+  .animate-spin-fast {
+    animation: spin-fast 0.6s linear infinite;
   }
 }

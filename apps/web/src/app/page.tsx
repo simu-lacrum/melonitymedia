@@ -32,19 +32,19 @@ export default function LandingPage() {
             </span>
           </Link>
           <div className="hidden md:flex items-center gap-8">
-            <a href="#capabilities" className="text-muted-gray hover:text-pure-white transition-colors text-sm font-medium">
+            <a href="#capabilities" className="text-muted-gray hover:text-pure-white transition-colors duration-150 ease-out text-sm font-medium">
               Платформа
             </a>
-            <a href="#workflow" className="text-muted-gray hover:text-pure-white transition-colors text-sm font-medium">
+            <a href="#workflow" className="text-muted-gray hover:text-pure-white transition-colors duration-150 ease-out text-sm font-medium">
               Процесс
             </a>
-            <a href="#infrastructure" className="text-muted-gray hover:text-pure-white transition-colors text-sm font-medium">
+            <a href="#infrastructure" className="text-muted-gray hover:text-pure-white transition-colors duration-150 ease-out text-sm font-medium">
               Инфраструктура
             </a>
             <div className="w-[1px] h-4 bg-pure-white/[0.1]"></div>
             <Link
               href="/auth/login"
-              className="text-sm text-muted-gray hover:text-pure-white transition-colors font-medium"
+              className="text-sm text-muted-gray hover:text-pure-white transition-colors duration-150 ease-out font-medium"
             >
               Войти
             </Link>
@@ -115,11 +115,11 @@ export default function LandingPage() {
               {/* Right — Animated ASCII Art */}
               <div className="hidden lg:flex justify-end animate-enter delay-2 w-full">
                 <div className="liquid-glass p-8 w-full max-w-[500px] aspect-square flex items-center justify-center relative group">
-                  <div className="absolute inset-0 bg-melon-pink/[0.03] opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+                  <div className="absolute inset-0 bg-melon-pink/[0.03] opacity-0 group-hover:opacity-100 transition-opacity duration-500 ease-out" />
                   
                   {/* ASCII Art */}
                   <pre 
-                    className="font-mono text-[10px] sm:text-xs leading-[1.2] text-melon-pink opacity-90 text-center select-none animate-pulse" 
+                    className="font-mono text-[10px] sm:text-xs leading-[1.2] text-melon-pink opacity-90 text-center select-none animate-[pulse_3s_ease-in-out_infinite]" 
                     style={{ textShadow: "0 0 15px rgba(255,20,105,0.4)" }}
                   >
 {`  __  __      _             _ _         
@@ -138,7 +138,7 @@ export default function LandingPage() {
                   
                   {/* Status Indicator */}
                   <div className="absolute bottom-6 flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-melon-pink animate-ping" />
+                    <span className="w-2 h-2 rounded-full bg-melon-pink animate-[ping_2s_ease-in-out_infinite]" />
                     <span className="text-[10px] text-melon-pink font-mono tracking-widest uppercase opacity-80">
                       System Online
                     </span>
@@ -197,7 +197,7 @@ export default function LandingPage() {
               ].map((feature, i) => (
                 <div
                   key={i}
-                  className="liquid-glass p-6"
+                  className="liquid-glass p-6 stagger-enter"
                 >
                   <feature.icon className="w-5 h-5 text-pure-white mb-6" />
                   <h3 className="text-sm font-semibold text-pure-white uppercase tracking-wide mb-2">{feature.title}</h3>
@@ -289,7 +289,7 @@ export default function LandingPage() {
                     { label: 'Database', tech: 'PostgreSQL 16' },
                     { label: 'Security', tech: 'AES-256-GCM, HttpOnly JWT, Xvfb' },
                   ].map((layer, i) => (
-                    <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between p-6 hover:bg-surface-elevated/30 transition-colors">
+                    <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between p-6 hover:bg-surface-elevated/30 transition-[background-color] duration-150 ease-out">
                       <div className="text-sm font-semibold text-pure-white mb-1 sm:mb-0">{layer.label}</div>
                       <div className="text-sm font-mono text-muted-gray">{layer.tech}</div>
                     </div>
@@ -378,7 +378,7 @@ export default function LandingPage() {
               </span>
             </div>
             <div className="flex items-center gap-6">
-              <Link href="/auth/login" className="text-xs font-semibold text-muted-gray hover:text-pure-white transition-colors uppercase tracking-widest">
+              <Link href="/auth/login" className="text-xs font-semibold text-muted-gray hover:text-pure-white transition-colors duration-150 ease-out uppercase tracking-widest">
                 System Login
               </Link>
             </div>

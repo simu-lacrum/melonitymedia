@@ -39,7 +39,7 @@ export function Sidebar({ isAdmin = false, isOpen = false, onClose }: SidebarPro
           href={href}
           onClick={onClose}
           className={cn(
-            'flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-200',
+            'flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-[color,background-color] duration-150 ease-out',
             isActive
               ? 'text-pure-white bg-pink-alpha border-l-2 border-melon-pink font-medium'
               : 'text-muted-gray hover:text-pure-white hover:bg-surface-dark',
@@ -65,7 +65,7 @@ export function Sidebar({ isAdmin = false, isOpen = false, onClose }: SidebarPro
       <aside
         className={cn(
           'fixed top-0 left-0 z-40 h-full w-60 bg-night-base pt-20 pb-6 flex flex-col gap-6',
-          'transition-transform duration-300 ease-out',
+          'transition-transform ease-[cubic-bezier(0.32,0.72,0,1)] duration-[280ms]',
           // Desktop: always visible. Mobile: slide in/out.
           'lg:translate-x-0',
           isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',

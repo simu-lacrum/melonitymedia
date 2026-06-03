@@ -54,7 +54,7 @@ export function DropZone({
       onDrop={handleDrop}
       className={cn(
         'flex flex-col items-center justify-center gap-3 p-8 rounded-2xl',
-        'border-2 border-dashed cursor-pointer transition-all duration-200',
+        'border-2 border-dashed cursor-pointer transition-[border-color,background-color] duration-200 ease-out',
         isDragOver
           ? 'border-melon-pink bg-melon-pink/5 scale-[1.01]'
           : 'border-muted-gray/30 hover:border-muted-gray/60',

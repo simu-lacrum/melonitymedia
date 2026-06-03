@@ -27,7 +27,7 @@ export function Header({ user, onMenuToggle }: HeaderProps) {
         <div className="flex items-center gap-4">
           <button
             onClick={onMenuToggle}
-            className="lg:hidden text-muted-gray hover:text-pure-white transition-colors"
+            className="lg:hidden text-muted-gray hover:text-pure-white transition-colors duration-150 ease-out"
           >
             <Menu className="w-6 h-6" />
           </button>
@@ -45,7 +45,7 @@ export function Header({ user, onMenuToggle }: HeaderProps) {
           <div className="relative">
             <button
               onClick={() => setShowUserMenu(!showUserMenu)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-surface-dark transition-colors"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-surface-dark transition-[background-color] duration-150 ease-out"
             >
               <div className="w-8 h-8 rounded-full bg-melon-pink/20 flex items-center justify-center">
                 <User className="w-4 h-4 text-melon-pink" />
@@ -59,14 +59,17 @@ export function Header({ user, onMenuToggle }: HeaderProps) {
             {showUserMenu && (
               <>
                 <div className="fixed inset-0 z-30" onClick={() => setShowUserMenu(false)} />
-                <div className="absolute right-0 top-full mt-2 w-56 bg-surface-dark rounded-xl shadow-xl border border-muted-gray/10 py-2 z-40 animate-[scaleIn_150ms_ease]">
+                <div
+                  className="absolute right-0 top-full mt-2 w-56 bg-surface-dark rounded-xl shadow-xl border border-muted-gray/10 py-2 z-40 transition-[opacity,transform] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] opacity-100 scale-100"
+                  style={{ transformOrigin: 'top right' }}
+                >
                   <div className="px-4 py-2 border-b border-muted-gray/10">
                     <p className="text-sm text-pure-white font-medium">{user.name || 'Пользователь'}</p>
                     <p className="text-xs text-muted-gray">{user.email}</p>
                   </div>
                   <button
                     onClick={handleLogout}
-                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-alert-red hover:bg-alert-red/5 transition-colors"
+                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-alert-red hover:bg-alert-red/5 transition-[background-color] duration-150 ease-out"
                   >
                     <LogOut className="w-4 h-4" />
                     Выйти

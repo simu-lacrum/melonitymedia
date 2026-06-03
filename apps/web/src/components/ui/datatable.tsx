@@ -76,7 +76,7 @@ export function DataTable<T extends { id: string }>({
     <div className="w-full">
       {/* Bulk actions toolbar */}
       {someSelected && bulkActions && (
-        <div className="flex items-center gap-3 px-4 py-3 mb-2 bg-melon-pink/5 rounded-xl border border-melon-pink/20 animate-[fadeIn_150ms_ease]">
+        <div className="flex items-center gap-3 px-4 py-3 mb-2 bg-melon-pink/5 rounded-xl border border-melon-pink/20 transition-opacity duration-150 ease-out">
           <span className="text-sm text-pure-white font-medium">
             Выбрано: {selectedIds.size}
           </span>
@@ -104,7 +104,7 @@ export function DataTable<T extends { id: string }>({
                   key={col.key}
                   className={cn(
                     'p-3 text-left text-xs font-medium text-muted-gray uppercase tracking-wider',
-                    col.sortable && 'cursor-pointer hover:text-pure-white transition-colors select-none',
+                    col.sortable && 'cursor-pointer hover:text-pure-white transition-colors duration-150 ease-out select-none',
                   )}
                   style={col.width ? { width: col.width } : undefined}
                   onClick={col.sortable ? () => handleSort(col.key) : undefined}
@@ -126,7 +126,7 @@ export function DataTable<T extends { id: string }>({
               <tr
                 key={item.id}
                 className={cn(
-                  'border-b border-muted-gray/5 transition-colors',
+                  'border-b border-muted-gray/5 transition-[background-color] duration-150 ease-out',
                   selectedIds.has(item.id) ? 'bg-melon-pink/5' : 'hover:bg-surface-dark/50',
                 )}
               >
