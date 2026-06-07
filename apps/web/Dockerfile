@@ -32,7 +32,8 @@ COPY apps/web/src ./apps/web/src
 COPY apps/web/public ./apps/web/public
 
 # Build environment variables (available at build time)
-ARG NEXT_PUBLIC_API_URL=http://api:4000
+# NEXT_PUBLIC_API_URL must be the EXTERNAL url (browser calls this directly)
+ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 # Build Next.js in standalone mode

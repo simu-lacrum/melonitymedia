@@ -12,7 +12,11 @@ export const metadata: Metadata = {
   title: 'MelonityMedia',
   description: 'Панель автоматизации для вертикального видеоконтента — TikTok и YouTube Shorts',
   icons: {
-    icon: '/logo.svg',
+    icon: [
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/favicon.ico', sizes: '32x32' },
+    ],
+    apple: '/logo.svg',
   },
 };
 

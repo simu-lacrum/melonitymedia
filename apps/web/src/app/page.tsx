@@ -43,13 +43,13 @@ export default function LandingPage() {
             </a>
             <div className="w-[1px] h-4 bg-pure-white/[0.1]"></div>
             <Link
-              href="/auth/login"
+              href="/auth/sign-in"
               className="text-sm text-muted-gray hover:text-pure-white transition-colors duration-150 ease-out font-medium"
             >
               Войти
             </Link>
             <Link
-              href="/auth/register"
+              href="/auth/sign-up"
               className="btn-primary-strict px-5 py-2 text-sm"
             >
               Запросить доступ
@@ -83,7 +83,7 @@ export default function LandingPage() {
                 {/* CTA */}
                 <div className="animate-enter delay-3 flex flex-wrap items-center gap-4">
                   <Link
-                    href="/auth/register"
+                    href="/auth/sign-up"
                     className="btn-primary-strict flex items-center gap-2 px-7 py-3.5 text-sm"
                   >
                     Запросить доступ
@@ -356,7 +356,7 @@ export default function LandingPage() {
                 Интеграция занимает минуты. Начните масштабирование контента уже сегодня.
               </p>
               <Link
-                href="/auth/register"
+                href="/auth/sign-up"
                 className="btn-primary-strict inline-flex items-center gap-2 px-8 py-4"
               >
                 Создать аккаунт
@@ -378,7 +378,7 @@ export default function LandingPage() {
               </span>
             </div>
             <div className="flex items-center gap-6">
-              <Link href="/auth/login" className="text-xs font-semibold text-muted-gray hover:text-pure-white transition-colors duration-150 ease-out uppercase tracking-widest">
+              <Link href="/auth/sign-in" className="text-xs font-semibold text-muted-gray hover:text-pure-white transition-colors duration-150 ease-out uppercase tracking-widest">
                 System Login
               </Link>
             </div>
