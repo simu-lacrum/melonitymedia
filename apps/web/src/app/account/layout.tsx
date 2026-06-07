@@ -122,10 +122,10 @@ export default function AccountLayout({
           <Separator orientation="vertical" className="h-6 hidden sm:block" />
           <Tooltip>
             <TooltipTrigger
-                render={<Button variant="ghost" size="icon" onClick={handleLogout} className="text-destructive hover:text-destructive hover:bg-destructive/10" />}
-              >
-                <LogOut className="size-4" />
-              </TooltipTrigger>
+              render={<Button variant="ghost" size="icon" onClick={handleLogout} className="text-destructive hover:text-destructive hover:bg-destructive/10" />}
+            >
+              <LogOut className="size-4" />
+            </TooltipTrigger>
             <TooltipContent>Выйти</TooltipContent>
           </Tooltip>
         </div>

@@ -158,6 +158,8 @@ export default function AccountsPage() {
         applyToAll: false,
         config: { mode: "COOKIES", concurrency: 1, headless: true },
         threads: 1,
+        delayMin: 0,
+        delayMax: 0,
       })
       toast.success("Сбор куки запущен")
     } catch {
@@ -367,7 +369,22 @@ export default function AccountsPage() {
                   >
                     <span className="text-sm font-medium">Выбрано: {selectedIds.length}</span>
                     <Separator orientation="vertical" className="h-4" />
-                    <Button variant="ghost" size="sm">
+                    <Button variant="ghost" size="sm" onClick={async () => {
+                      try {
+                        await api.post("/api/workspace/launch", {
+                          type: "COOKIES",
+                          accountIds: selectedIds,
+                          applyToAll: false,
+                          config: { mode: "COOKIES", concurrency: 3, headless: true },
+                          threads: 3,
+                          delayMin: 2000,
+                          delayMax: 5000,
+                        })
+                        toast.success(`Сбор куки запущен для ${selectedIds.length} аккаунтов`)
+                      } catch {
+                        toast.error("Ошибка запуска")
+                      }
+                    }}>
                       <RefreshCw className="size-4 mr-2" />
                       Обновить куки
                     </Button>

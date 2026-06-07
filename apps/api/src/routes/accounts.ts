@@ -119,7 +119,7 @@ router.get('/', async (req: Request, res: Response) => {
       where: { userId: req.user!.id },
       include: {
         pinnedProxy: {
-          select: { id: true, address: true, label: true, type: true, carrier: true, country: true },
+          select: { id: true, host: true, port: true, address: true, label: true, type: true, carrier: true, country: true },
         },
         _count: { select: { videos: { where: { isUploaded: true } } } },
       },
@@ -215,14 +215,33 @@ function parseBulkImport(text: string, mode: 'cookies' | 'login_pass' | 'auto'):
   for (const line of lines) {
     if (line.startsWith('#')) continue;  // comment
 
-    const parts = line.split(':');
-    if (parts.length === 2) {
-      result.push({ login: parts[0], password: parts[1] });
-    } else if (parts.length === 3) {
-      result.push({ login: parts[0], password: parts[1], cookies: parts[2] });
-    } else if (parts.length > 3) {
-      // login:password:cookies where cookies has ':' — rejoin from index 2
-      result.push({ login: parts[0], password: parts[1], cookies: parts.slice(2).join(':') });
+    // BUG-15 fix: passwords can contain ':' — use indexOf for first split only
+    const firstColon = line.indexOf(':');
+    if (firstColon === -1) continue; // skip malformed lines
+
+    const login = line.slice(0, firstColon);
+    const rest = line.slice(firstColon + 1);
+
+    if (mode === 'login_pass') {
+      // In credentials mode, everything after first colon is the password
+      result.push({ login, password: rest });
+    } else {
+      // Auto/cookies mode: try to detect if rest contains cookies (JSON-like)
+      // Format: login:password or login:password:cookies_json
+      const secondColon = rest.indexOf(':');
+      if (secondColon === -1) {
+        result.push({ login, password: rest });
+      } else {
+        const password = rest.slice(0, secondColon);
+        const cookiesPart = rest.slice(secondColon + 1);
+        // If cookies part looks like JSON, treat as login:pass:cookies
+        if (cookiesPart.trim().startsWith('[') || cookiesPart.trim().startsWith('{')) {
+          result.push({ login, password, cookies: cookiesPart });
+        } else {
+          // Otherwise treat entire rest as password (password has ':')
+          result.push({ login, password: rest });
+        }
+      }
     }
   }
 
@@ -431,7 +450,7 @@ const patchAccountSchema = z.object({
   defaultDescription: z.string().optional(),
   avatarUrl: z.string().url().optional(),
   bannerUrl: z.string().url().optional(),
-  pinnedProxyId: z.string().optional(),
+  pinnedProxyId: z.string().nullable().optional(),
   status: z.enum([
     'ALIVE', 'PAUSED', 'BANNED', 'EXPIRED_COOKIES',
     'WARMING_UP', 'SHADOWBAN_SUSPECTED', 'AUTH_NEEDED',

@@ -115,23 +115,20 @@ export default function ProxiesPage() {
     if (!formHost || !formPort) return
     setSubmitting(true)
     try {
-      await api.post("/api/proxies", {
+      // BUG-6 fix: Use the proxy ID from the creation response directly
+      const result = await api.post<{ proxy: Proxy }>("/api/proxies", {
         host: formHost.trim(),
         port: parseInt(formPort, 10),
         username: formUser.trim() || undefined,
         password: formPass.trim() || undefined,
       })
 
-      if (bindAccountIds.length > 0) {
-        const freshData = await api.get<{ proxies: Proxy[] }>("/api/proxies")
-        const newProxy = freshData.proxies[0]
-        if (newProxy) {
-          await Promise.all(
-            bindAccountIds.map(accId =>
-              api.patch(`/api/accounts/${accId}`, { pinnedProxyId: newProxy.id }).catch(() => {})
-            )
+      if (bindAccountIds.length > 0 && result.proxy?.id) {
+        await Promise.all(
+          bindAccountIds.map(accId =>
+            api.patch(`/api/accounts/${accId}`, { pinnedProxyId: result.proxy.id }).catch(() => {})
           )
-        }
+        )
       }
 
       toast.success("Прокси добавлен")
@@ -150,18 +147,17 @@ export default function ProxiesPage() {
     if (!bulkText.trim()) return
     setSubmitting(true)
     try {
-      await api.post("/api/proxies/import", { raw: bulkText.trim() })
+      // BUG-12 fix: Use IDs returned by bulk import to distribute proxies across accounts
+      const result = await api.post<{ created: number; ids: string[] }>("/api/proxies/import", { raw: bulkText.trim() })
 
-      if (bindAccountIds.length > 0) {
-        const freshData = await api.get<{ proxies: Proxy[] }>("/api/proxies")
-        const newProxy = freshData.proxies[0]
-        if (newProxy) {
-          await Promise.all(
-            bindAccountIds.map(accId =>
-              api.patch(`/api/accounts/${accId}`, { pinnedProxyId: newProxy.id }).catch(() => {})
-            )
-          )
-        }
+      if (bindAccountIds.length > 0 && result.ids?.length > 0) {
+        // Distribute proxies across accounts round-robin
+        await Promise.all(
+          bindAccountIds.map((accId, idx) => {
+            const proxyId = result.ids[idx % result.ids.length]
+            return api.patch(`/api/accounts/${accId}`, { pinnedProxyId: proxyId }).catch(() => {})
+          })
+        )
       }
 
       toast.success("Прокси импортированы")

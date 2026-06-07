@@ -122,7 +122,7 @@ export default function WorkspacePage() {
 
   React.useEffect(() => {
     if (mode === "UPLOAD") {
-      api.get<{ videos: VideoFile[] }>("/api/workspace/videos")
+      api.get<{ videos: VideoFile[] }>("/api/videos")
         .then((data) => setVideos(data.videos || []))
         .catch(() => {})
     }

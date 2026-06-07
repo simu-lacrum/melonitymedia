@@ -75,7 +75,9 @@ router.delete('/:id', async (req: Request, res: Response) => {
 
     // Delete file from disk if it exists
     if (video.filepath && fs.existsSync(video.filepath)) {
-      fs.unlinkSync(video.filepath);
+      await fs.promises.unlink(video.filepath).catch(err =>
+        console.error('[Videos] File delete warning:', err.message)
+      );
     }
 
     await prisma.video.delete({ where: { id: req.params.id as string } });

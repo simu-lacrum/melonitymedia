@@ -9,6 +9,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import os from 'os';
+import net from 'net';
 import { prisma } from '../lib/prisma.js';
 import { redis } from '../lib/redis.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -172,8 +173,14 @@ router.get('/firewall', async (_req: Request, res: Response) => {
 router.post('/firewall', async (req: Request, res: Response) => {
   try {
     const { ip } = req.body;
-    if (!ip) {
+    if (!ip || typeof ip !== 'string') {
       res.status(400).json({ error: 'IP обязателен' });
+      return;
+    }
+
+    // BUG-16 fix: Validate IP format (IPv4 or IPv6)
+    if (!net.isIP(ip)) {
+      res.status(400).json({ error: 'Невалидный формат IP-адреса' });
       return;
     }
 
@@ -208,6 +215,46 @@ router.post('/firewall/unblock', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[Admin] Firewall unblock error:', err);
     res.status(500).json({ error: 'Ошибка при разблокировке IP' });
+  }
+});
+
+// ── POST /users/:id/unban — remove soft-ban ────────────────
+router.post('/users/:id/unban', async (req: Request, res: Response) => {
+  try {
+    const targetUser = await prisma.user.findUnique({
+      where: { id: req.params.id as string },
+      select: { id: true, isBanned: true },
+    });
+
+    if (!targetUser) {
+      res.status(404).json({ error: 'Пользователь не найден' });
+      return;
+    }
+
+    if (!targetUser.isBanned) {
+      res.status(400).json({ error: 'Пользователь не заблокирован' });
+      return;
+    }
+
+    await prisma.user.update({
+      where: { id: req.params.id as string },
+      data: { isBanned: false, bannedAt: null },
+    });
+
+    // Audit log
+    await prisma.auditLog.create({
+      data: {
+        userId: req.user!.id,
+        action: 'user.unban',
+        details: { targetUserId: req.params.id as string },
+        ip: req.ip,
+      },
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Admin] Unban error:', err);
+    res.status(500).json({ error: 'Ошибка при разблокировке' });
   }
 });
 

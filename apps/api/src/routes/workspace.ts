@@ -284,30 +284,35 @@ router.post('/queue', async (req: Request, res: Response) => {
       data: { config: { ...currentConfig, videoIds: updatedVideos } },
     });
 
-    // BUG-M6 fix: Dispatch BullMQ jobs for the newly added videos
-    // Previously only the config was updated but no jobs were created,
-    // so videos sat in the config but never got processed.
-    const accountId = currentConfig.accountId as string | undefined;
-    if (accountId && task.type === 'UPLOAD') {
+    // BUG-M6 + BUG-3 fix: Dispatch BullMQ jobs for the newly added videos.
+    // Use accountIds (array) from config — launch stores them as accountIds, not accountId.
+    // For single-account tasks, task.accountId is also available as fallback.
+    const targetAccountIds: string[] =
+      (currentConfig.accountIds as string[] | undefined) ??
+      (task.accountId ? [task.accountId] : []);
+
+    if (targetAccountIds.length > 0 && task.type === 'UPLOAD') {
       for (const videoId of videoIds) {
         const video = await prisma.video.findUnique({
           where: { id: videoId },
           select: { id: true, filepath: true, description: true, hashtags: true },
         });
         if (video) {
-          await dispatchAccountJob({
-            queueName: 'upload',
-            accountId,
-            userId: req.user!.id,
-            extra: {
-              taskId,
-              videoId: video.id,
-              videoPath: video.filepath,
-              title: video.description ?? '',
-              description: video.description ?? '',
-              hashtags: (video.hashtags as string[]) ?? [],
-            },
-          });
+          for (const accId of targetAccountIds) {
+            await dispatchAccountJob({
+              queueName: 'upload',
+              accountId: accId,
+              userId: req.user!.id,
+              extra: {
+                taskId,
+                videoId: video.id,
+                videoPath: video.filepath,
+                title: video.description ?? '',
+                description: video.description ?? '',
+                hashtags: (video.hashtags as string[]) ?? [],
+              },
+            });
+          }
         }
       }
     }
