@@ -111,9 +111,9 @@ export function Modal({
             {cancelLabel}
           </Button>
           <Button
-            variant={variant === 'destructive' ? 'destructive' : 'primary'}
+            variant={variant === 'destructive' ? 'destructive' : 'default'}
             onClick={onConfirm}
-            loading={loading}
+            disabled={loading}
           >
             {confirmLabel}
           </Button>

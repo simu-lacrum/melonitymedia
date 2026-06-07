@@ -7,10 +7,16 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { SegmentedControl } from "@/components/ui/segmented-control"
+import { Badge } from "@/components/ui/badge"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Textarea } from "@/components/ui/textarea"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Separator } from "@/components/ui/separator"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { LiveTerminal } from "@/components/ui/live-terminal"
-import { Play, Users, Save, Loader2, CheckCircle, AlertCircle, Upload, X } from "lucide-react"
+import { Play, Users, Save, Loader2, CheckCircle, AlertCircle, Upload, X, Hash, Settings2 } from "lucide-react"
 import { api, ApiError } from "@/lib/api"
+import { toast } from "sonner"
 
 interface Preset {
   id: string
@@ -20,7 +26,6 @@ interface Preset {
 
 type LaunchStatus = "idle" | "launching" | "success" | "error"
 
-// ── Config types per mode ──
 interface WarmupConfig {
   mode: "WARMUP"
   concurrency: number
@@ -100,21 +105,16 @@ export default function WorkspacePage() {
   const [selectedPresetId, setSelectedPresetId] = React.useState<string>("")
   const [accountCount, setAccountCount] = React.useState(0)
 
-  // Mode-specific configs
   const [warmup, setWarmup] = React.useState<WarmupConfig>({ ...DEFAULT_CONFIGS.WARMUP })
   const [cookies, setCookies] = React.useState<CookiesConfig>({ ...DEFAULT_CONFIGS.COOKIES })
   const [editProfile, setEditProfile] = React.useState<EditProfileConfig>({ ...DEFAULT_CONFIGS.EDIT_PROFILE })
   const [upload, setUpload] = React.useState<UploadConfig>({ ...DEFAULT_CONFIGS.UPLOAD })
   const [login, setLogin] = React.useState<LoginConfig>({ ...DEFAULT_CONFIGS.LOGIN })
 
-  // Hashtag input
   const [hashtagInput, setHashtagInput] = React.useState("")
-
-  // Upload
   const [videos, setVideos] = React.useState<VideoFile[]>([])
   const [uploading, setUploading] = React.useState(false)
 
-  // Load presets + account count on mount
   React.useEffect(() => {
     api.get<{ presets: Preset[] }>("/api/workspace/presets")
       .then((data) => { if (data.presets) setPresets(data.presets) })
@@ -125,7 +125,6 @@ export default function WorkspacePage() {
       .catch(() => {})
   }, [])
 
-  // Load videos for upload mode
   React.useEffect(() => {
     if (mode === "UPLOAD") {
       api.get<{ videos: VideoFile[] }>("/api/workspace/videos")
@@ -164,13 +163,13 @@ export default function WorkspacePage() {
       const data = await api.post<{ preset: Preset }>("/api/workspace/presets", { name, config })
       setPresets([data.preset, ...presets])
       setSelectedPresetId(data.preset.id)
+      toast.success("Пресет сохранён")
     } catch {
-      alert("Ошибка сохранения пресета")
+      toast.error("Ошибка сохранения пресета")
     }
   }
 
-  const handleLoadPreset = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const id = e.target.value
+  const handleLoadPreset = (id: string) => {
     setSelectedPresetId(id)
     if (!id) return
     const preset = presets.find((p) => p.id === id)
@@ -185,16 +184,9 @@ export default function WorkspacePage() {
         case "UPLOAD": setUpload({ ...DEFAULT_CONFIGS.UPLOAD, ...cfg }); break
         case "LOGIN": setLogin({ ...DEFAULT_CONFIGS.LOGIN, ...cfg }); break
       }
+      toast.success(`Пресет «${preset.name}» загружен`)
     }
   }
-
-  const modes = [
-    { id: "WARMUP", label: "Прогрев" },
-    { id: "COOKIES", label: "Сбор кук" },
-    { id: "EDIT_PROFILE", label: "Ред. профиля" },
-    { id: "UPLOAD", label: "Автозалив" },
-    { id: "LOGIN", label: "Логин" },
-  ]
 
   const handleLaunch = async () => {
     setLaunchStatus("launching")
@@ -212,15 +204,14 @@ export default function WorkspacePage() {
         delayMax: 8000,
       })
       setLaunchStatus("success")
+      toast.success("Задача запущена!")
       setStatusMsg("Задача запущена!")
       setTimeout(() => setLaunchStatus("idle"), 3000)
     } catch (err) {
       setLaunchStatus("error")
-      if (err instanceof ApiError) {
-        setStatusMsg(err.message)
-      } else {
-        setStatusMsg("Ошибка запуска задачи")
-      }
+      const msg = err instanceof ApiError ? err.message : "Ошибка запуска задачи"
+      setStatusMsg(msg)
+      toast.error(msg)
     }
   }
 
@@ -262,316 +253,241 @@ export default function WorkspacePage() {
       const data = await res.json()
       setVideos([data.video, ...videos])
       setUpload({ ...upload, videoId: data.video.id })
+      toast.success("Видео загружено")
     } catch {
-      setStatusMsg("Ошибка загрузки видео")
-      setLaunchStatus("error")
+      toast.error("Ошибка загрузки видео")
     } finally {
       setUploading(false)
     }
   }
 
-  // ── Render mode-specific form ──
+  const renderHashtags = (tags: string[], target: "warmup" | "upload") => (
+    <div className="flex flex-col gap-2">
+      <Label><Hash className="size-3 inline mr-1" />Хештеги</Label>
+      <div className="flex gap-2">
+        <Input
+          placeholder="Введите хештег..."
+          value={hashtagInput}
+          onChange={e => setHashtagInput(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addHashtag(target) } }}
+        />
+        <Button variant="outline" size="icon" onClick={() => addHashtag(target)} type="button">
+          <span className="text-lg">+</span>
+        </Button>
+      </div>
+      {tags.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {tags.map(tag => (
+            <Badge key={tag} variant="secondary" className="gap-1 pl-2.5">
+              #{tag}
+              <button onClick={() => removeHashtag(target, tag)} className="hover:text-destructive transition-colors ml-1">
+                <X className="size-3" />
+              </button>
+            </Badge>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+
   const renderModeForm = () => {
     switch (mode) {
       case "WARMUP":
         return (
-          <div className="space-y-4">
+          <div className="flex flex-col gap-4">
             <div className="grid grid-cols-2 gap-4">
-              <div>
+              <div className="flex flex-col gap-2">
                 <Label htmlFor="warmup-threads">Потоки</Label>
-                <Input
-                  id="warmup-threads"
-                  type="number"
-                  min={1}
-                  max={20}
+                <Input id="warmup-threads" type="number" min={1} max={20}
                   value={warmup.concurrency}
                   onChange={e => setWarmup({ ...warmup, concurrency: parseInt(e.target.value) || 1 })}
                 />
               </div>
-              <div>
+              <div className="flex flex-col gap-2">
                 <Label htmlFor="warmup-days">Дней прогрева</Label>
-                <Input
-                  id="warmup-days"
-                  type="number"
-                  min={3}
-                  max={21}
+                <Input id="warmup-days" type="number" min={3} max={21}
                   value={warmup.warmupDays}
                   onChange={e => setWarmup({ ...warmup, warmupDays: parseInt(e.target.value) || 10 })}
                 />
               </div>
             </div>
-
             <div className="flex items-center gap-6">
               <div className="flex items-center gap-2">
-                <Checkbox
-                  id="warmup-rotation"
+                <Checkbox id="warmup-rotation"
                   checked={warmup.useRotation}
-                  onChange={() => setWarmup({ ...warmup, useRotation: !warmup.useRotation })}
+                  onCheckedChange={(v) => setWarmup({ ...warmup, useRotation: !!v })}
                 />
-                <Label htmlFor="warmup-rotation" className="mb-0 cursor-pointer">Ротация IP</Label>
+                <Label htmlFor="warmup-rotation" className="mb-0 cursor-pointer text-sm">Ротация IP</Label>
               </div>
               <div className="flex items-center gap-2">
-                <Checkbox
-                  id="warmup-headless"
+                <Checkbox id="warmup-headless"
                   checked={warmup.headless}
-                  onChange={() => setWarmup({ ...warmup, headless: !warmup.headless })}
+                  onCheckedChange={(v) => setWarmup({ ...warmup, headless: !!v })}
                 />
-                <Label htmlFor="warmup-headless" className="mb-0 cursor-pointer">Headless</Label>
+                <Label htmlFor="warmup-headless" className="mb-0 cursor-pointer text-sm">Headless</Label>
               </div>
             </div>
-
-            <div>
-              <Label>Хештеги для просмотра</Label>
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Введите хештег..."
-                  value={hashtagInput}
-                  onChange={e => setHashtagInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addHashtag("warmup") } }}
-                />
-                <Button variant="secondary" onClick={() => addHashtag("warmup")} type="button">+</Button>
-              </div>
-              <div className="flex flex-wrap gap-2 mt-2">
-                {warmup.hashtags.map(tag => (
-                  <span
-                    key={tag}
-                    className="inline-flex items-center gap-1 px-3 py-1 bg-melon-pink/10 text-melon-pink rounded-full text-caption font-medium"
-                  >
-                    #{tag}
-                    <button onClick={() => removeHashtag("warmup", tag)} className="hover:text-white transition-colors">
-                      <X className="w-3 h-3" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            </div>
+            {renderHashtags(warmup.hashtags, "warmup")}
           </div>
         )
 
       case "COOKIES":
         return (
-          <div className="space-y-4">
-            <div>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
               <Label htmlFor="cookies-threads">Потоки</Label>
-              <Input
-                id="cookies-threads"
-                type="number"
-                min={1}
-                max={20}
+              <Input id="cookies-threads" type="number" min={1} max={20}
                 value={cookies.concurrency}
                 onChange={e => setCookies({ ...cookies, concurrency: parseInt(e.target.value) || 1 })}
               />
             </div>
             <div className="flex items-center gap-2">
-              <Checkbox
-                id="cookies-headless"
+              <Checkbox id="cookies-headless"
                 checked={cookies.headless}
-                onChange={() => setCookies({ ...cookies, headless: !cookies.headless })}
+                onCheckedChange={(v) => setCookies({ ...cookies, headless: !!v })}
               />
-              <Label htmlFor="cookies-headless" className="mb-0 cursor-pointer">Headless режим</Label>
+              <Label htmlFor="cookies-headless" className="mb-0 cursor-pointer text-sm">Headless режим</Label>
             </div>
-            <div className="bg-white/5 border border-white/10 rounded-lg p-4">
-              <p className="text-body-sm text-text-muted">
+            <Alert>
+              <AlertDescription className="text-sm text-muted-foreground">
                 Автоматический сбор cookies со всех активных аккаунтов. Браузер откроет каждый аккаунт и сохранит cookies для последующей авторизации.
-              </p>
-            </div>
+              </AlertDescription>
+            </Alert>
           </div>
         )
 
       case "EDIT_PROFILE":
         return (
-          <div className="space-y-4">
-            <div>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
               <Label htmlFor="edit-threads">Потоки</Label>
-              <Input
-                id="edit-threads"
-                type="number"
-                min={1}
-                max={20}
+              <Input id="edit-threads" type="number" min={1} max={20}
                 value={editProfile.concurrency}
                 onChange={e => setEditProfile({ ...editProfile, concurrency: parseInt(e.target.value) || 1 })}
               />
             </div>
-            <div>
+            <div className="flex flex-col gap-2">
               <Label htmlFor="edit-nickname">Новый никнейм</Label>
-              <Input
-                id="edit-nickname"
-                placeholder="Оставьте пустым для пропуска"
+              <Input id="edit-nickname" placeholder="Оставьте пустым для пропуска"
                 value={editProfile.nickname}
                 onChange={e => setEditProfile({ ...editProfile, nickname: e.target.value })}
               />
             </div>
-            <div>
+            <div className="flex flex-col gap-2">
               <Label htmlFor="edit-bio">Новое описание (bio)</Label>
-              <textarea
-                id="edit-bio"
-                rows={3}
-                className="w-full bg-white/[0.03] border border-white/[0.06] rounded-lg px-4 py-3 text-body-md text-white placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-melon-pink/50 resize-none"
-                placeholder="Оставьте пустым для пропуска"
+              <Textarea id="edit-bio" rows={3} placeholder="Оставьте пустым для пропуска"
                 value={editProfile.bio}
                 onChange={e => setEditProfile({ ...editProfile, bio: e.target.value })}
               />
             </div>
-            <div>
+            <div className="flex flex-col gap-2">
               <Label htmlFor="edit-avatar">URL аватара</Label>
-              <Input
-                id="edit-avatar"
-                placeholder="https://example.com/avatar.jpg"
+              <Input id="edit-avatar" placeholder="https://example.com/avatar.jpg"
                 value={editProfile.avatarUrl}
                 onChange={e => setEditProfile({ ...editProfile, avatarUrl: e.target.value })}
               />
             </div>
             <div className="flex items-center gap-2">
-              <Checkbox
-                id="edit-headless"
+              <Checkbox id="edit-headless"
                 checked={editProfile.headless}
-                onChange={() => setEditProfile({ ...editProfile, headless: !editProfile.headless })}
+                onCheckedChange={(v) => setEditProfile({ ...editProfile, headless: !!v })}
               />
-              <Label htmlFor="edit-headless" className="mb-0 cursor-pointer">Headless режим</Label>
+              <Label htmlFor="edit-headless" className="mb-0 cursor-pointer text-sm">Headless режим</Label>
             </div>
           </div>
         )
 
       case "UPLOAD":
         return (
-          <div className="space-y-4">
-            <div>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
               <Label htmlFor="upload-threads">Потоки</Label>
-              <Input
-                id="upload-threads"
-                type="number"
-                min={1}
-                max={20}
+              <Input id="upload-threads" type="number" min={1} max={20}
                 value={upload.concurrency}
                 onChange={e => setUpload({ ...upload, concurrency: parseInt(e.target.value) || 1 })}
               />
             </div>
 
             {/* Video upload */}
-            <div>
+            <div className="flex flex-col gap-2">
               <Label>Видео для загрузки</Label>
-              <div className="space-y-2">
-                <label className="flex items-center justify-center gap-2 p-4 border-2 border-dashed border-white/10 rounded-lg cursor-pointer hover:border-melon-pink/50 transition-colors">
-                  {uploading ? (
-                    <Loader2 className="w-5 h-5 animate-spin text-text-muted" />
-                  ) : (
-                    <Upload className="w-5 h-5 text-text-muted" />
-                  )}
-                  <span className="text-body-sm text-text-muted">
-                    {uploading ? "Загрузка..." : "Нажмите для загрузки видео (.mp4, .webm, .mov)"}
-                  </span>
-                  <input
-                    type="file"
-                    accept=".mp4,.webm,.mov,.avi"
-                    className="hidden"
-                    onChange={handleVideoUpload}
-                    disabled={uploading}
-                  />
-                </label>
-
-                {videos.length > 0 && (
-                  <select
-                    className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-body-md text-white"
-                    value={upload.videoId}
-                    onChange={e => setUpload({ ...upload, videoId: e.target.value })}
-                  >
-                    <option value="">-- Выберите видео --</option>
-                    {videos.map(v => (
-                      <option key={v.id} value={v.id}>
-                        {v.originalName} ({(v.size / 1024 / 1024).toFixed(1)} MB)
-                      </option>
-                    ))}
-                  </select>
+              <label className="flex items-center justify-center gap-2 p-4 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary/50 transition-colors">
+                {uploading ? (
+                  <Loader2 className="size-5 animate-spin text-muted-foreground" />
+                ) : (
+                  <Upload className="size-5 text-muted-foreground" />
                 )}
-              </div>
+                <span className="text-sm text-muted-foreground">
+                  {uploading ? "Загрузка..." : "Нажмите для загрузки видео (.mp4, .webm, .mov)"}
+                </span>
+                <input type="file" accept=".mp4,.webm,.mov,.avi" className="hidden"
+                  onChange={handleVideoUpload} disabled={uploading}
+                />
+              </label>
+
+              {videos.length > 0 && (
+                <Select value={upload.videoId} onValueChange={(v) => setUpload({ ...upload, videoId: v ?? "" })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="-- Выберите видео --" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {videos.map(v => (
+                      <SelectItem key={v.id} value={v.id}>
+                        {v.originalName} ({(v.size / 1024 / 1024).toFixed(1)} MB)
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
 
-            <div>
+            <div className="flex flex-col gap-2">
               <Label htmlFor="upload-title">Заголовок</Label>
-              <Input
-                id="upload-title"
-                placeholder="Заголовок видео"
+              <Input id="upload-title" placeholder="Заголовок видео"
                 value={upload.title}
                 onChange={e => setUpload({ ...upload, title: e.target.value })}
               />
             </div>
-
-            <div>
+            <div className="flex flex-col gap-2">
               <Label htmlFor="upload-desc">Описание</Label>
-              <textarea
-                id="upload-desc"
-                rows={3}
-                className="w-full bg-white/[0.03] border border-white/[0.06] rounded-lg px-4 py-3 text-body-md text-white placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-melon-pink/50 resize-none"
-                placeholder="Описание видео"
+              <Textarea id="upload-desc" rows={3} placeholder="Описание видео"
                 value={upload.description}
                 onChange={e => setUpload({ ...upload, description: e.target.value })}
               />
             </div>
-
-            <div>
-              <Label>Хештеги</Label>
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Введите хештег..."
-                  value={hashtagInput}
-                  onChange={e => setHashtagInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addHashtag("upload") } }}
-                />
-                <Button variant="secondary" onClick={() => addHashtag("upload")} type="button">+</Button>
-              </div>
-              <div className="flex flex-wrap gap-2 mt-2">
-                {upload.hashtags.map(tag => (
-                  <span
-                    key={tag}
-                    className="inline-flex items-center gap-1 px-3 py-1 bg-melon-pink/10 text-melon-pink rounded-full text-caption font-medium"
-                  >
-                    #{tag}
-                    <button onClick={() => removeHashtag("upload", tag)} className="hover:text-white transition-colors">
-                      <X className="w-3 h-3" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            </div>
-
+            {renderHashtags(upload.hashtags, "upload")}
             <div className="flex items-center gap-2">
-              <Checkbox
-                id="upload-headless"
+              <Checkbox id="upload-headless"
                 checked={upload.headless}
-                onChange={() => setUpload({ ...upload, headless: !upload.headless })}
+                onCheckedChange={(v) => setUpload({ ...upload, headless: !!v })}
               />
-              <Label htmlFor="upload-headless" className="mb-0 cursor-pointer">Headless режим</Label>
+              <Label htmlFor="upload-headless" className="mb-0 cursor-pointer text-sm">Headless режим</Label>
             </div>
           </div>
         )
 
       case "LOGIN":
         return (
-          <div className="space-y-4">
-            <div>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
               <Label htmlFor="login-threads">Потоки</Label>
-              <Input
-                id="login-threads"
-                type="number"
-                min={1}
-                max={20}
+              <Input id="login-threads" type="number" min={1} max={20}
                 value={login.concurrency}
                 onChange={e => setLogin({ ...login, concurrency: parseInt(e.target.value) || 1 })}
               />
             </div>
             <div className="flex items-center gap-2">
-              <Checkbox
-                id="login-headless"
+              <Checkbox id="login-headless"
                 checked={login.headless}
-                onChange={() => setLogin({ ...login, headless: !login.headless })}
+                onCheckedChange={(v) => setLogin({ ...login, headless: !!v })}
               />
-              <Label htmlFor="login-headless" className="mb-0 cursor-pointer">Headless режим</Label>
+              <Label htmlFor="login-headless" className="mb-0 cursor-pointer text-sm">Headless режим</Label>
             </div>
-            <div className="bg-white/5 border border-white/10 rounded-lg p-4">
-              <p className="text-body-sm text-text-muted">
+            <Alert>
+              <AlertDescription className="text-sm text-muted-foreground">
                 Автоматический логин на всех аккаунтах через cookies. Проверяет валидность сессий и переавторизуется при необходимости.
-              </p>
-            </div>
+              </AlertDescription>
+            </Alert>
           </div>
         )
 
@@ -582,86 +498,73 @@ export default function WorkspacePage() {
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-      className="space-y-6 max-w-6xl mx-auto"
+      transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
+      className="flex flex-col gap-6 max-w-6xl mx-auto"
     >
       <div>
-        <h1 className="text-display-sm mb-2">Воркспейс</h1>
-        <p className="text-body-md text-text-muted">Запуск и управление задачами автоматизации</p>
+        <h1 className="text-2xl font-semibold tracking-tight">Воркспейс</h1>
+        <p className="text-sm text-muted-foreground mt-1">Запуск и управление задачами автоматизации</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className="lg:col-span-5 space-y-6">
+        <div className="lg:col-span-5 flex flex-col gap-6">
           <Card>
             <CardHeader>
-              <CardTitle>Конфигурация задачи</CardTitle>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Settings2 className="size-4" />
+                Конфигурация задачи
+              </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-3">
-                <Label>Режим работы</Label>
-                <SegmentedControl
-                  segments={modes}
-                  activeSegment={mode}
-                  onChange={setMode}
-                />
+            <CardContent className="flex flex-col gap-6">
+              {/* Mode Tabs */}
+              <Tabs value={mode} onValueChange={setMode}>
+                <TabsList className="w-full grid grid-cols-5">
+                  <TabsTrigger value="WARMUP" className="text-xs">Прогрев</TabsTrigger>
+                  <TabsTrigger value="COOKIES" className="text-xs">Куки</TabsTrigger>
+                  <TabsTrigger value="EDIT_PROFILE" className="text-xs">Профиль</TabsTrigger>
+                  <TabsTrigger value="UPLOAD" className="text-xs">Залив</TabsTrigger>
+                  <TabsTrigger value="LOGIN" className="text-xs">Логин</TabsTrigger>
+                </TabsList>
+              </Tabs>
+
+              {/* Account count */}
+              <div className="flex items-center gap-3 p-3 rounded-lg bg-accent/50 border border-border">
+                <Users className="size-5 text-muted-foreground" />
+                <div>
+                  <div className="font-medium text-sm">{accountCount} аккаунтов</div>
+                  <div className="text-xs text-muted-foreground">Все активные (ALIVE)</div>
+                </div>
               </div>
 
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label className="mb-0">Аккаунты для работы</Label>
-                </div>
-                <div className="bg-white/5 border border-white/10 rounded-input p-4 flex items-center space-x-3">
-                  <Users className="w-5 h-5 text-text-muted" />
-                  <div>
-                    <div className="font-medium text-white">{accountCount} аккаунтов</div>
-                    <div className="text-caption text-text-muted">Все активные (ALIVE)</div>
-                  </div>
-                </div>
-              </div>
+              <Separator />
 
               {/* Mode-specific form */}
-              <div className="border-t border-white/5 pt-5">
-                {renderModeForm()}
-              </div>
+              {renderModeForm()}
+
+              <Separator />
 
               {/* Presets */}
-              <div className="flex items-center gap-2 border-t border-white/5 pt-4">
-                <select
-                  className="flex-1 bg-white/5 border border-white/10 rounded px-3 py-2 text-xs text-white"
-                  value={selectedPresetId}
-                  onChange={handleLoadPreset}
-                >
-                  <option value="">-- Загрузить пресет --</option>
-                  {presets.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-                <Button variant="ghost" size="sm" className="h-8 text-text-muted shrink-0" onClick={handleSavePreset}>
-                  <Save className="w-4 h-4 mr-1" />
+              <div className="flex items-center gap-2">
+                <Select value={selectedPresetId} onValueChange={(v) => handleLoadPreset(v ?? "")}>
+                  <SelectTrigger className="flex-1">
+                    <SelectValue placeholder="-- Загрузить пресет --" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {presets.map(p => (
+                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button variant="ghost" size="sm" className="shrink-0" onClick={handleSavePreset}>
+                  <Save className="size-4 mr-1" />
                   Сохранить
                 </Button>
               </div>
 
-              {/* Status message */}
-              {statusMsg && (
-                <div className={`flex items-center gap-2 p-3 rounded-lg text-body-sm ${
-                  launchStatus === "success"
-                    ? "bg-[#00d287]/10 text-[#00d287] border border-[#00d287]/20"
-                    : "bg-[#F43F5E]/10 text-[#F43F5E] border border-[#F43F5E]/20"
-                }`}>
-                  {launchStatus === "success" ? (
-                    <CheckCircle className="w-4 h-4 shrink-0" />
-                  ) : (
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                  )}
-                  <span>{statusMsg}</span>
-                </div>
-              )}
-
+              {/* Launch Button */}
               <Button
-                variant="primary"
                 size="lg"
                 className="w-full"
                 onClick={handleLaunch}
@@ -669,12 +572,12 @@ export default function WorkspacePage() {
               >
                 {launchStatus === "launching" ? (
                   <>
-                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    <Loader2 className="size-5 mr-2 animate-spin" />
                     Подготовка...
                   </>
                 ) : (
                   <>
-                    <Play className="w-5 h-5 mr-2" />
+                    <Play className="size-5 mr-2" />
                     Запустить задачу
                   </>
                 )}

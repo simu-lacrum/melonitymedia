@@ -2,9 +2,12 @@
 
 import * as React from "react"
 import { motion } from "framer-motion"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Loader2, AlertCircle } from "lucide-react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { api } from "@/lib/api"
@@ -43,82 +46,63 @@ export default function SignUpPage() {
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, ease: "easeOut" }}
-      className="liquid-glass p-10 flex flex-col space-y-8"
+      transition={{ duration: 0.5, ease: [0.23, 1, 0.32, 1] }}
     >
-      <div className="text-center space-y-2">
-        <h1 className="text-display-md">Регистрация</h1>
-        <p className="text-body-md text-text-muted">
-          Создайте аккаунт MelonityMedia
-        </p>
-      </div>
+      <Card className="w-full">
+        <CardHeader className="text-center pb-2">
+          <CardTitle className="text-2xl font-semibold">Регистрация</CardTitle>
+          <CardDescription>Создайте аккаунт MelonityMedia</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-6">
+          {error && (
+            <Alert variant="destructive">
+              <AlertCircle className="size-4" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
 
-      {error && (
-        <div className="bg-[#F43F5E]/10 border border-[#F43F5E]/20 text-[#F43F5E] p-3 rounded-card-base text-body-sm text-center">
-          {error}
-        </div>
-      )}
+          <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="email">Email</Label>
+                <Input id="email" name="email" type="email" required disabled={loading} autoFocus />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="username">Username</Label>
+                <Input id="username" name="username" required disabled={loading} />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="password">Пароль</Label>
+                <Input id="password" name="password" type="password" required disabled={loading} />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="confirmPassword">Подтвердите пароль</Label>
+                <Input id="confirmPassword" name="confirmPassword" type="password" required disabled={loading} />
+              </div>
+            </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <div className="space-y-4">
-          <div>
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              name="email"
-              type="email"
-              required
-              disabled={loading}
-            />
-          </div>
-          <div>
-            <Label htmlFor="username">Username</Label>
-            <Input
-              id="username"
-              name="username"
-              required
-              disabled={loading}
-            />
-          </div>
-          <div>
-            <Label htmlFor="password">Пароль</Label>
-            <Input
-              id="password"
-              name="password"
-              type="password"
-              required
-              disabled={loading}
-            />
-          </div>
-          <div>
-            <Label htmlFor="confirmPassword">Подтвердите пароль</Label>
-            <Input
-              id="confirmPassword"
-              name="confirmPassword"
-              type="password"
-              required
-              disabled={loading}
-            />
-          </div>
-        </div>
+            <Button type="submit" className="w-full" size="lg" disabled={loading}>
+              {loading ? (
+                <>
+                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  Регистрация...
+                </>
+              ) : (
+                "Зарегистрироваться"
+              )}
+            </Button>
+          </form>
 
-        <Button type="submit" className="w-full" size="lg" disabled={loading}>
-          {loading ? "Регистрация..." : "Зарегистрироваться"}
-        </Button>
-      </form>
-
-      <div className="text-center text-body-sm text-text-muted">
-        Уже есть аккаунт?{" "}
-        <Link
-          href="/auth/sign-in"
-          className="text-melon-pink hover:text-[#FF6B8B] transition-colors"
-        >
-          Войти
-        </Link>
-      </div>
+          <div className="text-center text-sm text-muted-foreground">
+            Уже есть аккаунт?{" "}
+            <Link href="/auth/sign-in" className="text-primary hover:text-primary/80 transition-colors font-medium">
+              Войти
+            </Link>
+          </div>
+        </CardContent>
+      </Card>
     </motion.div>
   )
 }
-

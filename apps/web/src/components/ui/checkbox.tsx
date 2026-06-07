@@ -1,32 +1,29 @@
-import * as React from "react"
-import { Check } from "lucide-react"
+"use client"
+
+import { Checkbox as CheckboxPrimitive } from "@base-ui/react/checkbox"
+
 import { cn } from "@/lib/utils"
+import { CheckIcon } from "lucide-react"
 
-export interface CheckboxProps
-  extends React.InputHTMLAttributes<HTMLInputElement> {}
-
-const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
-  ({ className, ...props }, ref) => {
-    return (
-      <div className="relative inline-flex items-center">
-        <input
-          type="checkbox"
-          className="peer sr-only"
-          ref={ref}
-          {...props}
+function Checkbox({ className, ...props }: CheckboxPrimitive.Root.Props) {
+  return (
+    <CheckboxPrimitive.Root
+      data-slot="checkbox"
+      className={cn(
+        "peer relative flex size-4 shrink-0 items-center justify-center rounded-[4px] border border-input transition-colors outline-none group-has-disabled/field:opacity-50 after:absolute after:-inset-x-3 after:-inset-y-2 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 aria-invalid:aria-checked:border-primary dark:bg-input/30 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 data-checked:border-primary data-checked:bg-primary data-checked:text-primary-foreground dark:data-checked:bg-primary",
+        className
+      )}
+      {...props}
+    >
+      <CheckboxPrimitive.Indicator
+        data-slot="checkbox-indicator"
+        className="grid place-content-center text-current transition-none [&>svg]:size-3.5"
+      >
+        <CheckIcon
         />
-        <div
-          className={cn(
-            "flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] border border-white/10 bg-white/5 transition-colors peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-melon-pink peer-focus-visible:ring-offset-2 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 peer-checked:bg-melon-pink peer-checked:border-melon-pink",
-            className
-          )}
-        >
-          <Check className="h-3.5 w-3.5 text-white opacity-0 transition-opacity peer-checked:opacity-100" />
-        </div>
-      </div>
-    )
-  }
-)
-Checkbox.displayName = "Checkbox"
+      </CheckboxPrimitive.Indicator>
+    </CheckboxPrimitive.Root>
+  )
+}
 
 export { Checkbox }

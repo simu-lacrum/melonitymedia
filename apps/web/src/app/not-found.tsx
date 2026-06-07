@@ -14,9 +14,7 @@ export default function NotFound() {
           title="Страница не найдена"
           description="Возможно, она была удалена или вы ввели неверный адрес."
           action={
-            <Button asChild variant="primary">
-              <Link href="/account/dashboard">На главную</Link>
-            </Button>
+            <Button render={<Link href="/account/dashboard" />}>На главную</Button>
           }
         />
       </div>

@@ -2,16 +2,19 @@
 
 import * as React from "react"
 import { motion } from "framer-motion"
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Separator } from "@/components/ui/separator"
+import { Progress } from "@/components/ui/progress"
 import {
   Server, Database, HardDrive, Cpu, Shield, Users, Ban,
   Loader2, RefreshCw, Plus, Trash2, AlertCircle
 } from "lucide-react"
 import { api, ApiError } from "@/lib/api"
+import { toast } from "sonner"
 
 interface RuntimeData {
   db: string
@@ -76,24 +79,27 @@ export default function AdminPage() {
     if (!confirm("Заблокировать пользователя?")) return
     try {
       await api.post(`/api/admin/users/${userId}/ban`)
+      toast.success("Пользователь заблокирован")
       loadAll()
-    } catch { setError("Ошибка бана") }
+    } catch { toast.error("Ошибка бана") }
   }
 
   const handleBlockIp = async () => {
     if (!newIp.trim()) return
     try {
       await api.post("/api/admin/firewall", { ip: newIp.trim() })
+      toast.success(`IP ${newIp.trim()} заблокирован`)
       setNewIp("")
       loadAll()
-    } catch { setError("Ошибка блокировки IP") }
+    } catch { toast.error("Ошибка блокировки IP") }
   }
 
   const handleUnblockIp = async (ip: string) => {
     try {
       await api.delete("/api/admin/firewall", { ip })
+      toast.success(`IP ${ip} разблокирован`)
       loadAll()
-    } catch { setError("Ошибка разблокировки IP") }
+    } catch { toast.error("Ошибка разблокировки IP") }
   }
 
   const formatUptime = (seconds: number) => {
@@ -105,20 +111,20 @@ export default function AdminPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-32 text-text-muted">
-        <Loader2 className="w-8 h-8 animate-spin mr-3" />
-        <span className="text-body-md">Загрузка админ-панели...</span>
+      <div className="flex items-center justify-center py-32 text-muted-foreground">
+        <Loader2 className="size-8 animate-spin mr-3" />
+        <span className="text-sm">Загрузка админ-панели...</span>
       </div>
     )
   }
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center py-32 text-text-muted gap-4">
-        <AlertCircle className="w-12 h-12 text-[#F43F5E]" />
-        <p className="text-body-md text-[#F43F5E]">{error}</p>
-        <Button variant="secondary" onClick={loadAll}>
-          <RefreshCw className="w-4 h-4 mr-2" />
+      <div className="flex flex-col items-center justify-center py-32 text-muted-foreground gap-4">
+        <AlertCircle className="size-12 text-destructive" />
+        <p className="text-sm text-destructive">{error}</p>
+        <Button variant="outline" onClick={loadAll}>
+          <RefreshCw className="size-4 mr-2" />
           Повторить
         </Button>
       </div>
@@ -127,30 +133,33 @@ export default function AdminPage() {
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-      className="space-y-8"
+      transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
+      className="flex flex-col gap-8"
     >
       <div className="flex items-center justify-between">
-        <h1 className="text-display-sm">Администрирование</h1>
-        <Button variant="secondary" onClick={loadAll}>
-          <RefreshCw className="w-4 h-4 mr-2" />
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Администрирование</h1>
+          <p className="text-sm text-muted-foreground mt-1">Мониторинг системы и управление пользователями</p>
+        </div>
+        <Button variant="outline" onClick={loadAll}>
+          <RefreshCw className="size-4 mr-2" />
           Обновить
         </Button>
       </div>
 
       {/* Runtime Health */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center">
-                <Database className="w-5 h-5 text-text-muted" />
+          <CardContent className="p-5">
+            <div className="flex items-center gap-3">
+              <div className="size-10 rounded-lg bg-accent flex items-center justify-center">
+                <Database className="size-5 text-muted-foreground" />
               </div>
               <div>
-                <p className="text-caption text-text-muted">PostgreSQL</p>
-                <Badge variant={runtime?.db === "ok" ? "active" : "error"} showDot>
+                <p className="text-xs text-muted-foreground">PostgreSQL</p>
+                <Badge variant={runtime?.db === "ok" ? "default" : "destructive"}>
                   {runtime?.db === "ok" ? "OK" : "Error"}
                 </Badge>
               </div>
@@ -159,14 +168,14 @@ export default function AdminPage() {
         </Card>
 
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center">
-                <Server className="w-5 h-5 text-text-muted" />
+          <CardContent className="p-5">
+            <div className="flex items-center gap-3">
+              <div className="size-10 rounded-lg bg-accent flex items-center justify-center">
+                <Server className="size-5 text-muted-foreground" />
               </div>
               <div>
-                <p className="text-caption text-text-muted">Redis</p>
-                <Badge variant={runtime?.redis === "ok" ? "active" : "error"} showDot>
+                <p className="text-xs text-muted-foreground">Redis</p>
+                <Badge variant={runtime?.redis === "ok" ? "default" : "destructive"}>
                   {runtime?.redis === "ok" ? "OK" : "Error"}
                 </Badge>
               </div>
@@ -175,43 +184,43 @@ export default function AdminPage() {
         </Card>
 
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center">
-                <Cpu className="w-5 h-5 text-text-muted" />
+          <CardContent className="p-5">
+            <div className="flex items-center gap-3">
+              <div className="size-10 rounded-lg bg-accent flex items-center justify-center">
+                <Cpu className="size-5 text-muted-foreground" />
               </div>
-              <div>
-                <p className="text-caption text-text-muted">Память</p>
-                <p className="text-white font-semibold">
+              <div className="flex-1">
+                <p className="text-xs text-muted-foreground">Память</p>
+                <p className="text-sm font-semibold text-foreground">
                   {runtime?.system.memoryUsed}MB / {runtime?.system.memoryTotal}MB
                 </p>
-                <p className="text-caption text-text-muted">{runtime?.system.memoryPercent}%</p>
+                <Progress value={runtime?.system.memoryPercent ?? 0} className="mt-1.5 h-1.5" />
               </div>
             </div>
           </CardContent>
         </Card>
 
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center">
-                <HardDrive className="w-5 h-5 text-text-muted" />
+          <CardContent className="p-5">
+            <div className="flex items-center gap-3">
+              <div className="size-10 rounded-lg bg-accent flex items-center justify-center">
+                <HardDrive className="size-5 text-muted-foreground" />
               </div>
               <div>
-                <p className="text-caption text-text-muted">Аптайм</p>
-                <p className="text-white font-semibold">{formatUptime(runtime?.system.uptime ?? 0)}</p>
-                <p className="text-caption text-text-muted">Задач: {runtime?.activeTasks}</p>
+                <p className="text-xs text-muted-foreground">Аптайм</p>
+                <p className="text-sm font-semibold text-foreground">{formatUptime(runtime?.system.uptime ?? 0)}</p>
+                <p className="text-xs text-muted-foreground">Задач: {runtime?.activeTasks}</p>
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Users Management */}
+      {/* Users */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Users className="w-5 h-5" />
+          <CardTitle className="text-base flex items-center gap-2">
+            <Users className="size-4" />
             Пользователи ({users.length})
           </CardTitle>
         </CardHeader>
@@ -233,34 +242,34 @@ export default function AdminPage() {
                 <TableRow key={user.id}>
                   <TableCell>
                     <div>
-                      <div className="font-medium text-white">{user.email}</div>
-                      {user.name && <div className="text-caption text-text-muted">{user.name}</div>}
+                      <div className="font-medium text-foreground">{user.email}</div>
+                      {user.name && <div className="text-xs text-muted-foreground">{user.name}</div>}
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={user.role === "ADMIN" ? "active" : "neutral"}>
+                    <Badge variant={user.role === "ADMIN" ? "default" : "secondary"}>
                       {user.role}
                     </Badge>
                   </TableCell>
-                  <TableCell>{user.maxThreads}</TableCell>
-                  <TableCell>{user._count.accounts}</TableCell>
-                  <TableCell>{user._count.tasks}</TableCell>
+                  <TableCell className="text-sm">{user.maxThreads}</TableCell>
+                  <TableCell className="text-sm">{user._count.accounts}</TableCell>
+                  <TableCell className="text-sm">{user._count.tasks}</TableCell>
                   <TableCell>
                     {user.isBanned ? (
-                      <Badge variant="error" showDot>Заблокирован</Badge>
+                      <Badge variant="destructive">Заблокирован</Badge>
                     ) : (
-                      <Badge variant="active" showDot>Активен</Badge>
+                      <Badge variant="default">Активен</Badge>
                     )}
                   </TableCell>
                   <TableCell>
                     {!user.isBanned && user.role !== "ADMIN" && (
                       <Button
                         variant="ghost"
-                        size="sm"
-                        className="text-[#F43F5E] hover:bg-[#F43F5E]/10"
+                        size="icon"
+                        className="size-8 text-destructive hover:text-destructive hover:bg-destructive/10"
                         onClick={() => handleBan(user.id)}
                       >
-                        <Ban className="w-4 h-4" />
+                        <Ban className="size-4" />
                       </Button>
                     )}
                   </TableCell>
@@ -274,43 +283,41 @@ export default function AdminPage() {
       {/* IP Firewall */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Shield className="w-5 h-5" />
+          <CardTitle className="text-base flex items-center gap-2">
+            <Shield className="size-4" />
             IP Файрвол ({blockedIps.length} заблокировано)
           </CardTitle>
+          <CardDescription>Управление заблокированными IP-адресами</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="flex flex-col gap-4">
           <div className="flex items-center gap-3">
             <Input
               placeholder="IP для блокировки (напр. 192.168.1.1)"
               value={newIp}
               onChange={(e) => setNewIp(e.target.value)}
-              className="max-w-sm bg-white/[0.02]"
+              className="max-w-sm"
               onKeyDown={(e) => e.key === "Enter" && handleBlockIp()}
             />
-            <Button variant="primary" onClick={handleBlockIp} disabled={!newIp.trim()}>
-              <Plus className="w-4 h-4 mr-2" />
+            <Button onClick={handleBlockIp} disabled={!newIp.trim()}>
+              <Plus className="size-4 mr-2" />
               Заблокировать
             </Button>
           </div>
 
           {blockedIps.length === 0 ? (
-            <p className="text-text-muted text-body-sm py-4">Нет заблокированных IP</p>
+            <p className="text-muted-foreground text-sm py-4">Нет заблокированных IP</p>
           ) : (
             <div className="flex flex-wrap gap-2">
               {blockedIps.map((ip) => (
-                <div
-                  key={ip}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 text-body-sm font-mono"
-                >
-                  <span className="text-white">{ip}</span>
+                <Badge key={ip} variant="secondary" className="gap-2 py-1.5 px-3 font-mono text-xs">
+                  {ip}
                   <button
-                    className="text-text-muted hover:text-[#F43F5E] transition-colors"
+                    className="text-muted-foreground hover:text-destructive transition-colors"
                     onClick={() => handleUnblockIp(ip)}
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <Trash2 className="size-3.5" />
                   </button>
-                </div>
+                </Badge>
               ))}
             </div>
           )}

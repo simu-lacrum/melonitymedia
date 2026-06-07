@@ -3,11 +3,14 @@
 import * as React from "react"
 import { useRouter, usePathname } from "next/navigation"
 import { api } from "@/lib/api"
-import { Avatar } from "@/components/ui/avatar"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
+import { Separator } from "@/components/ui/separator"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import Link from "next/link"
 import { motion } from "framer-motion"
-import { LogOut, Home, Users, Shield, Server, Settings } from "lucide-react"
+import { LogOut, Home, Users, Shield, Server, Settings, Loader2 } from "lucide-react"
+import { toast } from "sonner"
 
 export default function AccountLayout({
   children,
@@ -33,16 +36,22 @@ export default function AccountLayout({
   const handleLogout = async () => {
     try {
       await api.post("/api/auth/logout")
+      toast.success("Вы вышли из системы")
       router.push("/auth/sign-in")
     } catch (err) {
-      console.error(err)
+      toast.error("Ошибка при выходе")
     }
   }
 
+  const initials = React.useMemo(() => {
+    const name = user?.user?.name || user?.user?.email || ""
+    return name.slice(0, 2).toUpperCase()
+  }, [user])
+
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-melon-pink border-t-transparent rounded-full animate-spin-fast" />
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Loader2 className="size-8 text-primary animate-spin" />
       </div>
     )
   }
@@ -53,41 +62,40 @@ export default function AccountLayout({
     { href: "/account/proxies", icon: Shield, label: "Прокси" },
     { href: "/account/workspace", icon: Server, label: "Воркспейс" },
     { href: "/account/settings", icon: Settings, label: "Настройки" },
-    // Admin link — only shown for ADMIN role
     ...(user?.user?.role === "ADMIN"
       ? [{ href: "/account/admin", icon: Shield, label: "Админ" }]
       : []),
   ]
 
   return (
-    <div className="min-h-screen flex flex-col">
-      {/* Top Navigation */}
-      <header className="sticky top-0 z-50 liquid-glass border-b border-white/5 px-6 h-16 flex items-center justify-between">
-        <div className="flex items-center space-x-8">
-          <Link href="/account/dashboard" className="text-heading-md text-white">
-            Melonity<span className="text-melon-pink">Media</span>
+    <div className="min-h-screen flex flex-col bg-background">
+      {/* Top Navigation — glassmorphism header */}
+      <header className="sticky top-0 z-50 liquid-glass border-b border-border px-6 h-16 flex items-center justify-between">
+        <div className="flex items-center gap-8">
+          <Link href="/account/dashboard" className="text-xl font-semibold tracking-tight text-foreground">
+            Melonity<span className="text-primary">Media</span>
           </Link>
-          
-          <nav className="hidden md:flex items-center space-x-1">
+
+          <nav className="hidden md:flex items-center gap-1">
             {navItems.map((item) => {
               const isActive = pathname.startsWith(item.href)
               return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`relative px-4 py-2 text-body-sm font-medium rounded-pill transition-[color,background-color] duration-150 ease-out ${
-                    isActive ? "text-white" : "text-text-muted hover:text-white hover:bg-white/5"
+                  className={`relative px-4 py-2 text-sm font-medium rounded-full transition-colors duration-150 ${
+                    isActive ? "text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-accent"
                   }`}
                 >
                   {isActive && (
                     <motion.div
                       layoutId="activeNav"
-                      className="absolute inset-0 bg-white/10 rounded-pill"
+                      className="absolute inset-0 bg-accent rounded-full"
                       transition={{ type: "spring", duration: 0.35, bounce: 0.12 }}
                     />
                   )}
-                  <span className="relative z-10 flex items-center space-x-2">
-                    <item.icon className="w-4 h-4" />
+                  <span className="relative z-10 flex items-center gap-2">
+                    <item.icon className="size-4" />
                     <span>{item.label}</span>
                   </span>
                 </Link>
@@ -96,17 +104,27 @@ export default function AccountLayout({
           </nav>
         </div>
 
-        <div className="flex items-center space-x-4">
-          <div className="flex items-center space-x-3 text-right">
-            <div className="hidden sm:block">
-              <div className="text-body-sm font-medium">{user?.user?.name || user?.user?.email}</div>
-              <div className="text-caption text-text-muted">{user?.user?.email}</div>
+        <div className="flex items-center gap-3">
+          <div className="hidden sm:flex items-center gap-3">
+            <div className="text-right">
+              <div className="text-sm font-medium text-foreground">{user?.user?.name || user?.user?.email}</div>
+              <div className="text-xs text-muted-foreground">{user?.user?.email}</div>
             </div>
-            <Avatar size="sm" />
+            <Avatar className="size-8">
+              <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
+                {initials}
+              </AvatarFallback>
+            </Avatar>
           </div>
-          <Button variant="ghost" size="icon" onClick={handleLogout} title="Выход">
-            <LogOut className="w-5 h-5 text-status-error" />
-          </Button>
+          <Separator orientation="vertical" className="h-6 hidden sm:block" />
+          <Tooltip>
+            <TooltipTrigger
+                render={<Button variant="ghost" size="icon" onClick={handleLogout} className="text-destructive hover:text-destructive hover:bg-destructive/10" />}
+              >
+                <LogOut className="size-4" />
+              </TooltipTrigger>
+            <TooltipContent>Выйти</TooltipContent>
+          </Tooltip>
         </div>
       </header>
 
@@ -117,4 +135,3 @@ export default function AccountLayout({
     </div>
   )
 }
-
