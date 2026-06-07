@@ -23,6 +23,9 @@ jobs:
             echo "══════ Pulling latest changes ══════"
             git pull origin main
 
+            echo "══════ Fixing .env ══════"
+            sed -i 's|NEXT_PUBLIC_API_URL=https://cluster-cheats.shop/api|NEXT_PUBLIC_API_URL=https://cluster-cheats.shop|' .env
+
             echo "══════ Building & restarting containers ══════"
             docker compose up -d --build --force-recreate --remove-orphans
 
