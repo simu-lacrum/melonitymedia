@@ -9,7 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Avatar } from "@/components/ui/avatar"
-import { Search, Plus, Trash2, RefreshCw, MoreVertical, Loader2, AlertCircle } from "lucide-react"
+import { Search, Plus, Trash2, RefreshCw, MoreVertical, Loader2, AlertCircle, X } from "lucide-react"
 import { api, ApiError } from "@/lib/api"
 
 interface SocialAccount {
@@ -34,6 +34,10 @@ export default function AccountsPage() {
   const [error, setError] = React.useState<string | null>(null)
   const [selectedIds, setSelectedIds] = React.useState<string[]>([])
   const [search, setSearch] = React.useState("")
+  const [importOpen, setImportOpen] = React.useState(false)
+  const [importText, setImportText] = React.useState("")
+  const [importLoading, setImportLoading] = React.useState(false)
+  const [importError, setImportError] = React.useState<string | null>(null)
 
   const fetchAccounts = React.useCallback(async () => {
     try {
@@ -87,6 +91,26 @@ export default function AccountsPage() {
     }
   }
 
+  const handleImport = async () => {
+    if (!importText.trim()) return
+    try {
+      setImportLoading(true)
+      setImportError(null)
+      await api.post("/api/accounts/import", { raw: importText })
+      setImportOpen(false)
+      setImportText("")
+      fetchAccounts()
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setImportError(err.message)
+      } else {
+        setImportError("Не удалось импортировать аккаунты")
+      }
+    } finally {
+      setImportLoading(false)
+    }
+  }
+
   const timeAgo = (dateStr: string) => {
     const diff = Date.now() - new Date(dateStr).getTime()
     const mins = Math.floor(diff / 60000)
@@ -100,7 +124,7 @@ export default function AccountsPage() {
 
   const renderStatus = (status: string) => {
     switch (status) {
-      case "ACTIVE":
+      case "ALIVE":
         return <Badge variant="active" showDot>Живой</Badge>
       case "AUTH_NEEDED":
         return <Badge variant="warning" showDot>Нужна авториз.</Badge>
@@ -124,6 +148,7 @@ export default function AccountsPage() {
   }
 
   return (
+    <>
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
@@ -142,7 +167,7 @@ export default function AccountsPage() {
             <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />
             Синхронизировать
           </Button>
-          <Button variant="primary">
+          <Button variant="primary" onClick={() => setImportOpen(true)}>
             <Plus className="w-4 h-4 mr-2" />
             Добавить
           </Button>
@@ -273,5 +298,84 @@ export default function AccountsPage() {
         </CardContent>
       </Card>
     </motion.div>
+
+      {/* Import Modal */}
+      <AnimatePresence>
+        {importOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+            onClick={() => !importLoading && setImportOpen(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ duration: 0.2 }}
+              className="w-full max-w-lg mx-4 liquid-glass rounded-2xl border border-white/10 p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-display-xs">Импорт аккаунтов</h2>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => setImportOpen(false)}
+                  disabled={importLoading}
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+
+              <p className="text-body-sm text-text-muted mb-3">
+                Вставьте данные аккаунтов в формате login:password или JSON с куками
+              </p>
+
+              <textarea
+                className="w-full h-40 rounded-lg bg-white/[0.03] border border-white/10 p-3 text-body-sm font-mono text-white placeholder:text-text-muted focus:outline-none focus:border-white/20 resize-none"
+                placeholder={"login:password\nlogin2:password2\n\nили JSON с куками..."}
+                value={importText}
+                onChange={(e) => setImportText(e.target.value)}
+                disabled={importLoading}
+              />
+
+              {importError && (
+                <div className="flex items-center gap-2 mt-3 p-3 rounded-lg bg-[#F43F5E]/10 text-[#F43F5E] text-body-sm border border-[#F43F5E]/20">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{importError}</span>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 mt-4">
+                <Button
+                  variant="secondary"
+                  onClick={() => setImportOpen(false)}
+                  disabled={importLoading}
+                >
+                  Отмена
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={handleImport}
+                  disabled={importLoading || !importText.trim()}
+                >
+                  {importLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Импорт...
+                    </>
+                  ) : (
+                    "Импортировать"
+                  )}
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   )
 }

@@ -49,30 +49,7 @@ export function LiveTerminal({ taskId }: { taskId?: string }) {
       }
     })
 
-    // Simulated logs for UI demonstration
-    const interval = setInterval(() => {
-      const levels = ["info", "info", "success", "warning"] as const;
-      const msgs = [
-        "Initializing Patchright browser instance...",
-        "Navigating to TikTok login...",
-        "Solving capsolver challenge...",
-        "Cookie injected successfully.",
-        "Detected slow proxy connection, retrying...",
-        "Task 'Warming_Up' progressing: 45%",
-      ]
-      setLogs((prev) => [
-        ...prev.slice(-100),
-        {
-          id: Date.now().toString(),
-          timestamp: new Date().toLocaleTimeString(),
-          level: levels[Math.floor(Math.random() * levels.length)],
-          message: msgs[Math.floor(Math.random() * msgs.length)]
-        }
-      ])
-    }, 3000)
-
     return () => {
-      clearInterval(interval)
       disconnectSocket()
     }
   }, [taskId])

@@ -5,10 +5,11 @@ import { motion } from "framer-motion"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Search, Plus, Trash2, Shield, SignalHigh, SignalMedium, SignalLow, Loader2, RefreshCw } from "lucide-react"
+import { Search, Plus, Trash2, Shield, SignalHigh, SignalMedium, SignalLow, Loader2, RefreshCw, X } from "lucide-react"
 import { api, ApiError } from "@/lib/api"
 
 interface Proxy {
@@ -29,6 +30,18 @@ export default function ProxiesPage() {
   const [error, setError] = React.useState<string | null>(null)
   const [selectedIds, setSelectedIds] = React.useState<string[]>([])
   const [search, setSearch] = React.useState("")
+  const [showModal, setShowModal] = React.useState(false)
+  const [modalMode, setModalMode] = React.useState<"single" | "bulk">("single")
+  const [submitting, setSubmitting] = React.useState(false)
+
+  // Single proxy form
+  const [formHost, setFormHost] = React.useState("")
+  const [formPort, setFormPort] = React.useState("")
+  const [formUser, setFormUser] = React.useState("")
+  const [formPass, setFormPass] = React.useState("")
+
+  // Bulk import
+  const [bulkText, setBulkText] = React.useState("")
 
   const fetchProxies = React.useCallback(async () => {
     try {
@@ -74,14 +87,60 @@ export default function ProxiesPage() {
   const handleDelete = async () => {
     if (!confirm(`Удалить ${selectedIds.length} прокси?`)) return
     try {
-      for (const id of selectedIds) {
-        await api.delete(`/api/proxies/${id}`)
-      }
+      await api.post("/api/proxies/bulk-delete", { ids: selectedIds })
       setSelectedIds([])
       fetchProxies()
     } catch {
       setError("Ошибка удаления")
     }
+  }
+
+  const handleAddSingle = async () => {
+    if (!formHost || !formPort) return
+    setSubmitting(true)
+    try {
+      await api.post("/api/proxies", {
+        host: formHost.trim(),
+        port: parseInt(formPort, 10),
+        username: formUser.trim() || undefined,
+        password: formPass.trim() || undefined,
+      })
+      setShowModal(false)
+      setFormHost("")
+      setFormPort("")
+      setFormUser("")
+      setFormPass("")
+      fetchProxies()
+    } catch (err: any) {
+      setError(err.message || "Ошибка добавления прокси")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleBulkImport = async () => {
+    if (!bulkText.trim()) return
+    setSubmitting(true)
+    try {
+      await api.post("/api/proxies/import", { raw: bulkText.trim() })
+      setShowModal(false)
+      setBulkText("")
+      fetchProxies()
+    } catch (err: any) {
+      setError(err.message || "Ошибка импорта прокси")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const openModal = () => {
+    setShowModal(true)
+    setModalMode("single")
+    setFormHost("")
+    setFormPort("")
+    setFormUser("")
+    setFormPass("")
+    setBulkText("")
   }
 
   const renderLatency = (ms?: number) => {
@@ -108,7 +167,7 @@ export default function ProxiesPage() {
             <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />
             Обновить
           </Button>
-          <Button variant="primary">
+          <Button variant="primary" onClick={openModal}>
             <Plus className="w-4 h-4 mr-2" />
             Добавить прокси
           </Button>
@@ -118,6 +177,128 @@ export default function ProxiesPage() {
       {error && (
         <div className="p-4 rounded-lg bg-[#F43F5E]/10 text-[#F43F5E] border border-[#F43F5E]/20">
           {error}
+        </div>
+      )}
+
+      {/* ── Add Proxy Modal ── */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="liquid-glass p-8 w-full max-w-lg mx-4 relative"
+          >
+            <button
+              onClick={() => setShowModal(false)}
+              className="absolute top-4 right-4 text-text-muted hover:text-white transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <h2 className="text-display-sm mb-6">Добавить прокси</h2>
+
+            {/* Tabs */}
+            <div className="flex space-x-2 mb-6">
+              <button
+                onClick={() => setModalMode("single")}
+                className={`px-4 py-2 rounded-lg text-body-sm font-medium transition-colors ${
+                  modalMode === "single"
+                    ? "bg-melon-pink text-white"
+                    : "bg-white/5 text-text-muted hover:text-white"
+                }`}
+              >
+                Один прокси
+              </button>
+              <button
+                onClick={() => setModalMode("bulk")}
+                className={`px-4 py-2 rounded-lg text-body-sm font-medium transition-colors ${
+                  modalMode === "bulk"
+                    ? "bg-melon-pink text-white"
+                    : "bg-white/5 text-text-muted hover:text-white"
+                }`}
+              >
+                Массовый импорт
+              </button>
+            </div>
+
+            {modalMode === "single" ? (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="proxy-host">Хост *</Label>
+                    <Input
+                      id="proxy-host"
+                      placeholder="185.0.0.1"
+                      value={formHost}
+                      onChange={(e) => setFormHost(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="proxy-port">Порт *</Label>
+                    <Input
+                      id="proxy-port"
+                      placeholder="8080"
+                      type="number"
+                      value={formPort}
+                      onChange={(e) => setFormPort(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="proxy-user">Логин</Label>
+                    <Input
+                      id="proxy-user"
+                      placeholder="username"
+                      value={formUser}
+                      onChange={(e) => setFormUser(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="proxy-pass">Пароль</Label>
+                    <Input
+                      id="proxy-pass"
+                      placeholder="password"
+                      type="password"
+                      value={formPass}
+                      onChange={(e) => setFormPass(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <Button
+                  className="w-full"
+                  onClick={handleAddSingle}
+                  disabled={submitting || !formHost || !formPort}
+                >
+                  {submitting ? "Добавление..." : "Добавить"}
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div>
+                  <Label htmlFor="proxy-bulk">Список прокси</Label>
+                  <textarea
+                    id="proxy-bulk"
+                    rows={8}
+                    className="w-full bg-white/[0.03] border border-white/[0.06] rounded-lg px-4 py-3 text-body-md text-white font-mono placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-melon-pink/50 resize-none"
+                    placeholder={"host:port:user:pass\nhost:port:user:pass\nhost:port"}
+                    value={bulkText}
+                    onChange={(e) => setBulkText(e.target.value)}
+                  />
+                  <p className="text-caption text-text-muted mt-1">
+                    Формат: host:port или host:port:user:pass — по одному на строку
+                  </p>
+                </div>
+                <Button
+                  className="w-full"
+                  onClick={handleBulkImport}
+                  disabled={submitting || !bulkText.trim()}
+                >
+                  {submitting ? "Импорт..." : "Импортировать"}
+                </Button>
+              </div>
+            )}
+          </motion.div>
         </div>
       )}
 

@@ -46,7 +46,7 @@ export default function DashboardPage() {
 
         setStats({
           totalAccounts: accounts.length,
-          activeAccounts: accounts.filter((a: any) => a.status === "ACTIVE").length,
+          activeAccounts: accounts.filter((a: any) => a.status === "ALIVE").length,
           bannedAccounts: accounts.filter((a: any) => a.status === "BANNED").length,
           warmingUp: accounts.filter((a: any) => a.status === "WARMING_UP").length,
           totalVideos: videos.length,
