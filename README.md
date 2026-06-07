@@ -334,9 +334,10 @@ graph TD
 
     subgraph ACCOUNT_Z["👤 /account"]
         DASH_P["/account/dashboard<br/>Дашборд аналитики"]
-        PROF_P["/account/profiles<br/>База аккаунтов"]
+        PROF_P["/account/accounts<br/>База аккаунтов"]
         WS_P["/account/workspace<br/>Загрузчик + Терминал"]
         PROX_P["/account/proxies<br/>Управление прокси"]
+        SET_P["/account/settings<br/>Настройки"]
     end
 
     subgraph ADMIN_Z["⚙️ /admin (role=ADMIN)"]
@@ -358,9 +359,9 @@ graph TD
 | `/` | Лендинг с hero-секцией, фичами, статистикой | Публичный |
 | `/auth/login` | JWT-авторизация через HttpOnly Cookie | Публичный |
 | `/auth/register` | Регистрация нового вебмастера | Публичный |
-| `/account/dashboard` | KPI-карточки, **Recharts AreaChart**, статус BullMQ очередей | Авторизованный |
-| `/account/profiles` | DataGrid аккаунтов, импорт cookies (Netscape/JSON), **массовая привязка прокси** | Авторизованный |
-| `/account/workspace` | **4 вкладки** (Залив/Прогрев/Cookies/Профиль), DropZone, Terminal | Авторизованный |
+| `/account/dashboard` | KPI-карточки (6 метрик), **Recharts AreaChart**, активные задачи BullMQ | Авторизованный |
+| `/account/accounts` | DataGrid аккаунтов, импорт cookies (Netscape/JSON), **массовая привязка прокси** | Авторизованный |
+| `/account/workspace` | **5 вкладок** (Залив/Прогрев/Cookies/Профиль/Логин), Upload, Terminal | Авторизованный |
 | `/account/proxies` | CRUD прокси, тест коннекта, ротация IP, carrier/ASN валидация | Авторизованный |
 | `/admin/runtime` | PostgreSQL, Redis, BullMQ, CPU/RAM мониторинг | Администратор |
 | `/admin/users` | Таблица вебмастеров, лимиты потоков, soft-ban | Администратор |
