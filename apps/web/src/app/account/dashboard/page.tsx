@@ -197,7 +197,7 @@ export default function DashboardPage() {
                     }}
                   />
                   <Area type="monotone" dataKey="views" stroke="var(--chart-1)" fill="rgba(255, 20, 105, 0.1)" strokeWidth={2} name="Просмотры" />
-                  <Area type="monotone" dataKey="interactions" stroke="var(--chart-2)" fill="rgba(126, 232, 250, 0.1)" strokeWidth={2} name="Взаимодействия" />
+                  <Area type="monotone" dataKey="interactions" stroke="var(--chart-2)" fill="rgba(21, 193, 136, 0.1)" strokeWidth={2} name="Взаимодействия" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>

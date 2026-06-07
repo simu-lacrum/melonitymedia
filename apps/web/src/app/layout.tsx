@@ -1,17 +1,8 @@
 import type { Metadata } from 'next';
-import { JetBrains_Mono, Geist } from 'next/font/google';
 import './globals.css';
 import { cn } from "@/lib/utils";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
-
-const geist = Geist({subsets:['latin'],variable:'--font-sans'});
-
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ['latin', 'cyrillic'],
-  variable: '--font-jetbrains-mono',
-  display: 'swap',
-});
 
 export const metadata: Metadata = {
   title: 'MelonityMedia',
@@ -24,7 +15,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ru" className={cn(jetbrainsMono.variable, "font-sans", geist.variable)}>
+    <html lang="ru">
       <body>
         <TooltipProvider>
           {children}
@@ -33,8 +24,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           position="bottom-right"
           toastOptions={{
             style: {
-              background: '#181C24',
-              border: '1px solid rgba(255,255,255,0.08)',
+              background: '#282d35',
+              border: '1px solid #586271',
               color: '#FFFFFF',
             },
           }}

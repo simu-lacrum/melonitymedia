@@ -76,7 +76,7 @@ export function DataTable<T extends { id: string }>({
     <div className="w-full">
       {/* Bulk actions toolbar */}
       {someSelected && bulkActions && (
-        <div className="flex items-center gap-3 px-4 py-3 mb-2 bg-melon-pink/5 rounded-xl border border-melon-pink/20 transition-opacity duration-150 ease-out">
+        <div className="flex items-center gap-3 px-4 py-3 mb-2 bg-melon-pink/5 rounded-lg border border-melon-pink/20 transition-opacity duration-150 ease-out">
           <span className="text-sm text-pure-white font-medium">
             Выбрано: {selectedIds.size}
           </span>
@@ -87,7 +87,7 @@ export function DataTable<T extends { id: string }>({
       )}
 
       {/* Table */}
-      <div className="overflow-x-auto rounded-xl">
+      <div className="overflow-x-auto rounded-lg">
         <table className="w-full">
           <thead>
             <tr className="border-b border-muted-gray/10">

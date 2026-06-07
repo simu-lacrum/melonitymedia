@@ -70,10 +70,13 @@ export default function AccountLayout({
   return (
     <div className="min-h-screen flex flex-col bg-background">
       {/* Top Navigation — glassmorphism header */}
-      <header className="sticky top-0 z-50 liquid-glass border-b border-border px-6 h-16 flex items-center justify-between">
+      <header className="sticky top-0 z-50 panel-header-glass px-6 h-16 flex items-center justify-between">
         <div className="flex items-center gap-8">
-          <Link href="/account/dashboard" className="text-xl font-semibold tracking-tight text-foreground">
-            Melonity<span className="text-primary">Media</span>
+          <Link href="/account/dashboard" className="flex items-center gap-3">
+            <img src="/logo.svg" alt="MelonityMedia" width="28" height="28" />
+            <span className="text-sm font-semibold tracking-wide text-foreground uppercase">
+              Melonity<span className="text-primary">Media</span>
+            </span>
           </Link>
 
           <nav className="hidden md:flex items-center gap-1">
@@ -83,14 +86,14 @@ export default function AccountLayout({
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`relative px-4 py-2 text-sm font-medium rounded-full transition-colors duration-150 ${
+                  className={`relative px-4 py-2 text-sm font-medium rounded-lg transition-colors duration-150 ${
                     isActive ? "text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-accent"
                   }`}
                 >
                   {isActive && (
                     <motion.div
                       layoutId="activeNav"
-                      className="absolute inset-0 bg-accent rounded-full"
+                      className="absolute inset-0 bg-accent rounded-lg"
                       transition={{ type: "spring", duration: 0.35, bounce: 0.12 }}
                     />
                   )}

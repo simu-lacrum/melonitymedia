@@ -45,7 +45,7 @@ export function Header({ user, onMenuToggle }: HeaderProps) {
           <div className="relative">
             <button
               onClick={() => setShowUserMenu(!showUserMenu)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-surface-dark transition-[background-color] duration-150 ease-out"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-surface-dark transition-[background-color] duration-150 ease-out"
             >
               <div className="w-8 h-8 rounded-full bg-melon-pink/20 flex items-center justify-center">
                 <User className="w-4 h-4 text-melon-pink" />
@@ -60,7 +60,7 @@ export function Header({ user, onMenuToggle }: HeaderProps) {
               <>
                 <div className="fixed inset-0 z-30" onClick={() => setShowUserMenu(false)} />
                 <div
-                  className="absolute right-0 top-full mt-2 w-56 bg-surface-dark rounded-xl shadow-xl border border-muted-gray/10 py-2 z-40 transition-[opacity,transform] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] opacity-100 scale-100"
+                  className="absolute right-0 top-full mt-2 w-56 bg-surface-dark rounded-lg shadow-xl border border-muted-gray/10 py-2 z-40 transition-[opacity,transform] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] opacity-100 scale-100"
                   style={{ transformOrigin: 'top right' }}
                 >
                   <div className="px-4 py-2 border-b border-muted-gray/10">

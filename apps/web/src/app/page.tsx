@@ -215,7 +215,7 @@ export default function LandingPage() {
               Рабочий процесс.
             </h2>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-px bg-pure-white/[0.05] rounded-xl overflow-hidden border border-pure-white/[0.05]">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-px bg-pure-white/[0.05] rounded-lg overflow-hidden border border-pure-white/[0.05]">
               {[
                 {
                   step: '01',

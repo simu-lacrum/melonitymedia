@@ -32,7 +32,7 @@ export function Terminal({ logs, className, maxHeight = '400px' }: TerminalProps
   return (
     <div
       className={cn(
-        'bg-[#0a0a0a] rounded-xl overflow-y-auto font-mono text-xs p-4',
+        'bg-[#0a0a0a] rounded-lg overflow-y-auto font-mono text-xs p-4',
         className,
       )}
       style={{ maxHeight }}

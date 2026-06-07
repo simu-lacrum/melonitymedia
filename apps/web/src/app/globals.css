@@ -1,4 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,100..1000&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
@@ -8,83 +9,83 @@
 @source "../components";
 @source "../lib";
 
+/* ═══════════════════════════════════════════════════════════════
+   Melonity Design System — derived from DESIGN-melonity-gg.md
+   Colors: bg #20242a · surface #282d35 · primary #ff1469
+   Radius: sm 8px · md 12px · lg 16px
+   Font:   Roboto Flex (display+body) · Roboto Mono (code)
+   ═══════════════════════════════════════════════════════════════ */
+
 @theme {
-  --color-canvas-base: #0E1014;
-  --color-canvas-tint-cobalt: #1A1F2E;
-  --color-canvas-tint-plum: #2A1828;
-  --color-canvas-tint-graphite: #181C24;
+  /* ── Melonity Color Palette ─────────────────────────────── */
+  --color-melonity-bg: #20242a;
+  --color-melonity-surface: #282d35;
+  --color-melonity-surface-darker: #22272d;
+  --color-melonity-primary: #ff1469;
+  --color-melonity-primary-hover: #e00e5e;
+  --color-melonity-green: #15c188;
 
-  --glass-surface: rgba(38, 42, 48, 0.5);
-  --glass-stroke: rgba(255, 255, 255, 0.05);
-  --glass-highlight: rgba(255, 255, 255, 0.1);
-  --glass-occlusion: rgba(0, 0, 0, 0.2);
+  --color-text-primary: #ffffff;
+  --color-text-muted: #8d97a6;
+  --color-text-secondary: #b9c0cb;
+  --color-text-disabled: #586271;
 
-  --color-melon-pink: #FF1469;
-  --color-melon-glow: rgba(255, 20, 105, 0.35);
-  --color-melon-tint: rgba(255, 20, 105, 0.08);
-  --color-coral: #FF6B8B;
-  --color-ice-cyan: #7EE8FA;
+  --color-melonity-border: #586271;
+  --color-melonity-border-light: rgba(255, 255, 255, 0.08);
 
-  --color-status-active: #00D287;
+  /* Mapped aliases for Tailwind classes used in pages */
+  --color-pure-white: #ffffff;
+  --color-muted-gray: #8d97a6;
+  --color-melon-pink: #ff1469;
+  --color-night-base: #20242a;
+  --color-surface-dark: #22272d;
+  --color-surface-elevated: #282d35;
+  --color-success-green: #15c188;
+  --color-alert-red: #F43F5E;
+  --color-status-active: #15c188;
   --color-status-warn: #F59E0B;
   --color-status-error: #F43F5E;
 
-  --color-text-primary: #FFFFFF;
-  --color-text-body: #E5E7EB;
-  --color-text-muted: #9CA3AF;
-  --color-text-disabled: #4B5563;
-
+  /* ── Typography ─────────────────────────────────────────── */
   --font-sans: 'Roboto Flex', sans-serif;
   --font-display: 'Roboto Flex', sans-serif;
-  --font-mono: var(--font-jetbrains-mono), monospace;
+  --font-mono: 'Roboto Mono', monospace;
 
-  --radius-input: 12px;
-  --radius-card-base: 20px;
-  --radius-card-elevated: 28px;
-  --radius-drawer: 32px;
-  --radius-pill: 999px;
+  /* ── Radius (melonity.gg) ───────────────────────────────── */
+  --radius-sm-mel: 8px;
+  --radius-md-mel: 12px;
+  --radius-lg-mel: 16px;
+  --radius-full: 9999px;
 
-  /* Additional component colors used in UI */
-  --color-pure-white: #FFFFFF;
-  --color-muted-gray: #9CA3AF;
-  --color-alert-red: #F43F5E;
-  --color-surface-dark: #181C24;
-  --color-surface-elevated: #2A2F3D;
-  --color-night-base: #0E1014;
+  /* ── Elevation ──────────────────────────────────────────── */
+  --shadow-card: rgba(27, 27, 27, 0.1) 0px -2px 16px 0px;
+  --shadow-focus: 0px 0px 0px 4px rgba(255, 20, 105, 0.2);
+  --shadow-hero-glow: 0px 0px 65px 17px rgba(255, 20, 105, 0.4);
 
-  /* ── Emil Kowalski: Custom Easing Curves ──────────────── */
-  /* Strong ease-out for UI interactions */
+  /* ── Motion (Emil Kowalski + melonity.gg) ────────────────── */
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-  /* Strong ease-in-out for on-screen movement */
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
-  /* iOS-like drawer curve (from Ionic Framework) */
-  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
-
-  /* ── Duration Tokens ──────────────────────────────────── */
+  --ease-standard: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --dur-fast: 0.15s;
+  --dur-base: 0.3s;
   --dur-press: 160ms;
   --dur-tooltip: 150ms;
   --dur-dropdown: 200ms;
   --dur-modal: 250ms;
-  --dur-drawer: 280ms;
 }
 
+/* ── Base Layer ────────────────────────────────────────────── */
 @layer base {
-
   body {
-    background:
-      radial-gradient(circle at 15% 20%, rgba(58, 90, 140, 0.18) 0%, transparent 45%),
-      radial-gradient(circle at 85% 80%, rgba(140, 50, 100, 0.16) 0%, transparent 50%),
-      radial-gradient(circle at 50% 50%, rgba(255, 20, 105, 0.04) 0%, transparent 70%),
-      var(--color-canvas-base);
-    color: var(--color-text-body);
-    font-family: var(--font-display);
+    background-color: #20242a;
+    color: #ffffff;
+    font-family: 'Roboto Flex', sans-serif;
     min-height: 100vh;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     @apply bg-background text-foreground;
   }
 
-  /* ── Accessibility: Reduced Motion ─────────────────── */
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
       animation-duration: 0.01ms !important;
@@ -94,217 +95,198 @@
     }
   }
 
-  /* Custom Scrollbar */
-  ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-  ::-webkit-scrollbar-track {
-    background: rgba(255, 255, 255, 0.02);
-  }
-  ::-webkit-scrollbar-thumb {
-    background: rgba(255, 20, 105, 0.2);
-    border-radius: 999px;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 20, 105, 0.4);
-  }
-  * {
-    @apply border-border outline-ring/50;
-  }
-  button:not(:disabled), [role="button"]:not(:disabled) {
-    cursor: pointer;
-  }
-  html {
-    @apply font-sans;
+  /* Custom Scrollbar — melonity pink */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.02); }
+  ::-webkit-scrollbar-thumb { background: rgba(255, 20, 105, 0.2); border-radius: 999px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255, 20, 105, 0.4); }
+
+  * { @apply border-border outline-ring/50; }
+  button:not(:disabled), [role="button"]:not(:disabled) { cursor: pointer; }
+  html { @apply font-sans; }
+
+  /* ── Focus ring — melonity.gg standard ────────────────── */
+  :focus-visible {
+    outline: none;
+    box-shadow: 0px 0px 0px 4px rgba(255, 20, 105, 0.2);
   }
 }
 
+/* ── Utilities Layer ───────────────────────────────────────── */
 @layer utilities {
-  /* Typography classes */
+
+  /* ── Typography Classes (melonity.gg hierarchy) ─────────── */
   .text-display-xl {
-    font-size: 80px;
-    line-height: 90%;
+    font-size: 64px;
+    line-height: 1.2;
     font-weight: 700;
-    font-stretch: 150%;
-    font-variation-settings: "wdth" 150, "opsz" 14, "GRAD" 150;
     color: var(--color-text-primary);
   }
 
   .text-display-md {
-    font-size: 48px;
-    line-height: 110%;
+    font-size: 40px;
+    line-height: 1.2;
     font-weight: 700;
-    font-stretch: 130%;
-    font-variation-settings: "wdth" 130, "opsz" 14, "GRAD" 100;
     color: var(--color-text-primary);
   }
 
   .text-heading-lg {
     font-size: 28px;
-    line-height: 120%;
-    font-weight: 600;
-    font-stretch: 100%;
+    line-height: 1.2;
+    font-weight: 700;
     color: var(--color-text-primary);
   }
 
   .text-heading-md {
     font-size: 20px;
-    line-height: 130%;
-    font-weight: 600;
-    font-stretch: 100%;
+    line-height: 1.5;
+    font-weight: 400;
     color: var(--color-text-primary);
   }
 
   .text-body-lg {
     font-size: 16px;
-    line-height: 150%;
+    line-height: 1.5;
     font-weight: 400;
-    font-stretch: 100%;
-    color: var(--color-text-body);
+    color: var(--color-text-primary);
   }
 
   .text-body-sm {
     font-size: 14px;
-    line-height: 150%;
+    line-height: 1.5;
     font-weight: 400;
-    font-stretch: 100%;
-    color: var(--color-text-body);
+    color: var(--color-text-secondary);
   }
 
   .text-caption {
-    font-size: 12px;
-    line-height: 140%;
-    font-weight: 500;
-    font-stretch: 100%;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    font-size: 13px;
+    line-height: 1.5;
+    font-weight: 400;
     color: var(--color-text-muted);
   }
 
   .text-mono {
     font-family: var(--font-mono);
     font-size: 13px;
-    line-height: 140%;
-    font-weight: 500;
-    color: var(--color-text-body);
+    line-height: 1.4;
+    font-weight: 400;
+    color: var(--color-text-primary);
   }
 
+  /* ── Card (melonity.gg surface card) ─────────────────────── */
+  .melonity-card {
+    background-color: #282d35;
+    border-radius: 16px;
+    box-shadow: rgba(27, 27, 27, 0.1) 0px -2px 16px 0px;
+    transition: background-color 0.15s cubic-bezier(0.25, 0.1, 0.25, 1);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .melonity-card:hover {
+      background-color: #222224;
+    }
+  }
+
+  /* ── Legacy liquid-glass (still used in landing) ──────── */
   .liquid-glass {
-    position: relative;
-    background: var(--glass-surface);
-    backdrop-filter: blur(40px) saturate(180%);
-    -webkit-backdrop-filter: blur(40px) saturate(180%);
-    border: 1px solid var(--glass-stroke);
-    border-radius: 24px;
-    box-shadow:
-      0 24px 48px -12px rgba(0, 0, 0, 0.50),
-      inset 0 1px 0 0 var(--glass-highlight),
-      inset 0 -1px 0 0 var(--glass-occlusion);
+    background-color: #282d35;
+    border-radius: 16px;
+    box-shadow: rgba(27, 27, 27, 0.1) 0px -2px 16px 0px;
     overflow: hidden;
   }
 
-  .liquid-glass::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background: linear-gradient(
-      135deg,
-      rgba(255, 255, 255, 0.08) 0%,
-      rgba(255, 255, 255, 0.00) 30%,
-      rgba(255, 255, 255, 0.00) 100%
-    );
-    border-radius: inherit;
-  }
-
-  .liquid-glass::after {
-    content: '';
-    position: absolute;
-    inset: -1px;
-    pointer-events: none;
-    border-radius: inherit;
-    background: linear-gradient(
-      180deg,
-      rgba(126, 232, 250, 0.04) 0%,
-      transparent 30%,
-      transparent 70%,
-      rgba(255, 107, 139, 0.04) 100%
-    );
-    mix-blend-mode: screen;
-  }
-
-  /* ── Button Variants ──────────────────────────────────── */
+  /* ── Button Variants (melonity.gg flat style) ─────────── */
   .btn-primary-strict {
-    background: linear-gradient(135deg, var(--color-melon-pink) 0%, var(--color-coral) 100%);
-    color: var(--color-pure-white);
-    box-shadow: 0 4px 12px var(--color-melon-glow), inset 0 1px 0 rgba(255,255,255,0.2);
+    background-color: #ff1469;
+    color: #ffffff;
     border: none;
-    border-radius: 999px;
-    transition: transform var(--dur-press) var(--ease-out),
-                filter 200ms ease,
-                box-shadow 200ms ease;
+    border-radius: 12px;
+    font-weight: 500;
+    font-size: 16px;
+    padding: 12px 24px;
+    transition: background-color 0.15s cubic-bezier(0.25, 0.1, 0.25, 1),
+                transform var(--dur-press) var(--ease-out);
+  }
+  .btn-primary-strict:hover {
+    background-color: #e00e5e;
   }
   .btn-primary-strict:active {
     transform: scale(0.97);
   }
-  @media (hover: hover) and (pointer: fine) {
-    .btn-primary-strict:hover {
-      filter: brightness(1.1);
-      box-shadow: 0 6px 16px var(--color-melon-glow), inset 0 1px 0 rgba(255,255,255,0.3);
-    }
+  .btn-primary-strict:disabled {
+    background-color: #282d35;
+    color: #586271;
+    cursor: default;
+    transform: none;
   }
 
-  .btn-accent-strict {
-    background: linear-gradient(135deg, var(--color-ice-cyan) 0%, #3B82F6 100%);
-    color: var(--color-night-base);
-    box-shadow: 0 4px 12px rgba(126, 232, 250, 0.3), inset 0 1px 0 rgba(255,255,255,0.4);
-    border: none;
-    border-radius: 999px;
-    transition: transform var(--dur-press) var(--ease-out),
-                filter 200ms ease,
-                box-shadow 200ms ease;
+  .btn-secondary-strict {
+    background-color: #282d35;
+    color: #ffffff;
+    border: 1px solid #ffffff;
+    border-radius: 12px;
+    font-weight: 500;
+    font-size: 16px;
+    padding: 12px 24px;
+    transition: background-color 0.15s cubic-bezier(0.25, 0.1, 0.25, 1),
+                border-color 0.15s cubic-bezier(0.25, 0.1, 0.25, 1),
+                transform var(--dur-press) var(--ease-out);
   }
-  .btn-accent-strict:active {
+  .btn-secondary-strict:hover {
+    background-color: #20242a;
+    border-color: #8d97a6;
+  }
+  .btn-secondary-strict:active {
     transform: scale(0.97);
-  }
-  @media (hover: hover) and (pointer: fine) {
-    .btn-accent-strict:hover {
-      filter: brightness(1.1);
-      box-shadow: 0 6px 16px rgba(126, 232, 250, 0.4), inset 0 1px 0 rgba(255,255,255,0.5);
-    }
   }
 
   .btn-outline-strict {
     background: transparent;
-    color: var(--color-pure-white);
-    border: 1px solid var(--glass-stroke);
-    backdrop-filter: blur(10px);
-    border-radius: 999px;
-    transition: transform var(--dur-press) var(--ease-out),
-                background-color 200ms ease,
-                border-color 200ms ease;
+    color: #ffffff;
+    border: 1px solid #586271;
+    border-radius: 12px;
+    font-weight: 500;
+    font-size: 16px;
+    padding: 12px 24px;
+    transition: background-color 0.15s cubic-bezier(0.25, 0.1, 0.25, 1),
+                border-color 0.15s cubic-bezier(0.25, 0.1, 0.25, 1),
+                color 0.15s cubic-bezier(0.25, 0.1, 0.25, 1),
+                transform var(--dur-press) var(--ease-out);
+  }
+  .btn-outline-strict:hover {
+    background-color: #282d35;
+    border-color: #ffffff;
+    color: #ffffff;
   }
   .btn-outline-strict:active {
     transform: scale(0.97);
   }
-  @media (hover: hover) and (pointer: fine) {
-    .btn-outline-strict:hover {
-      background: var(--color-glass-surface);
-      border-color: rgba(255, 255, 255, 0.2);
-    }
+
+  .btn-ghost-strict {
+    background-color: #22272d;
+    color: #586271;
+    border: 1px solid #586271;
+    border-radius: 12px;
+    font-weight: 500;
+    font-size: 16px;
+    padding: 12px 24px;
+    transition: background-color 0.15s cubic-bezier(0.25, 0.1, 0.25, 1),
+                color 0.15s cubic-bezier(0.25, 0.1, 0.25, 1),
+                transform var(--dur-press) var(--ease-out);
+  }
+  .btn-ghost-strict:hover {
+    background-color: #282d35;
+    color: #ffffff;
+    border-color: #ffffff;
+  }
+  .btn-ghost-strict:active {
+    transform: scale(0.97);
   }
 
-  /* ── Stagger Entry Animation ──────────────────────────── */
+  /* ── Stagger Entry Animation ────────────────────────────── */
   @keyframes fadeInUp {
-    from {
-      opacity: 0;
-      transform: translateY(8px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
   }
 
   .stagger-enter {
@@ -318,21 +300,58 @@
   .stagger-enter:nth-child(5) { animation-delay: 200ms; }
   .stagger-enter:nth-child(6) { animation-delay: 250ms; }
 
-  @keyframes shimmer {
-    100% {
-      transform: translateX(100%);
-    }
+  @keyframes shimmer { 100% { transform: translateX(100%); } }
+  @keyframes spin-fast { to { transform: rotate(360deg); } }
+  .animate-spin-fast { animation: spin-fast 0.6s linear infinite; }
+
+  /* ── Landing Page Utility Classes ──────────────────────── */
+  .header-blur {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    background-color: rgba(32, 36, 42, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 0 1.5rem;
+    height: 4rem;
+    display: flex;
+    align-items: center;
   }
 
-  /* ── Faster Spinner (perceived performance) ───────────── */
-  @keyframes spin-fast {
-    to { transform: rotate(360deg); }
+  .panel-header-glass {
+    background-color: rgba(32, 36, 42, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   }
-  .animate-spin-fast {
-    animation: spin-fast 0.6s linear infinite;
+
+  .max-w-wrapper {
+    max-width: 1280px;
+    margin: 0 auto;
+    width: 100%;
+    padding: 0 1.5rem;
   }
+
+  .text-display-wide {
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .animate-enter {
+    opacity: 0;
+    transform: translateY(12px);
+    animation: fadeInUp 500ms cubic-bezier(0.23, 1, 0.32, 1) forwards;
+  }
+  .animate-enter.delay-1 { animation-delay: 80ms; }
+  .animate-enter.delay-2 { animation-delay: 160ms; }
+  .animate-enter.delay-3 { animation-delay: 240ms; }
+  .animate-enter.delay-4 { animation-delay: 320ms; }
 }
 
+/* ── Tailwind → shadcn mapping ─────────────────────────────── */
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: var(--font-sans);
@@ -367,100 +386,93 @@
   --color-card: var(--card);
   --color-foreground: var(--foreground);
   --color-background: var(--background);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
+  --radius-3xl: 28px;
+  --radius-4xl: 32px;
 }
 
-/* ── MelonityMedia Dark Theme (single theme, no light mode) ──── */
+/* ═══════════════════════════════════════════════════════════════
+   Melonity Dark Theme — DESIGN-melonity-gg.md palette
+   bg: #20242a  surface: #282d35  primary: #ff1469
+   ═══════════════════════════════════════════════════════════════ */
 :root {
-  /* Core surfaces — design.md palette */
-  --background: #0E1014;
-  --foreground: #FFFFFF;
-  --card: #181C24;
-  --card-foreground: #FFFFFF;
-  --popover: #181C24;
-  --popover-foreground: #FFFFFF;
+  --background: #20242a;
+  --foreground: #ffffff;
+  --card: #282d35;
+  --card-foreground: #ffffff;
+  --popover: #282d35;
+  --popover-foreground: #ffffff;
 
-  /* Primary = Melon Pink (brand accent) */
-  --primary: #FF1469;
-  --primary-foreground: #FFFFFF;
+  --primary: #ff1469;
+  --primary-foreground: #ffffff;
 
-  /* Secondary = Ice Cyan */
-  --secondary: #1A1F2E;
-  --secondary-foreground: #E5E7EB;
+  --secondary: #282d35;
+  --secondary-foreground: #ffffff;
 
-  /* Muted surfaces */
-  --muted: #1A1F2E;
-  --muted-foreground: #9CA3AF;
+  --muted: #22272d;
+  --muted-foreground: #8d97a6;
 
-  /* Accent = subtle elevated surface */
-  --accent: #2A2F3D;
-  --accent-foreground: #FFFFFF;
+  --accent: #282d35;
+  --accent-foreground: #ffffff;
 
-  /* Destructive = alert red */
   --destructive: #F43F5E;
 
-  /* Borders & inputs */
-  --border: rgba(255, 255, 255, 0.08);
-  --input: rgba(255, 255, 255, 0.08);
-  --ring: #FF1469;
+  --border: #586271;
+  --input: #586271;
+  --ring: #ff1469;
 
-  /* Charts — MelonityMedia branded */
-  --chart-1: #FF1469;
-  --chart-2: #7EE8FA;
-  --chart-3: #00D287;
-  --chart-4: #F59E0B;
-  --chart-5: #FF6B8B;
+  --chart-1: #ff1469;
+  --chart-2: #15c188;
+  --chart-3: #F59E0B;
+  --chart-4: #b9c0cb;
+  --chart-5: #e00e5e;
 
-  --radius: 0.75rem;
+  --radius: 12px;
 
-  /* Sidebar */
-  --sidebar: #0E1014;
-  --sidebar-foreground: #FFFFFF;
-  --sidebar-primary: #FF1469;
-  --sidebar-primary-foreground: #FFFFFF;
-  --sidebar-accent: #1A1F2E;
-  --sidebar-accent-foreground: #FFFFFF;
-  --sidebar-border: rgba(255, 255, 255, 0.06);
-  --sidebar-ring: #FF1469;
+  --sidebar: #20242a;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #ff1469;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #282d35;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #586271;
+  --sidebar-ring: #ff1469;
 }
 
-/* .dark class is a no-op since we're always dark */
 .dark {
-  --background: #0E1014;
-  --foreground: #FFFFFF;
-  --card: #181C24;
-  --card-foreground: #FFFFFF;
-  --popover: #181C24;
-  --popover-foreground: #FFFFFF;
-  --primary: #FF1469;
-  --primary-foreground: #FFFFFF;
-  --secondary: #1A1F2E;
-  --secondary-foreground: #E5E7EB;
-  --muted: #1A1F2E;
-  --muted-foreground: #9CA3AF;
-  --accent: #2A2F3D;
-  --accent-foreground: #FFFFFF;
+  --background: #20242a;
+  --foreground: #ffffff;
+  --card: #282d35;
+  --card-foreground: #ffffff;
+  --popover: #282d35;
+  --popover-foreground: #ffffff;
+  --primary: #ff1469;
+  --primary-foreground: #ffffff;
+  --secondary: #282d35;
+  --secondary-foreground: #ffffff;
+  --muted: #22272d;
+  --muted-foreground: #8d97a6;
+  --accent: #282d35;
+  --accent-foreground: #ffffff;
   --destructive: #F43F5E;
-  --border: rgba(255, 255, 255, 0.08);
-  --input: rgba(255, 255, 255, 0.08);
-  --ring: #FF1469;
-  --chart-1: #FF1469;
-  --chart-2: #7EE8FA;
-  --chart-3: #00D287;
-  --chart-4: #F59E0B;
-  --chart-5: #FF6B8B;
-  --sidebar: #0E1014;
-  --sidebar-foreground: #FFFFFF;
-  --sidebar-primary: #FF1469;
-  --sidebar-primary-foreground: #FFFFFF;
-  --sidebar-accent: #1A1F2E;
-  --sidebar-accent-foreground: #FFFFFF;
-  --sidebar-border: rgba(255, 255, 255, 0.06);
-  --sidebar-ring: #FF1469;
+  --border: #586271;
+  --input: #586271;
+  --ring: #ff1469;
+  --chart-1: #ff1469;
+  --chart-2: #15c188;
+  --chart-3: #F59E0B;
+  --chart-4: #b9c0cb;
+  --chart-5: #e00e5e;
+  --sidebar: #20242a;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #ff1469;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #282d35;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #586271;
+  --sidebar-ring: #ff1469;
 }
