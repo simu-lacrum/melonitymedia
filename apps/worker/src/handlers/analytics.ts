@@ -17,6 +17,7 @@ import { impersonatedFetch } from '../core/tls/curl-impersonate-client.js';
 import { loadCookiesFromEncryptedStore, type BrowserCookie } from '../core/auth/cookie-store.js';
 import { SocketLogger } from '../lib/socket-logger.js';
 import { loadAccountContext } from '../lib/account-context.js';
+import { prisma } from '../lib/prisma.js';
 import type { AccountFingerprint } from '../core/browser/fingerprint-manager.js';
 
 // ── Types ───────────────────────────────────────────────────
@@ -50,8 +51,47 @@ type ResolvedAnalyticsData = AnalyticsJobData & {
 
 // ── Main ────────────────────────────────────────────────────
 
-export async function analyticsHandler(job: Job<AnalyticsJobData>): Promise<ProfileStats> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function analyticsHandler(job: Job<any>): Promise<ProfileStats | { dispatched: number }> {
   const data = job.data;
+
+  // ── Cron Dispatch Mode ──────────────────────────────────
+  // When triggered by a BullMQ repeatable (has _cron flag),
+  // fan out individual analytics jobs for all ALIVE accounts.
+  if (data._cron) {
+    const accounts = await prisma.socialAccount.findMany({
+      where: { status: 'ALIVE' },
+      select: { id: true, userId: true, secUid: true, nickname: true },
+    });
+
+    // Re-use the same queue that this job came from to add child jobs
+    const { Queue } = await import('bullmq');
+    const queue = new Queue('analytics-cron', {
+      connection: {
+        host: new URL(process.env.REDIS_URL || 'redis://localhost:6379').hostname,
+        port: parseInt(new URL(process.env.REDIS_URL || 'redis://localhost:6379').port || '6379'),
+      },
+    });
+
+    let dispatched = 0;
+    for (const acc of accounts) {
+      await queue.add(`analytics-${acc.id}`, {
+        userId: acc.userId,
+        accountId: acc.id,
+        secUid: acc.secUid,
+        nickname: acc.nickname,
+      }, {
+        delay: dispatched * 5_000, // 5s stagger to avoid rate-limits
+      });
+      dispatched++;
+    }
+
+    await queue.close();
+    console.log(`[Analytics] Cron fan-out: dispatched ${dispatched} jobs`);
+    return { dispatched };
+  }
+
+  // ── Per-Account Analytics Mode ────────────────────────────
   const logger = new SocketLogger(data.userId);
 
   try {
@@ -71,6 +111,11 @@ export async function analyticsHandler(job: Job<AnalyticsJobData>): Promise<Prof
     } else {
       stats = await _fetchYouTubeStats(resolvedData, logger);
     }
+
+    // ── Persist stats to DB ─────────────────────────────────
+    // Without this, the dashboard summary/views-chart and shadowban
+    // detector have no data to work with.
+    await _persistStats(data.accountId, stats, logger);
 
     logger.info(
       `📊 ${data.accountId}: ${stats.followers} подписчиков, ` +
@@ -220,6 +265,35 @@ function _emptyStats(): ProfileStats {
     videos: 0,
     snapshotAt: new Date(),
   };
+}
+
+/**
+ * Persist collected stats to the database.
+ * Updates SocialAccount (followers, views) and per-video views
+ * so the dashboard, views-chart, and shadowban detector work.
+ */
+async function _persistStats(
+  accountId: string,
+  stats: ProfileStats,
+  logger: SocketLogger,
+): Promise<void> {
+  try {
+    // Update account-level aggregate stats
+    await prisma.socialAccount.update({
+      where: { id: accountId },
+      data: {
+        views: stats.views,
+        followers: stats.followers,
+      },
+    });
+
+    logger.info(`💾 Статистика сохранена: views=${stats.views}, followers=${stats.followers}`);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn(`⚠️ Не удалось сохранить статистику в БД: ${message}`);
+    // Don't throw — stats collection succeeded, only persistence failed.
+    // The job should still be marked as completed.
+  }
 }
 
 /**

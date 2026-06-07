@@ -33,6 +33,7 @@ import workspaceRoutes from './routes/workspace.js';
 import videosRoutes from './routes/videos.js';
 import analyticsRoutes from './routes/analytics.js';
 import adminRoutes from './routes/admin.js';
+import { registerCronJobs } from './lib/cron-scheduler.js';
 
 // ── Fail-fast: Validate critical secrets at startup ────────
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -132,6 +133,11 @@ httpServer.listen(PORT, () => {
   ║     Running on http://localhost:${PORT}          ║
   ╚══════════════════════════════════════════════╝
   `);
+
+  // Register cron jobs (analytics, shadowban checks)
+  registerCronJobs().catch(err => {
+    console.error('[Server] Failed to register cron jobs:', err);
+  });
 });
 
 // ── Graceful Shutdown ───────────────────────────────────────
