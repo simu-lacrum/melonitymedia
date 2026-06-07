@@ -92,7 +92,8 @@ function seededInt(rng: () => number, min: number, max: number): number {
  */
 export async function uniquifyVideo(opts: UniquifyOptions): Promise<UniquifyResult> {
   const { accountId, inputPath, outputDir = '/tmp/uniquified' } = opts;
-  const rng = createSeededRandom(accountId);
+  // Seed from accountId + inputPath so different videos get different transforms
+  const rng = createSeededRandom(`${accountId}:${inputPath}`);
   const transforms: string[] = [];
 
   // Ensure output directory exists

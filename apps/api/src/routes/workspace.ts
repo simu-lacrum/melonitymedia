@@ -170,25 +170,53 @@ router.post('/launch', async (req: Request, res: Response) => {
     } as const;
     const queueName = queueMap[type];
 
-    // Build per-job extras (UPLOAD needs videoId/path/title/description/hashtags)
+    // Build per-job extras — maps frontend config → worker payload shapes
     const buildExtra = async () => {
-      if (type !== 'UPLOAD') return { taskId: task.id, config };
+      // ── EDIT_PROFILE: worker expects { changes: { name, bio, avatarUrl } }
+      if (type === 'EDIT_PROFILE') {
+        const cfg = config as Record<string, unknown>;
+        return {
+          taskId: task.id,
+          changes: {
+            name: cfg.nickname || undefined,
+            bio: cfg.bio || undefined,
+            avatarUrl: cfg.avatarUrl || undefined,
+          },
+        };
+      }
 
-      const videoId = (config as Record<string, unknown>).videoId as string | undefined;
-      if (!videoId) throw new Error("UPLOAD requires config.videoId");
+      // ── WARMUP: flatten hashtags to top-level for worker
+      if (type === 'WARMUP') {
+        const cfg = config as Record<string, unknown>;
+        return {
+          taskId: task.id,
+          hashtags: Array.isArray(cfg.hashtags) ? cfg.hashtags : [],
+          warmupDays: cfg.warmupDays ?? 10,
+        };
+      }
 
-      const video = await prisma.video.findFirstOrThrow({
-        where: { id: videoId, userId: req.user!.id },
-      });
+      // ── UPLOAD: resolve video details from DB
+      if (type === 'UPLOAD') {
+        const cfg = config as Record<string, unknown>;
+        const videoId = cfg.videoId as string | undefined;
+        if (!videoId) throw new Error("UPLOAD requires config.videoId");
 
-      return {
-        taskId: task.id,
-        videoId: video.id,
-        videoPath: video.filepath,
-        title: (config as Record<string, unknown>).title ?? video.originalName,
-        description: video.description ?? "",
-        hashtags: video.hashtags ?? [],
-      };
+        const video = await prisma.video.findFirstOrThrow({
+          where: { id: videoId, userId: req.user!.id },
+        });
+
+        return {
+          taskId: task.id,
+          videoId: video.id,
+          videoPath: video.filepath,
+          title: (cfg.title as string) || video.originalName,
+          description: (cfg.description as string) || video.description || "",
+          hashtags: (cfg.hashtags as string[]) ?? video.hashtags ?? [],
+        };
+      }
+
+      // ── Default (COOKIES, LOGIN): pass config as-is
+      return { taskId: task.id, config };
     };
 
     // Dispatch one job per account with staggered delay (M-4)

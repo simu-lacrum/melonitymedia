@@ -151,6 +151,30 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
         where: { id: data.accountId },
         data: { lastWarmupDay: warmupDay },
       });
+
+      // ── Self-reschedule next day's warmup ──────────────────
+      // Delay 20-28 hours (randomized to avoid pattern detection)
+      const nextDayDelay = _randomDelay(20 * 3600_000, 28 * 3600_000);
+      const { Queue } = await import('bullmq');
+      const queue = new Queue('warmup', {
+        connection: {
+          host: new URL(process.env.REDIS_URL || 'redis://localhost:6379').hostname,
+          port: parseInt(new URL(process.env.REDIS_URL || 'redis://localhost:6379').port || '6379'),
+        },
+      });
+
+      await queue.add(`warmup-${data.accountId}-day${warmupDay + 1}`, {
+        userId: data.userId,
+        accountId: data.accountId,
+        hashtags: data.hashtags,
+        cookiesDir: data.cookiesDir,
+      }, {
+        delay: nextDayDelay,
+      });
+
+      await queue.close();
+      const nextHours = Math.round(nextDayDelay / 3600_000);
+      logger.info(`⏰ Следующий день прогрева (${warmupDay + 1}/${totalDays}) запланирован через ~${nextHours}ч`);
     }
 
     await job.updateProgress(100);

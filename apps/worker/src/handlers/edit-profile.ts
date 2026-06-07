@@ -26,6 +26,7 @@ interface EditProfileJobData {
   changes: {
     name?: string;
     bio?: string;
+    avatarUrl?: string;
   };
   // platform, fingerprint, proxyUrl are resolved from DB via loadAccountContext()
 }
@@ -83,6 +84,74 @@ export async function editProfileHandler(job: Job<EditProfileJobData>): Promise<
         logger.info(`Био обновлено: ${data.changes.bio.substring(0, 50)}...`);
       } catch {
         logger.warn('Не удалось обновить био — селектор не найден');
+      }
+    }
+
+    // Upload avatar if provided
+    if (data.changes.avatarUrl) {
+      try {
+        logger.info(`Загрузка аватара: ${data.changes.avatarUrl.substring(0, 60)}...`);
+
+        // Download image to temp file
+        const fs = await import('fs/promises');
+        const path = await import('path');
+        const https = await import('https');
+        const http = await import('http');
+
+        const tmpPath = path.join('/tmp', `avatar_${data.accountId}_${Date.now()}.jpg`);
+
+        await new Promise<void>((resolve, reject) => {
+          const mod = data.changes.avatarUrl!.startsWith('https') ? https : http;
+          const file = require('fs').createWriteStream(tmpPath);
+          mod.get(data.changes.avatarUrl!, (response: any) => {
+            response.pipe(file);
+            file.on('finish', () => { file.close(); resolve(); });
+          }).on('error', reject);
+        });
+
+        // Click avatar area to trigger file upload dialog
+        if (ctxAcc.platform === 'TIKTOK') {
+          // TikTok settings: click on avatar image to open change dialog
+          const avatarSelector = '[data-e2e="edit-avatar"], .avatar-edit, img.tiktok-avatar, [class*="avatar"]';
+          try {
+            await humanClick(page, cursor, avatarSelector, { postClickDelay: 1500 });
+            await page.waitForTimeout(_randomDelay(1000, 2000));
+
+            // Upload via hidden file input
+            const fileInput = await page.locator('input[type="file"][accept*="image"]').first();
+            await fileInput.setInputFiles(tmpPath);
+            await page.waitForTimeout(_randomDelay(3000, 5000));
+
+            // Confirm/apply crop if dialog appears
+            try {
+              await humanClick(page, cursor, 'button:has-text("Apply"), button:has-text("Применить"), button:has-text("Save")', { postClickDelay: 2000 });
+            } catch { /* no crop dialog */ }
+
+            logger.info('Аватар загружен ✓');
+          } catch {
+            logger.warn('Не удалось загрузить аватар — селектор не найден');
+          }
+        } else {
+          // YouTube Studio: avatar change in channel editing
+          try {
+            await humanClick(page, cursor, '#avatar-editor, .avatar-image-wrapper, [aria-label*="avatar" i]', { postClickDelay: 1500 });
+            const fileInput = await page.locator('input[type="file"][accept*="image"]').first();
+            await fileInput.setInputFiles(tmpPath);
+            await page.waitForTimeout(_randomDelay(3000, 5000));
+            try {
+              await humanClick(page, cursor, '#done-button, button:has-text("Done"), button:has-text("Готово")', { postClickDelay: 2000 });
+            } catch { /* no confirm dialog */ }
+            logger.info('Аватар YouTube загружен ✓');
+          } catch {
+            logger.warn('Не удалось загрузить аватар YouTube');
+          }
+        }
+
+        // Cleanup temp file
+        try { await fs.unlink(tmpPath); } catch { /* non-critical */ }
+      } catch (avatarErr) {
+        const msg = avatarErr instanceof Error ? avatarErr.message : String(avatarErr);
+        logger.warn(`Не удалось загрузить аватар: ${msg}`);
       }
     }
 
