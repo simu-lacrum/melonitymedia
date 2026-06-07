@@ -10,7 +10,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: melonity
-      POSTGRES_PASSWORD: melonity
+      POSTGRES_PASSWORD: 85797697351pc
       POSTGRES_DB: melonitymedia
     ports:
       - "${PORT_DB:-5433}:5432"

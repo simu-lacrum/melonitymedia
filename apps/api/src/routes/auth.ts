@@ -11,7 +11,6 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import ms from 'ms';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -20,10 +19,6 @@ import { authRateLimit } from '../middleware/rate-limit.js';
 const router = Router();
 
 const JWT_SECRET = process.env.JWT_SECRET!; // validated at startup (M-3)
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
-// Parse the duration string to seconds for jwt.sign()
-// ms('7d') returns 604800000 (ms), so we divide by 1000 for seconds
-const JWT_EXPIRES_SECONDS = Math.floor(ms(JWT_EXPIRES_IN as ms.StringValue) / 1000);
 const BCRYPT_ROUNDS = 12;
 
 // ── Validation Schemas ──────────────────────────────────────
@@ -39,15 +34,14 @@ const loginSchema = z.object({
   password: z.string().min(1, 'Пароль обязателен'),
 });
 
-// Helper: create JWT and set as HttpOnly cookie
+// Helper: create JWT and set as HttpOnly cookie (no expiration)
 function issueToken(res: Response, payload: { id: string; email: string; role: string }) {
-  const token = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_SECONDS });
+  const token = jwt.sign(payload, JWT_SECRET);
 
   res.cookie('melonity_token', token, {
     httpOnly: true,         // JS can't read this cookie
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'strict',     // CSRF protection
-    maxAge: ms(JWT_EXPIRES_IN as ms.StringValue), // synced with JWT TTL
     path: '/',
   });
 
