@@ -27,11 +27,15 @@ const registerSchema = z.object({
   email: z.string().email('Некорректный email'),
   password: z.string().min(6, 'Минимум 6 символов'),
   name: z.string().min(1, 'Имя обязательно').optional(),
+  username: z.string().min(1).optional(), // alias for name from frontend
 });
 
 const loginSchema = z.object({
-  email: z.string().email('Некорректный email'),
+  email: z.string().email('Некорректный email').optional(),
+  login: z.string().min(1).optional(), // alias from frontend
   password: z.string().min(1, 'Пароль обязателен'),
+}).refine(data => data.email || data.login, {
+  message: 'Email обязателен',
 });
 
 // Helper: create JWT and set as HttpOnly cookie (no expiration)
@@ -57,7 +61,8 @@ router.post('/register', authRateLimit, async (req: Request, res: Response) => {
       return;
     }
 
-    const { email, password, name } = parsed.data;
+    const { email, password, name, username } = parsed.data;
+    const displayName = name || username;
 
     // Check if email already exists
     const existing = await prisma.user.findUnique({ where: { email } });
@@ -74,7 +79,7 @@ router.post('/register', authRateLimit, async (req: Request, res: Response) => {
     const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
     const user = await prisma.user.create({
-      data: { email, passwordHash, name, role },
+      data: { email, passwordHash, name: displayName, role },
     });
 
     issueToken(res, { id: user.id, email: user.email, role: user.role });
@@ -97,9 +102,10 @@ router.post('/login', authRateLimit, async (req: Request, res: Response) => {
       return;
     }
 
-    const { email, password } = parsed.data;
+    const { email, login, password } = parsed.data;
+    const emailToFind = email || login;
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await prisma.user.findUnique({ where: { email: emailToFind } });
     if (!user) {
       res.status(401).json({ error: 'Неверный email или пароль' });
       return;
