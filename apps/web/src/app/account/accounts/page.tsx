@@ -5,14 +5,18 @@ import { motion, AnimatePresence } from "framer-motion"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Textarea } from "@/components/ui/textarea"
+import { Separator } from "@/components/ui/separator"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Separator } from "@/components/ui/separator"
-import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Search, Plus, Trash2, RefreshCw, MoreVertical, Loader2, AlertCircle } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { Search, Plus, Trash2, RefreshCw, MoreVertical, Loader2, Shield } from "lucide-react"
 import { api, ApiError } from "@/lib/api"
 import { toast } from "sonner"
 
@@ -30,6 +34,13 @@ interface SocialAccount {
     port: number
     carrier?: string
   } | null
+  pinnedProxyId?: string | null
+}
+
+interface ProxyItem {
+  id: string
+  host: string
+  port: number
 }
 
 export default function AccountsPage() {
@@ -37,9 +48,22 @@ export default function AccountsPage() {
   const [loading, setLoading] = React.useState(true)
   const [selectedIds, setSelectedIds] = React.useState<string[]>([])
   const [search, setSearch] = React.useState("")
+  const [platformFilter, setPlatformFilter] = React.useState<"ALL" | "TIKTOK" | "YOUTUBE">("ALL")
+
+  // Import dialog state
   const [importOpen, setImportOpen] = React.useState(false)
   const [importText, setImportText] = React.useState("")
   const [importLoading, setImportLoading] = React.useState(false)
+  const [importPlatform, setImportPlatform] = React.useState<string>("TIKTOK")
+  const [importMethod, setImportMethod] = React.useState<string>("cookies")
+  const [importProxyId, setImportProxyId] = React.useState<string>("")
+  const [availableProxies, setAvailableProxies] = React.useState<ProxyItem[]>([])
+
+  // Proxy bind dialog state
+  const [proxyBindOpen, setProxyBindOpen] = React.useState(false)
+  const [proxyBindAccountId, setProxyBindAccountId] = React.useState("")
+  const [proxyBindValue, setProxyBindValue] = React.useState("")
+  const [bindingProxy, setBindingProxy] = React.useState(false)
 
   const fetchAccounts = React.useCallback(async () => {
     try {
@@ -57,16 +81,20 @@ export default function AccountsPage() {
     fetchAccounts()
   }, [fetchAccounts])
 
-  const filtered = accounts.filter(
-    (a) => a.username?.toLowerCase().includes(search.toLowerCase())
-  )
+  React.useEffect(() => {
+    if (importOpen || proxyBindOpen) {
+      api.get<{ proxies: ProxyItem[] }>("/api/proxies")
+        .then(data => setAvailableProxies(data.proxies || []))
+        .catch(() => {})
+    }
+  }, [importOpen, proxyBindOpen])
+
+  const filtered = accounts
+    .filter(a => platformFilter === "ALL" || a.platform === platformFilter)
+    .filter(a => a.username?.toLowerCase().includes(search.toLowerCase()))
 
   const toggleAll = () => {
-    if (selectedIds.length === filtered.length) {
-      setSelectedIds([])
-    } else {
-      setSelectedIds(filtered.map((a) => a.id))
-    }
+    setSelectedIds(selectedIds.length === filtered.length ? [] : filtered.map((a) => a.id))
   }
 
   const toggleOne = (id: string) => {
@@ -91,15 +119,72 @@ export default function AccountsPage() {
     if (!importText.trim()) return
     try {
       setImportLoading(true)
-      await api.post("/api/accounts/import", { raw: importText })
+      await api.post("/api/accounts/import", {
+        raw: importText,
+        platform: importPlatform,
+        proxyId: importProxyId && importProxyId !== "none" ? importProxyId : undefined,
+        method: importMethod,
+      })
       toast.success("Аккаунты импортированы")
       setImportOpen(false)
       setImportText("")
+      setImportPlatform("TIKTOK")
+      setImportMethod("cookies")
+      setImportProxyId("")
       fetchAccounts()
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Не удалось импортировать")
     } finally {
       setImportLoading(false)
+    }
+  }
+
+  const handleDeleteSingle = async (id: string) => {
+    if (!confirm("Удалить аккаунт?")) return
+    try {
+      await api.delete("/api/accounts/bulk", { ids: [id] })
+      toast.success("Аккаунт удалён")
+      fetchAccounts()
+    } catch {
+      toast.error("Ошибка удаления")
+    }
+  }
+
+  const handleRefreshCookies = async (id: string) => {
+    try {
+      await api.post("/api/workspace/launch", {
+        type: "COOKIES",
+        accountIds: [id],
+        applyToAll: false,
+        config: { mode: "COOKIES", concurrency: 1, headless: true },
+        threads: 1,
+      })
+      toast.success("Сбор куки запущен")
+    } catch {
+      toast.error("Ошибка запуска")
+    }
+  }
+
+  const handleBindProxy = (accountId: string) => {
+    setProxyBindAccountId(accountId)
+    setProxyBindValue("")
+    setProxyBindOpen(true)
+  }
+
+  const handleConfirmBindProxy = async () => {
+    setBindingProxy(true)
+    try {
+      await api.patch(`/api/accounts/${proxyBindAccountId}`, {
+        pinnedProxyId: proxyBindValue === "none" ? null : proxyBindValue,
+      })
+      toast.success("Прокси привязан")
+      setProxyBindOpen(false)
+      setProxyBindValue("")
+      fetchAccounts()
+    } catch {
+      toast.error("Ошибка привязки прокси")
+    } finally {
+      setBindingProxy(false)
     }
   }
 
@@ -120,7 +205,7 @@ export default function AccountsPage() {
   return (
     <>
       <motion.div
-        initial={{ opacity: 0, y: 12 }}
+        initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
         className="flex flex-col gap-6"
@@ -144,6 +229,21 @@ export default function AccountsPage() {
             </Button>
           </div>
         </div>
+
+        {/* Platform Tabs */}
+        <Tabs value={platformFilter} onValueChange={(v) => setPlatformFilter(v as any)}>
+          <TabsList>
+            <TabsTrigger value="ALL">
+              Все <Badge variant="secondary" className="ml-1.5 text-[10px] px-1.5 py-0">{accounts.length}</Badge>
+            </TabsTrigger>
+            <TabsTrigger value="TIKTOK">
+              TikTok <Badge variant="secondary" className="ml-1.5 text-[10px] px-1.5 py-0">{accounts.filter(a => a.platform === "TIKTOK").length}</Badge>
+            </TabsTrigger>
+            <TabsTrigger value="YOUTUBE">
+              YouTube <Badge variant="secondary" className="ml-1.5 text-[10px] px-1.5 py-0">{accounts.filter(a => a.platform === "YOUTUBE").length}</Badge>
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         {/* Table Card */}
         <Card>
@@ -217,7 +317,9 @@ export default function AccountsPage() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <span className="font-semibold text-sm">{acc.platform === "TIKTOK" ? "TikTok" : "YouTube"}</span>
+                          <Badge variant="secondary" className="text-xs">
+                            {acc.platform === "TIKTOK" ? "TikTok" : "YouTube"}
+                          </Badge>
                         </TableCell>
                         <TableCell>{renderStatus(acc.status)}</TableCell>
                         <TableCell>
@@ -230,9 +332,22 @@ export default function AccountsPage() {
                         <TableCell>{(acc.followers ?? 0).toLocaleString()}</TableCell>
                         <TableCell className="text-muted-foreground text-sm">{timeAgo(acc.updatedAt)}</TableCell>
                         <TableCell>
-                          <Button variant="ghost" size="icon" className="size-8">
-                            <MoreVertical className="size-4 text-muted-foreground" />
-                          </Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger className="inline-flex items-center justify-center size-8 rounded-md hover:bg-accent transition-colors">
+                              <MoreVertical className="size-4 text-muted-foreground" />
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => handleBindProxy(acc.id)}>
+                                <Shield className="size-4 mr-2" />Привязать прокси
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleRefreshCookies(acc.id)}>
+                                <RefreshCw className="size-4 mr-2" />Обновить куки
+                              </DropdownMenuItem>
+                              <DropdownMenuItem className="text-destructive" onClick={() => handleDeleteSingle(acc.id)}>
+                                <Trash2 className="size-4 mr-2" />Удалить
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -244,11 +359,11 @@ export default function AccountsPage() {
               <AnimatePresence>
                 {selectedIds.length > 0 && (
                   <motion.div
-                    initial={{ opacity: 0, y: 20 }}
+                    initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 20 }}
+                    exit={{ opacity: 0, y: 8 }}
                     transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
-                    className="absolute bottom-4 left-1/2 -translate-x-1/2 liquid-glass px-6 py-3 rounded-full flex items-center gap-4 border border-border"
+                    className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-card px-6 py-3 rounded-lg flex items-center gap-4 border border-border shadow-lg"
                   >
                     <span className="text-sm font-medium">Выбрано: {selectedIds.length}</span>
                     <Separator orientation="vertical" className="h-4" />
@@ -278,32 +393,93 @@ export default function AccountsPage() {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Импорт аккаунтов</DialogTitle>
-            <DialogDescription>
-              Вставьте данные аккаунтов в формате login:password или JSON с куками
-            </DialogDescription>
+            <DialogDescription>Добавьте аккаунты через cookies или login:password</DialogDescription>
           </DialogHeader>
 
-          <Textarea
-            className="h-40 font-mono text-sm resize-none"
-            placeholder={"login:password\nlogin2:password2\n\nили JSON с куками..."}
-            value={importText}
-            onChange={(e) => setImportText(e.target.value)}
-            disabled={importLoading}
-          />
+          <div className="flex flex-col gap-4">
+            {/* Platform */}
+            <div className="flex flex-col gap-2">
+              <Label>Платформа</Label>
+              <Select value={importPlatform} onValueChange={(v) => setImportPlatform(v ?? "TIKTOK")}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TIKTOK">TikTok</SelectItem>
+                  <SelectItem value="YOUTUBE">YouTube</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Method tabs */}
+            <Tabs value={importMethod} onValueChange={setImportMethod}>
+              <TabsList className="w-full grid grid-cols-2">
+                <TabsTrigger value="cookies">Cookies</TabsTrigger>
+                <TabsTrigger value="credentials">Login:Password</TabsTrigger>
+              </TabsList>
+              <TabsContent value="cookies" className="mt-3">
+                <Textarea
+                  className="h-40 font-mono text-sm resize-none"
+                  placeholder={'[{"name": "sid_tt", "value": "...", ...}]\n\nВставьте JSON с cookies'}
+                  value={importText}
+                  onChange={(e) => setImportText(e.target.value)}
+                  disabled={importLoading}
+                />
+              </TabsContent>
+              <TabsContent value="credentials" className="mt-3">
+                <Textarea
+                  className="h-40 font-mono text-sm resize-none"
+                  placeholder={"login:password\nlogin2:password2\n\nПо одному на строку"}
+                  value={importText}
+                  onChange={(e) => setImportText(e.target.value)}
+                  disabled={importLoading}
+                />
+              </TabsContent>
+            </Tabs>
+
+            {/* Proxy */}
+            <div className="flex flex-col gap-2">
+              <Label>Привязать прокси (опционально)</Label>
+              <Select value={importProxyId} onValueChange={(v) => setImportProxyId(v ?? "")}>
+                <SelectTrigger><SelectValue placeholder="Без прокси" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Без прокси</SelectItem>
+                  {availableProxies.map(p => (
+                    <SelectItem key={p.id} value={p.id}>{p.host}:{p.port}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setImportOpen(false)} disabled={importLoading}>
-              Отмена
+            <Button variant="outline" onClick={() => setImportOpen(false)} disabled={importLoading}>Отмена</Button>
+            <Button onClick={handleImport} disabled={importLoading || !importText.trim()} className="active:scale-[0.97] transition-transform">
+              {importLoading ? <><Loader2 className="size-4 mr-2 animate-spin" />Импорт...</> : "Импортировать"}
             </Button>
-            <Button onClick={handleImport} disabled={importLoading || !importText.trim()}>
-              {importLoading ? (
-                <>
-                  <Loader2 className="size-4 mr-2 animate-spin" />
-                  Импорт...
-                </>
-              ) : (
-                "Импортировать"
-              )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Proxy Bind Dialog */}
+      <Dialog open={proxyBindOpen} onOpenChange={setProxyBindOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Привязка прокси</DialogTitle>
+            <DialogDescription>Выберите прокси для аккаунта</DialogDescription>
+          </DialogHeader>
+          <Select value={proxyBindValue} onValueChange={(v) => setProxyBindValue(v ?? "")}>
+            <SelectTrigger><SelectValue placeholder="Выберите прокси" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Без прокси</SelectItem>
+              {availableProxies.map(p => (
+                <SelectItem key={p.id} value={p.id}>{p.host}:{p.port}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setProxyBindOpen(false)}>Отмена</Button>
+            <Button onClick={handleConfirmBindProxy} disabled={bindingProxy} className="active:scale-[0.97] transition-transform">
+              {bindingProxy ? <Loader2 className="size-4 mr-2 animate-spin" /> : null}
+              Привязать
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -10,8 +10,10 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
+import { Separator } from "@/components/ui/separator"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Search, Plus, Trash2, Shield, SignalHigh, SignalMedium, SignalLow, Loader2, RefreshCw } from "lucide-react"
 import { api, ApiError } from "@/lib/api"
 import { toast } from "sonner"
@@ -28,6 +30,13 @@ interface Proxy {
   _count?: { accounts: number }
 }
 
+interface LinkedAccount {
+  id: string
+  username: string
+  platform: string
+  pinnedProxyId?: string | null
+}
+
 export default function ProxiesPage() {
   const [proxies, setProxies] = React.useState<Proxy[]>([])
   const [loading, setLoading] = React.useState(true)
@@ -41,6 +50,16 @@ export default function ProxiesPage() {
   const [formUser, setFormUser] = React.useState("")
   const [formPass, setFormPass] = React.useState("")
   const [bulkText, setBulkText] = React.useState("")
+
+  const [linkedAccountsOpen, setLinkedAccountsOpen] = React.useState(false)
+  const [linkedProxyId, setLinkedProxyId] = React.useState("")
+  const [linkedAccounts, setLinkedAccounts] = React.useState<LinkedAccount[]>([])
+  const [allAccounts, setAllAccounts] = React.useState<LinkedAccount[]>([])
+  const [loadingLinked, setLoadingLinked] = React.useState(false)
+  const [linkAccountId, setLinkAccountId] = React.useState("")
+
+  const [bindAccountIds, setBindAccountIds] = React.useState<string[]>([])
+  const [dialogAccounts, setDialogAccounts] = React.useState<LinkedAccount[]>([])
 
   const fetchProxies = React.useCallback(async () => {
     try {
@@ -57,6 +76,14 @@ export default function ProxiesPage() {
   React.useEffect(() => {
     fetchProxies()
   }, [fetchProxies])
+
+  React.useEffect(() => {
+    if (showModal) {
+      api.get<{ accounts: LinkedAccount[] }>("/api/accounts")
+        .then(data => setDialogAccounts(data.accounts || []))
+        .catch(() => {})
+    }
+  }, [showModal])
 
   const filtered = proxies.filter((p) =>
     `${p.host}:${p.port} ${p.carrier || ""} ${p.country || ""}`.toLowerCase().includes(search.toLowerCase())
@@ -94,9 +121,23 @@ export default function ProxiesPage() {
         username: formUser.trim() || undefined,
         password: formPass.trim() || undefined,
       })
+
+      if (bindAccountIds.length > 0) {
+        const freshData = await api.get<{ proxies: Proxy[] }>("/api/proxies")
+        const newProxy = freshData.proxies[0]
+        if (newProxy) {
+          await Promise.all(
+            bindAccountIds.map(accId =>
+              api.patch(`/api/accounts/${accId}`, { pinnedProxyId: newProxy.id }).catch(() => {})
+            )
+          )
+        }
+      }
+
       toast.success("Прокси добавлен")
       setShowModal(false)
       setFormHost(""); setFormPort(""); setFormUser(""); setFormPass("")
+      setBindAccountIds([])
       fetchProxies()
     } catch (err: any) {
       toast.error(err.message || "Ошибка добавления прокси")
@@ -110,14 +151,68 @@ export default function ProxiesPage() {
     setSubmitting(true)
     try {
       await api.post("/api/proxies/import", { raw: bulkText.trim() })
+
+      if (bindAccountIds.length > 0) {
+        const freshData = await api.get<{ proxies: Proxy[] }>("/api/proxies")
+        const newProxy = freshData.proxies[0]
+        if (newProxy) {
+          await Promise.all(
+            bindAccountIds.map(accId =>
+              api.patch(`/api/accounts/${accId}`, { pinnedProxyId: newProxy.id }).catch(() => {})
+            )
+          )
+        }
+      }
+
       toast.success("Прокси импортированы")
       setShowModal(false)
       setBulkText("")
+      setBindAccountIds([])
       fetchProxies()
     } catch (err: any) {
       toast.error(err.message || "Ошибка импорта прокси")
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const handleShowLinked = async (proxyId: string) => {
+    setLinkedProxyId(proxyId)
+    setLinkedAccountsOpen(true)
+    setLoadingLinked(true)
+    try {
+      const data = await api.get<{ accounts: LinkedAccount[] }>("/api/accounts")
+      const all = data.accounts || []
+      setAllAccounts(all)
+      setLinkedAccounts(all.filter(a => a.pinnedProxyId === proxyId))
+    } catch {
+      toast.error("Ошибка загрузки аккаунтов")
+    } finally {
+      setLoadingLinked(false)
+    }
+  }
+
+  const handleUnlinkAccount = async (accountId: string) => {
+    try {
+      await api.patch(`/api/accounts/${accountId}`, { pinnedProxyId: null })
+      toast.success("Аккаунт отвязан")
+      setLinkedAccounts(prev => prev.filter(a => a.id !== accountId))
+      fetchProxies()
+    } catch {
+      toast.error("Ошибка")
+    }
+  }
+
+  const handleLinkAccount = async () => {
+    if (!linkAccountId) return
+    try {
+      await api.patch(`/api/accounts/${linkAccountId}`, { pinnedProxyId: linkedProxyId })
+      toast.success("Аккаунт привязан")
+      setLinkAccountId("")
+      handleShowLinked(linkedProxyId)
+      fetchProxies()
+    } catch {
+      toast.error("Ошибка привязки")
     }
   }
 
@@ -134,10 +229,36 @@ export default function ProxiesPage() {
     return <div className={`flex items-center gap-1.5 ${color}`}><Icon className="size-4" />{ms}ms</div>
   }
 
+  const renderAccountSelector = () => (
+    <div className="flex flex-col gap-2">
+      <Label>Привязать к аккаунтам (опционально)</Label>
+      <div className="max-h-32 overflow-y-auto rounded-lg border border-border p-2 flex flex-col gap-1">
+        {dialogAccounts.length === 0 ? (
+          <span className="text-xs text-muted-foreground text-center py-2">Нет аккаунтов</span>
+        ) : dialogAccounts.map(acc => (
+          <label key={acc.id} className="flex items-center gap-2 px-2 py-1 rounded-md hover:bg-accent/50 cursor-pointer text-sm transition-colors duration-150">
+            <Checkbox
+              checked={bindAccountIds.includes(acc.id)}
+              onCheckedChange={(checked) => {
+                setBindAccountIds(prev =>
+                  checked ? [...prev, acc.id] : prev.filter(x => x !== acc.id)
+                )
+              }}
+            />
+            <span className="truncate flex-1">{acc.username || acc.id.slice(0, 8)}</span>
+            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+              {acc.platform === "TIKTOK" ? "TT" : "YT"}
+            </Badge>
+          </label>
+        ))}
+      </div>
+    </div>
+  )
+
   return (
     <>
       <motion.div
-        initial={{ opacity: 0, y: 12 }}
+        initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
         className="flex flex-col gap-6"
@@ -237,7 +358,16 @@ export default function ProxiesPage() {
                       <TableCell className="text-sm">{proxy.country || "—"}</TableCell>
                       <TableCell>{renderStatus(proxy.status)}</TableCell>
                       <TableCell className="text-sm">{renderLatency(proxy.latencyMs)}</TableCell>
-                      <TableCell className="text-sm">{proxy._count?.accounts ?? 0}</TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs font-mono"
+                          onClick={() => handleShowLinked(proxy.id)}
+                        >
+                          {proxy._count?.accounts ?? 0}
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -286,7 +416,8 @@ export default function ProxiesPage() {
                     onChange={(e) => setFormPass(e.target.value)} />
                 </div>
               </div>
-              <Button onClick={handleAddSingle} disabled={submitting || !formHost || !formPort} className="w-full">
+              {renderAccountSelector()}
+              <Button onClick={handleAddSingle} disabled={submitting || !formHost || !formPort} className="w-full active:scale-[0.97] transition-transform">
                 {submitting ? <><Loader2 className="size-4 mr-2 animate-spin" />Добавление...</> : "Добавить"}
               </Button>
             </TabsContent>
@@ -306,11 +437,71 @@ export default function ProxiesPage() {
                   Формат: host:port или host:port:user:pass — по одному на строку
                 </p>
               </div>
-              <Button onClick={handleBulkImport} disabled={submitting || !bulkText.trim()} className="w-full">
+              {renderAccountSelector()}
+              <Button onClick={handleBulkImport} disabled={submitting || !bulkText.trim()} className="w-full active:scale-[0.97] transition-transform">
                 {submitting ? <><Loader2 className="size-4 mr-2 animate-spin" />Импорт...</> : "Импортировать"}
               </Button>
             </TabsContent>
           </Tabs>
+        </DialogContent>
+      </Dialog>
+
+      {/* Linked Accounts Dialog */}
+      <Dialog open={linkedAccountsOpen} onOpenChange={setLinkedAccountsOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Привязанные аккаунты</DialogTitle>
+            <DialogDescription>
+              {linkedAccounts.length > 0 ? `${linkedAccounts.length} аккаунтов привязано` : "Нет привязанных аккаунтов"}
+            </DialogDescription>
+          </DialogHeader>
+          {loadingLinked ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="size-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {linkedAccounts.map(acc => (
+                <div key={acc.id} className="flex items-center justify-between p-2 rounded-md bg-accent/30">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                      {acc.platform === "TIKTOK" ? "TT" : "YT"}
+                    </Badge>
+                    <span className="text-sm">{acc.username || acc.id.slice(0, 8)}</span>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs text-destructive hover:text-destructive"
+                    onClick={() => handleUnlinkAccount(acc.id)}
+                  >
+                    Отвязать
+                  </Button>
+                </div>
+              ))}
+
+              <Separator className="my-2" />
+
+              <div className="flex flex-col gap-2">
+                <Label className="text-sm">Привязать аккаунт</Label>
+                <Select value={linkAccountId} onValueChange={(v) => setLinkAccountId(v ?? "")}>
+                  <SelectTrigger><SelectValue placeholder="Выберите аккаунт" /></SelectTrigger>
+                  <SelectContent>
+                    {allAccounts
+                      .filter(a => !a.pinnedProxyId || a.pinnedProxyId !== linkedProxyId)
+                      .map(a => (
+                        <SelectItem key={a.id} value={a.id}>
+                          {a.username || a.id.slice(0, 8)} ({a.platform === "TIKTOK" ? "TT" : "YT"})
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <Button size="sm" onClick={handleLinkAccount} disabled={!linkAccountId} className="active:scale-[0.97] transition-transform">
+                  Привязать
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </>

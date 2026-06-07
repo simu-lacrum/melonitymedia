@@ -169,9 +169,13 @@ router.get('/', async (req: Request, res: Response) => {
 
 const bulkImportSchema = z.object({
   platform: z.enum(['TIKTOK', 'YOUTUBE']),
-  data: z.string().min(1, 'Данные обязательны'),
+  data: z.string().min(1, 'Данные обязательны').optional(),
+  raw: z.string().min(1).optional(),
   authMode: z.enum(['cookies', 'login_pass', 'auto']).default('auto'),
-});
+  method: z.enum(['cookies', 'credentials']).optional(),
+  proxyId: z.string().optional(),
+}).refine(d => d.data || d.raw, { message: 'Данные обязательны (data или raw)' });
+
 
 /**
  * Parses bulk import text. Supports three formats per line:
@@ -233,8 +237,11 @@ router.post('/import', async (req: Request, res: Response) => {
       return;
     }
 
-    const { platform, data, authMode } = parsed.data;
-    const entries = parseBulkImport(data, authMode);
+    const { platform, data, raw, authMode, method, proxyId } = parsed.data;
+    const importText = data || raw || '';
+    const resolvedAuthMode: 'cookies' | 'login_pass' | 'auto' = method === 'credentials' ? 'login_pass' : method === 'cookies' ? 'cookies' : authMode;
+    const entries = parseBulkImport(importText, resolvedAuthMode);
+
 
     if (entries.length === 0) {
       res.status(400).json({ error: 'Не удалось распарсить ни одной записи (ожидается login:password или login:password:cookies, по одной на строку)' });
@@ -325,6 +332,22 @@ router.post('/import', async (req: Request, res: Response) => {
         created.push(accountId);
       } catch (err: any) {
         failed.push({ line: i + 1, reason: err.message ?? String(err) });
+      }
+    }
+    // Auto-bind proxy to imported accounts if proxyId was specified
+    if (proxyId && created.length > 0) {
+      try {
+        const proxy = await prisma.proxy.findFirst({
+          where: { id: proxyId, userId: req.user!.id },
+        });
+        if (proxy) {
+          await prisma.socialAccount.updateMany({
+            where: { id: { in: created }, userId: req.user!.id },
+            data: { pinnedProxyId: proxyId, proxyPinnedAt: new Date() },
+          });
+        }
+      } catch (bindErr) {
+        console.error('[Accounts] Proxy auto-bind error:', bindErr);
       }
     }
 

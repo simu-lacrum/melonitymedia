@@ -61,12 +61,6 @@ interface UploadConfig {
   scheduleAt: string
 }
 
-interface LoginConfig {
-  mode: "LOGIN"
-  concurrency: number
-  headless: boolean
-}
-
 const DEFAULT_CONFIGS = {
   WARMUP: {
     mode: "WARMUP", concurrency: 3, warmupDays: 10, useRotation: true,
@@ -83,9 +77,6 @@ const DEFAULT_CONFIGS = {
     mode: "UPLOAD", concurrency: 3, headless: true, videoId: "",
     title: "", description: "", hashtags: [], scheduleAt: "",
   } as UploadConfig,
-  LOGIN: {
-    mode: "LOGIN", concurrency: 5, headless: true,
-  } as LoginConfig,
 }
 
 interface VideoFile {
@@ -103,13 +94,13 @@ export default function WorkspacePage() {
   const [statusMsg, setStatusMsg] = React.useState("")
   const [presets, setPresets] = React.useState<Preset[]>([])
   const [selectedPresetId, setSelectedPresetId] = React.useState<string>("")
-  const [accountCount, setAccountCount] = React.useState(0)
+  const [accounts, setAccounts] = React.useState<{id: string; username: string; platform: string; status: string}[]>([])
+  const [selectedAccountIds, setSelectedAccountIds] = React.useState<Set<string>>(new Set())
 
   const [warmup, setWarmup] = React.useState<WarmupConfig>({ ...DEFAULT_CONFIGS.WARMUP })
   const [cookies, setCookies] = React.useState<CookiesConfig>({ ...DEFAULT_CONFIGS.COOKIES })
   const [editProfile, setEditProfile] = React.useState<EditProfileConfig>({ ...DEFAULT_CONFIGS.EDIT_PROFILE })
   const [upload, setUpload] = React.useState<UploadConfig>({ ...DEFAULT_CONFIGS.UPLOAD })
-  const [login, setLogin] = React.useState<LoginConfig>({ ...DEFAULT_CONFIGS.LOGIN })
 
   const [hashtagInput, setHashtagInput] = React.useState("")
   const [videos, setVideos] = React.useState<VideoFile[]>([])
@@ -121,7 +112,11 @@ export default function WorkspacePage() {
       .catch(console.error)
 
     api.get<{ accounts: any[] }>("/api/accounts")
-      .then((data) => setAccountCount(data.accounts?.length ?? 0))
+      .then((data) => {
+        const accs = data.accounts || []
+        setAccounts(accs)
+        setSelectedAccountIds(new Set(accs.filter((a: any) => a.status === 'ALIVE').map((a: any) => a.id)))
+      })
       .catch(() => {})
   }, [])
 
@@ -139,7 +134,6 @@ export default function WorkspacePage() {
       case "COOKIES": return { ...cookies }
       case "EDIT_PROFILE": return { ...editProfile }
       case "UPLOAD": return { ...upload }
-      case "LOGIN": return { ...login }
       default: return {}
     }
   }
@@ -150,7 +144,6 @@ export default function WorkspacePage() {
       case "COOKIES": return cookies.concurrency
       case "EDIT_PROFILE": return editProfile.concurrency
       case "UPLOAD": return upload.concurrency
-      case "LOGIN": return login.concurrency
       default: return 3
     }
   }
@@ -182,13 +175,16 @@ export default function WorkspacePage() {
         case "COOKIES": setCookies({ ...DEFAULT_CONFIGS.COOKIES, ...cfg }); break
         case "EDIT_PROFILE": setEditProfile({ ...DEFAULT_CONFIGS.EDIT_PROFILE, ...cfg }); break
         case "UPLOAD": setUpload({ ...DEFAULT_CONFIGS.UPLOAD, ...cfg }); break
-        case "LOGIN": setLogin({ ...DEFAULT_CONFIGS.LOGIN, ...cfg }); break
       }
       toast.success(`Пресет «${preset.name}» загружен`)
     }
   }
 
   const handleLaunch = async () => {
+    if (selectedAccountIds.size === 0) {
+      toast.error("Выберите хотя бы один аккаунт")
+      return
+    }
     setLaunchStatus("launching")
     setStatusMsg("")
     try {
@@ -196,8 +192,8 @@ export default function WorkspacePage() {
       const concurrency = getConcurrency()
       await api.post("/api/workspace/launch", {
         type: mode,
-        accountIds: [],
-        applyToAll: true,
+        accountIds: Array.from(selectedAccountIds),
+        applyToAll: selectedAccountIds.size === accounts.length,
         config,
         threads: concurrency,
         delayMin: 2000,
@@ -466,30 +462,7 @@ export default function WorkspacePage() {
           </div>
         )
 
-      case "LOGIN":
-        return (
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="login-threads">Потоки</Label>
-              <Input id="login-threads" type="number" min={1} max={20}
-                value={login.concurrency}
-                onChange={e => setLogin({ ...login, concurrency: parseInt(e.target.value) || 1 })}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox id="login-headless"
-                checked={login.headless}
-                onCheckedChange={(v) => setLogin({ ...login, headless: !!v })}
-              />
-              <Label htmlFor="login-headless" className="mb-0 cursor-pointer text-sm">Headless режим</Label>
-            </div>
-            <Alert>
-              <AlertDescription className="text-sm text-muted-foreground">
-                Автоматический логин на всех аккаунтах через cookies. Проверяет валидность сессий и переавторизуется при необходимости.
-              </AlertDescription>
-            </Alert>
-          </div>
-        )
+
 
       default:
         return null
@@ -498,7 +471,7 @@ export default function WorkspacePage() {
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 12 }}
+      initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
       className="flex flex-col gap-6 max-w-6xl mx-auto"
@@ -520,21 +493,61 @@ export default function WorkspacePage() {
             <CardContent className="flex flex-col gap-6">
               {/* Mode Tabs */}
               <Tabs value={mode} onValueChange={setMode}>
-                <TabsList className="w-full grid grid-cols-5">
+                <TabsList className="w-full grid grid-cols-4">
                   <TabsTrigger value="WARMUP" className="text-xs">Прогрев</TabsTrigger>
                   <TabsTrigger value="COOKIES" className="text-xs">Куки</TabsTrigger>
                   <TabsTrigger value="EDIT_PROFILE" className="text-xs">Профиль</TabsTrigger>
                   <TabsTrigger value="UPLOAD" className="text-xs">Залив</TabsTrigger>
-                  <TabsTrigger value="LOGIN" className="text-xs">Логин</TabsTrigger>
                 </TabsList>
               </Tabs>
 
-              {/* Account count */}
-              <div className="flex items-center gap-3 p-3 rounded-lg bg-accent/50 border border-border">
-                <Users className="size-5 text-muted-foreground" />
-                <div>
-                  <div className="font-medium text-sm">{accountCount} аккаунтов</div>
-                  <div className="text-xs text-muted-foreground">Все активные (ALIVE)</div>
+              {/* Account selector */}
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-medium flex items-center gap-2">
+                    <Users className="size-4" />
+                    Аккаунты
+                  </Label>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => {
+                      if (selectedAccountIds.size === accounts.length) {
+                        setSelectedAccountIds(new Set())
+                      } else {
+                        setSelectedAccountIds(new Set(accounts.map(a => a.id)))
+                      }
+                    }}
+                  >
+                    {selectedAccountIds.size === accounts.length ? "Снять все" : "Выбрать все"}
+                  </Button>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Выбрано: {selectedAccountIds.size} из {accounts.length}
+                </div>
+                <div className="max-h-40 overflow-y-auto rounded-lg border border-border bg-accent/30 p-2 flex flex-col gap-1">
+                  {accounts.length === 0 ? (
+                    <div className="text-xs text-muted-foreground text-center py-4">Нет аккаунтов</div>
+                  ) : (
+                    accounts.map(acc => (
+                      <label key={acc.id} className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent/50 cursor-pointer transition-colors duration-150">
+                        <Checkbox
+                          checked={selectedAccountIds.has(acc.id)}
+                          onCheckedChange={(checked) => {
+                            const next = new Set(selectedAccountIds)
+                            if (checked) next.add(acc.id)
+                            else next.delete(acc.id)
+                            setSelectedAccountIds(next)
+                          }}
+                        />
+                        <span className="text-sm truncate flex-1">{acc.username || acc.id.slice(0, 8)}</span>
+                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                          {acc.platform === 'TIKTOK' ? 'TT' : 'YT'}
+                        </Badge>
+                      </label>
+                    ))
+                  )}
                 </div>
               </div>
 
@@ -566,9 +579,9 @@ export default function WorkspacePage() {
               {/* Launch Button */}
               <Button
                 size="lg"
-                className="w-full"
+                className="w-full active:scale-[0.97] transition-transform"
                 onClick={handleLaunch}
-                disabled={launchStatus === "launching"}
+                disabled={launchStatus === "launching" || selectedAccountIds.size === 0}
               >
                 {launchStatus === "launching" ? (
                   <>
