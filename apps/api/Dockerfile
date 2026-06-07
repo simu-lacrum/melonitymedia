@@ -75,6 +75,9 @@ RUN groupadd -r api && useradd -r -g api api \
     && chown -R api:api /app
 USER api
 
+# Set working directory to apps/api so Prisma finds schema.prisma
+WORKDIR /app/apps/api
+
 EXPOSE 4000
 
-CMD ["node", "apps/api/dist/index.js"]
+CMD ["node", "dist/index.js"]
