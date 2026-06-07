@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.3.0] - 2026-06-07
+
+### Added
+- **Platform Filter Tabs**: `/account/accounts` now has TikTok / YouTube / Все filter tabs with badge counts.
+- **Dual-Format Import**: Account import dialog supports both **cookies (JSON)** and **login:password** methods via tabbed interface.
+- **Proxy Binding on Import**: Import dialog includes optional proxy selector for auto-binding on creation.
+- **Account Multi-Select in Workspace**: Workspace page now shows scrollable checklist of all accounts with TT/YT badges and select-all/deselect-all toggle.
+- **3-Dot Action Menu (Accounts)**: Per-row dropdown menu with: Привязка прокси, Обновление куки, Удаление.
+- **Proxy ↔ Account Binding Dialog (Proxies)**: Clickable "Аккаунтов" column opens dialog showing linked accounts with unbind/bind controls.
+- **Account Binding on Proxy Creation**: Add Proxy dialog now includes optional multi-select for immediate account binding.
+- **shadcn/ui Migration**: All UI components migrated to shadcn/ui (base-ui primitives) with Melonity design system styling.
+- **DESIGN-melonity-gg.md**: Added comprehensive design identity document (Emil Kowalski design language).
+
+### Changed
+- **Workspace Tabs**: Reduced from 5 to 4 tabs — removed "Логин" (redundant with "Куки" mode). New order: Прогрев → Куки → Профиль → Залив.
+- **Launch Endpoint**: `POST /api/workspace/launch` now receives `accountIds[]` array instead of `applyToAll: true`.
+- **Import API Schema**: `POST /api/accounts/import` now accepts both `raw`/`method` (new) and `data`/`authMode` (legacy) field names for backward compatibility. Added optional `proxyId` field.
+- **Header Component**: Unified header across landing and dashboard with glass effect, Roboto Flex font, and Melonity branding.
+- **Design System**: Applied DESIGN-melonity-gg.md identity across all pages: Roboto Flex variable font, strict dark palette, glass morphism cards, micro-animations.
+- **Bulk Actions Bar**: Changed from floating pill (`rounded-full`, `liquid-glass`) to card-style bar (`rounded-lg`, `bg-card`).
+
+### Removed
+- **Login Tab (Workspace)**: Removed Login tab and `LoginConfig` interface — cookie collection via "Куки" tab covers this functionality.
+- **Login BullMQ Queue**: Removed `login` queue from documentation (7 queues total instead of 8).
+
 ## [0.2.2] - 2026-06-02
 
 ### Fixed (Technical Audit 02-06 — 21 issues resolved)

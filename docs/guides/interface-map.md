@@ -41,14 +41,15 @@
 
 ---
 
-### Профили (`/account/profiles`)
+### Аккаунты (`/account/accounts`)
 **Назначение:** Единый инвентарь аккаунтов.
 
 | Функция | Описание |
 |---------|----------|
-| DataTable | Чекбокс, Платформа, Никнейм, Статус (incl. SHADOWBAN_SUSPECTED, WARMING_UP), Прокси, Cookies, Warmup Day |
-| Импорт (Drawer) | Drag-and-Drop зона для **cookies** (Netscape .txt или JSON). Cookies шифруются AES-256-GCM |
-| Cookie re-import | Повторный импорт cookies для конкретного аккаунта (статус EXPIRED_COOKIES → ALIVE) |
+| **Фильтр по платформе** | Вкладки: Все / TikTok / YouTube с бейджами количества |
+| DataTable | Чекбокс, Платформа (бейдж TT/YT), Никнейм, Статус (incl. SHADOWBAN_SUSPECTED, WARMING_UP), Прокси, Cookies, Warmup Day |
+| Импорт (Dialog) | **Два метода**: cookies (JSON) и login:password (по одному на строку). Выбор платформы. Опциональная привязка прокси |
+| 3-dot меню | Привязка прокси, обновление куки (запуск cookie refresh), удаление аккаунта |
 | Bulk Actions | Массовая привязка прокси (с Carrier Stability Rule: 409 при нарушении 14-day window), удаление, запуск прогрева, обновление статуса |
 | Warmup Status | Индикатор прогрева: Day X/10, прогресс-бар (passive → active) |
 | Shadowban Alert | ⚠️ При `SHADOWBAN_SUSPECTED` — красный бейдж + tooltip с рекомендацией 7-day cooldown |
@@ -62,14 +63,15 @@
 
 | Блок | Описание |
 |------|----------|
+| **Мульти-селект аккаунтов** | Чекбоксы для выбора конкретных аккаунтов, кнопка «Выбрать все / Снять все», бейджи TT/YT |
 | **Глобальные настройки** | Потоки, задержка старта (от/до), профиль/пресет |
 | **Медиатека** | Drag-n-Drop загрузка видео (.mp4) |
-| **Вкладка А: Залив** | Пулы названий, описаний, тегов. Лимит в сутки. **Видео автоматически уникализируется per account** |
-| **Вкладка Б: Прогрев** | Настройка и мониторинг batch-прогрева для выбранных аккаунтов. Триггер warmup — из `/account/profiles` (per-account) или из Workspace (batch). Day отображается из `warmupStartedAt` |
-| **Вкладка В: Cookies** | Export/refresh cookies через Patchright. **Нет доноров** — только TikTok сессии |
-| **Вкладка Г: Профиль** | Аватар, Баннер, Био. Массовое применение |
+| **Вкладка: Прогрев** | Настройка и мониторинг batch-прогрева для выбранных аккаунтов. Дни, ротация IP, хештеги |
+| **Вкладка: Куки** | Export/refresh cookies через Patchright. **Нет доноров** — только TikTok сессии |
+| **Вкладка: Профиль** | Аватар, Баннер, Био. Массовое применение |
+| **Вкладка: Залив** | Загрузка видео, заголовок, описание, теги. **Видео автоматически уникализируется per account** |
 | **Терминал** | Live Socket.io логи воркеров |
-| **Запуск** | Кнопка «🚀 ЗАПУСТИТЬ ЗАДАЧУ» |
+| **Запуск** | Кнопка «🚀 ЗАПУСТИТЬ ЗАДАЧУ» (disabled если аккаунты не выбраны) |
 
 ---
 
@@ -78,8 +80,9 @@
 
 | Функция | Описание |
 |---------|----------|
-| DataTable | Host, Port, Тип (LTE_MOBILE/STATIC_RESIDENTIAL/DATACENTER), Carrier, ASN, Статус, Аккаунты |
-| Drawer | Добавление: host, port, login, pass + rotation link + type + carrier + country + DMA |
+| DataTable | Host, Port, Тип (LTE_MOBILE/STATIC_RESIDENTIAL/DATACENTER), Carrier, ASN, Статус, Аккаунты (кликабельная колонка) |
+| Добавление (Dialog) | host, port, login, pass + rotation link + type + carrier + country. **Опциональная привязка аккаунтов** при создании |
+| **Аккаунты (Dialog)** | Клик по колонке «Аккаунтов» — диалог со списком привязанных аккаунтов + возможность отвязать / привязать новые |
 | Тест | Проверка соединения с прокси + BGP/ASN валидация (carrier vs реальный AS) + сохранение `bgpPathValid` флага |
 | Ротация | Ручная смена IP (cooldown enforcement: минимум 15 мин) |
 | Carrier Warning | ⚠️ Жёлтый бейдж если `bgpPathValid: false` (ASN датацентра: AWS, Hetzner, OVH) |
