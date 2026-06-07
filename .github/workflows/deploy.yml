@@ -1,0 +1,32 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: 22
+          script_stop: true
+          script: |
+            cd /opt/melonitymedia
+
+            echo "══════ Pulling latest changes ══════"
+            git pull origin main
+
+            echo "══════ Building & restarting containers ══════"
+            docker compose up -d --build --remove-orphans
+
+            echo "══════ Cleaning up old images ══════"
+            docker image prune -f
+
+            echo "══════ Deploy complete ══════"
+            docker compose ps
