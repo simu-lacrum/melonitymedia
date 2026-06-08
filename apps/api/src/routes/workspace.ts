@@ -15,6 +15,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { dispatchAccountJob } from '../lib/job-dispatch.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { authRateLimit } from '../middleware/rate-limit.js';
 
 const router = Router();
 router.use(authMiddleware);
@@ -321,8 +322,8 @@ router.post('/queue', async (req: Request, res: Response) => {
 
     if (targetAccountIds.length > 0 && task.type === 'UPLOAD') {
       for (const videoId of videoIds) {
-        const video = await prisma.video.findUnique({
-          where: { id: videoId },
+        const video = await prisma.video.findFirst({
+          where: { id: videoId, userId: req.user!.id },
           select: { id: true, filepath: true, description: true, hashtags: true },
         });
         if (video) {
@@ -392,7 +393,8 @@ router.post('/presets', async (req: Request, res: Response) => {
 });
 
 // ── GET /cookies/export — download decrypted cookies as JSON ─
-router.get('/cookies/export', async (req: Request, res: Response) => {
+// C-6 FIX: Rate-limited and audit-logged — this is the most sensitive endpoint
+router.get('/cookies/export', authRateLimit, async (req: Request, res: Response) => {
   try {
     // Fetch all accounts with encrypted cookies for this user
     const accounts = await prisma.socialAccount.findMany({
@@ -457,6 +459,10 @@ router.get('/cookies/export', async (req: Request, res: Response) => {
 
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    // Audit log for sensitive operation
+    console.log(`[AUDIT] Cookies exported by userId=${req.user!.id} email=${req.user!.email} count=${cookiesData.length} at=${new Date().toISOString()}`);
+
     res.send(jsonPayload);
   } catch (err) {
     console.error('[Workspace] Cookies export error:', err);

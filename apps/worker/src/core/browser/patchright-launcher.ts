@@ -105,8 +105,13 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
       const url = new URL(opts.proxyUrl);
       const host = url.hostname;
       const port = parseInt(url.port || '80', 10);
+      // H-7 FIX: Scope proxy lookup by account's userId to prevent cross-tenant access
+      const account = await prisma.socialAccount.findUnique({
+        where: { id: opts.accountId },
+        select: { userId: true },
+      });
       const proxy = await prisma.proxy.findFirst({
-        where: { host, port },
+        where: { host, port, userId: account?.userId },
       });
       if (proxy?.rotationMode === 'PER_SESSION') {
         const { rotateProxy } = await import('../proxy/rotation-client.js');

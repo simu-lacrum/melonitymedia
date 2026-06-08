@@ -155,24 +155,18 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
       // ── Self-reschedule next day's warmup ──────────────────
       // Delay 20-28 hours (randomized to avoid pattern detection)
       const nextDayDelay = _randomDelay(20 * 3600_000, 28 * 3600_000);
-      const { Queue } = await import('bullmq');
-      const queue = new Queue('warmup', {
-        connection: {
-          host: new URL(process.env.REDIS_URL || 'redis://localhost:6379').hostname,
-          port: parseInt(new URL(process.env.REDIS_URL || 'redis://localhost:6379').port || '6379'),
-        },
-      });
+      // H-6 FIX: Use shared bullmq addJob instead of creating a new Queue each time
+      const { addJob } = await import('../lib/bullmq.js');
 
-      await queue.add(`warmup-${data.accountId}-day${warmupDay + 1}`, {
+      await addJob('warmup' as any, {
         userId: data.userId,
         accountId: data.accountId,
         hashtags: data.hashtags,
         cookiesDir: data.cookiesDir,
       }, {
         delay: nextDayDelay,
+        jobId: `warmup-${data.accountId}-day${warmupDay + 1}`,
       });
-
-      await queue.close();
       const nextHours = Math.round(nextDayDelay / 3600_000);
       logger.info(`⏰ Следующий день прогрева (${warmupDay + 1}/${totalDays}) запланирован через ~${nextHours}ч`);
     }
@@ -253,7 +247,13 @@ async function _lightEngagement(
   job: Job,
 ): Promise<void> {
   const watchCount = _randomDelay(10, 18);
-  const likeProb = 0.3 + (data.warmupDay - 4) * 0.1; // Day 4: 30%, Day 5: 40%, Day 6: 50%
+  // M-3 FIX: Use proportional phase calculation instead of hardcoded Day 4 offset
+  const passiveEnd = Math.max(1, Math.ceil(data.warmupDays * 0.3));
+  const lightStart = passiveEnd + 1;
+  const lightEnd = Math.max(passiveEnd + 1, Math.ceil(data.warmupDays * 0.6));
+  const lightSpan = Math.max(1, lightEnd - lightStart + 1);
+  const dayInPhase = data.warmupDay - lightStart;
+  const likeProb = 0.3 + (dayInPhase / lightSpan) * 0.2; // 30% → 50% across the phase
   let liked = 0;
   let commented = false;
 
@@ -327,7 +327,12 @@ async function _activeEngagement(
   job: Job,
 ): Promise<void> {
   const watchCount = _randomDelay(12, 20);
-  const likeProb = 0.6 + (data.warmupDay - 7) * 0.05;
+  // M-3 FIX: Use proportional phase calculation instead of hardcoded Day 7 offset
+  const lightEnd = Math.max(2, Math.ceil(data.warmupDays * 0.6));
+  const activeStart = lightEnd + 1;
+  const activeSpan = Math.max(1, data.warmupDays - activeStart + 1);
+  const dayInPhase = data.warmupDay - activeStart;
+  const likeProb = 0.6 + (dayInPhase / activeSpan) * 0.2; // 60% → 80% across the phase
   let liked = 0;
   let comments = 0;
   const maxComments = _randomDelay(2, 3);

@@ -70,6 +70,13 @@ export async function dispatchAccountJob(args: {
 
   if (!account) return { accountId: args.accountId, jobId: null, error: "NO_ACCOUNT" };
 
+  // M-7 FIX: Reject jobs for accounts in invalid states
+  // Login queue is exempt — it's used to fix auth issues
+  const blockedStatuses = ['BANNED', 'SHADOWBAN_SUSPECTED', 'PAUSED'];
+  if (args.queueName !== 'login' && blockedStatuses.includes(account.status)) {
+    return { accountId: args.accountId, jobId: null, error: `ACCOUNT_${account.status}` };
+  }
+
   // Upload-specific guards
   if (args.queueName === "upload") {
     if (!account.warmupCompletedAt && !args.forceSkipWarmup) {

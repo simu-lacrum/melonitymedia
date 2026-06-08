@@ -66,6 +66,11 @@ export function rateLimit(maxRequests: number, windowMs: number) {
 
 /**
  * Pre-configured rate limiters for common use cases.
+ *
+ * M-1 NOTE: These are in-memory and reset on process restart.
+ * For production multi-instance deploys, migrate to Redis-backed
+ * rate limiting (e.g. ioredis + sliding-window-rate-limiter).
+ * In single-instance Docker mode, this is acceptable.
  */
-export const authRateLimit = rateLimit(10, 15 * 60_000);  // 10 attempts per 15 min
+export const authRateLimit = rateLimit(5, 15 * 60_000);    // 5 attempts per 15 min (tightened from 10)
 export const apiRateLimit = rateLimit(100, 60_000);         // 100 per minute

@@ -16,6 +16,7 @@
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
+import { prisma } from '../../lib/prisma.js';
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -201,10 +202,30 @@ export async function loadCookiesFromEncryptedStore(
 ): Promise<BrowserCookie[]> {
   const cachePath = path.join(cookiesDir, `${accountId}.enc.json`);
 
-  // Layer 1: disk cache (fast path)
+  // Layer 1: disk cache (fast path) with M-6 FIX: freshness validation
   try {
     const raw = await fs.readFile(cachePath, 'utf8');
-    const { encrypted, iv, authTag } = JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    const { encrypted, iv, authTag, updatedAt } = parsed;
+
+    // M-6 FIX: Check if DB has newer cookies than disk cache
+    const dbMeta = await prisma.socialAccount.findUnique({
+      where: { id: accountId },
+      select: { cookiesUpdatedAt: true },
+    });
+
+    if (dbMeta?.cookiesUpdatedAt && updatedAt) {
+      const diskTime = new Date(updatedAt).getTime();
+      const dbTime = new Date(dbMeta.cookiesUpdatedAt).getTime();
+      if (dbTime > diskTime) {
+        // DB has newer cookies — invalidate disk cache
+        const fromDb = await loadCookiesForAccount(accountId);
+        if (fromDb.length > 0) {
+          await saveCookiesToDiskCache(accountId, fromDb, cookiesDir);
+        }
+        return fromDb;
+      }
+    }
 
     return decryptCookies(
       Buffer.from(encrypted, 'base64'),
@@ -286,8 +307,6 @@ export async function persistCookies(
 }
 
 // ── DB-backed Cookie Loader ─────────────────────────────────
-
-import { prisma } from '../../lib/prisma.js';
 
 /**
  * Load and decrypt cookies for an account, reading directly from Prisma.

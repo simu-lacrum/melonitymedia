@@ -35,6 +35,21 @@ const createProxySchema = z.object({
   rotationCooldown: z.number().int().min(60).max(3600).optional(),
 });
 
+// H-2 FIX: Zod validation schema for proxy PATCH
+const updateProxySchema = z.object({
+  isActive: z.boolean().optional(),
+  name: z.string().optional(),
+  host: z.string().min(1).optional(),
+  port: z.number().int().min(1).max(65535).optional(),
+  username: z.string().optional(),
+  password: z.string().optional(),
+  rotationLink: z.string().url().optional().or(z.literal('')).or(z.null()),
+  type: z.enum(['LTE_MOBILE', 'STATIC_RESIDENTIAL']).optional(),
+  country: z.string().max(10).optional(),
+  carrier: z.string().max(100).optional(),
+  rotationCooldown: z.number().int().min(60).max(3600).optional(),
+}).strict(); // .strict() rejects unknown keys like userId, id, status
+
 // Helper: compose address from parts for DB storage
 function composeAddress(host: string, port: number, username?: string, password?: string): string {
   if (username && password) {
@@ -108,6 +123,16 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     const { name, host, port, username, password, rotationLink, type, country, carrier, dma, rotationCooldown } = parsed.data;
+
+    // M-8 FIX: Prevent duplicate proxies with same host:port for this user
+    const existing = await prisma.proxy.findFirst({
+      where: { host, port, userId: req.user!.id },
+    });
+    if (existing) {
+      res.status(409).json({ error: `Прокси ${host}:${port} уже существует`, existingId: existing.id });
+      return;
+    }
+
     const address = composeAddress(host, port, username, password);
     const isRotating = !!rotationLink;
 
@@ -137,9 +162,16 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
-// ── PATCH /:id ──────────────────────────────────────────────
+// ── PATCH /:id ──────────────────────────────────────────────────
 router.patch('/:id', async (req: Request, res: Response) => {
   try {
+    // H-2 FIX: Validate input with Zod before processing
+    const parsed = updateProxySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.errors[0].message });
+      return;
+    }
+
     const existing = await prisma.proxy.findFirst({
       where: { id: req.params.id as string, userId: req.user!.id },
     });
@@ -148,34 +180,34 @@ router.patch('/:id', async (req: Request, res: Response) => {
       return;
     }
 
-    // Build update data from frontend fields
+    const input = parsed.data;
     const updateData: Record<string, unknown> = {};
 
     // Handle isActive toggle
-    if (typeof req.body.isActive === 'boolean') {
-      updateData.status = req.body.isActive ? 'ACTIVE' : 'DEAD';
+    if (typeof input.isActive === 'boolean') {
+      updateData.status = input.isActive ? 'ACTIVE' : 'DEAD';
     }
 
     // Handle full edit (host/port/username/password)
-    if (req.body.host && req.body.port) {
-      updateData.host = req.body.host;
-      updateData.port = req.body.port;
-      updateData.username = req.body.username ?? existing.username;
-      updateData.password = req.body.password ?? existing.password;
+    if (input.host && input.port) {
+      updateData.host = input.host;
+      updateData.port = input.port;
+      updateData.username = input.username ?? existing.username;
+      updateData.password = input.password ?? existing.password;
       updateData.address = composeAddress(
-        req.body.host, req.body.port,
-        req.body.username, req.body.password,
+        input.host, input.port,
+        input.username, input.password,
       );
     }
-    if (req.body.name !== undefined) updateData.label = req.body.name;
-    if (req.body.rotationLink !== undefined) {
-      updateData.rotationLink = req.body.rotationLink || null;
-      updateData.isRotating = !!req.body.rotationLink;
+    if (input.name !== undefined) updateData.label = input.name;
+    if (input.rotationLink !== undefined) {
+      updateData.rotationLink = input.rotationLink || null;
+      updateData.isRotating = !!input.rotationLink;
     }
-    if (req.body.type !== undefined) updateData.type = req.body.type;
-    if (req.body.country !== undefined) updateData.country = req.body.country;
-    if (req.body.carrier !== undefined) updateData.carrier = req.body.carrier;
-    if (req.body.rotationCooldown !== undefined) updateData.rotationCooldown = req.body.rotationCooldown;
+    if (input.type !== undefined) updateData.type = input.type;
+    if (input.country !== undefined) updateData.country = input.country;
+    if (input.carrier !== undefined) updateData.carrier = input.carrier;
+    if (input.rotationCooldown !== undefined) updateData.rotationCooldown = input.rotationCooldown;
 
     const proxy = await prisma.proxy.update({
       where: { id: req.params.id as string },
@@ -319,6 +351,12 @@ router.post('/import', async (req: Request, res: Response) => {
         const username = parts.length >= 3 ? parts[2] : null;
         const password = parts.length >= 4 ? parts[3] : null;
 
+        // Skip duplicates (same host:port for this user)
+        const existingProxy = await prisma.proxy.findFirst({
+          where: { host, port, userId: req.user!.id },
+        });
+        if (existingProxy) continue;
+
         await prisma.proxy.create({
           data: {
             userId: req.user!.id,
@@ -338,9 +376,11 @@ router.post('/import', async (req: Request, res: Response) => {
         return;
       }
       
-      // Fetch from proxys.io API
-      // Since fetch is native in Node 18+:
-      const resp = await fetch(`https://proxys.io/ru/api/v2/proxies?key=${apiKey}`);
+      // H-3 FIX: Send API key in Authorization header instead of URL query string
+      // to prevent leaking in logs, Referer headers, and proxy logs.
+      const resp = await fetch('https://proxys.io/ru/api/v2/proxies', {
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+      });
       if (!resp.ok) {
          res.status(400).json({ error: 'Failed to fetch from Proxys.io' });
          return;
@@ -361,6 +401,12 @@ router.post('/import', async (req: Request, res: Response) => {
          // Assuming Proxys.io gives mostly IPv4 static or mobile
          const isMobile = p.type?.toLowerCase().includes('mobile');
          const proxyType = isMobile ? 'LTE_MOBILE' : 'STATIC_RESIDENTIAL';
+
+         // Skip duplicates (same host:port for this user)
+         const existingProxy = await prisma.proxy.findFirst({
+           where: { host, port, userId: req.user!.id },
+         });
+         if (existingProxy) continue;
 
          await prisma.proxy.create({
            data: {

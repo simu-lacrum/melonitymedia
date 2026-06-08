@@ -197,7 +197,7 @@ MelonityMedia/
 │   │
 │   └── worker/                 # BullMQ worker pool
 │       ├── src/
-│       │   ├── index.ts        # Worker entrypoint (7 queues)
+│       │   ├── index.ts        # Worker entrypoint (8 queues)
 │       │   ├── core/
 │       │   │   ├── browser/    # patchright-launcher.ts, fingerprint-manager.ts
 │       │   │   ├── auth/       # cookie-store.ts (AES-256-GCM), session-validator.ts
@@ -224,7 +224,7 @@ MelonityMedia/
 │   └── architecture/
 │       └── backend-contracts.md
 │
-├── docker-compose.yml          # PostgreSQL + Redis + API + Web + Worker + Cookies Volume
+├── docker-compose.yml          # Nginx + PostgreSQL + Redis + API + Web + Worker + Cookies Volume
 ├── design.md                   # Design system reference
 ├── tsconfig.base.json          # Shared TypeScript config
 ├── .env.example                # Environment template (includes MASTER_KEY)
@@ -298,18 +298,21 @@ docker-compose logs -f worker
 ```mermaid
 graph LR
     subgraph Docker Compose
+        NGX["nginx<br/>Reverse Proxy<br/>:80/:443"]
         DB[("db<br/>PostgreSQL 16<br/>:5432")]
-        RD[("redis<br/>Redis 7<br/>:6379")]
+        RD[("redis<br/>Redis 7 (auth)<br/>:6379")]
         API[api<br/>Express.js<br/>:4000]
         WEB[frontend<br/>Next.js<br/>:3000]
         WK["worker<br/>Patchright + ffmpeg<br/>+ curl-impersonate"]
     end
 
-    WEB -->|HTTP| API
+    NGX -->|/api/*| API
+    NGX -->|/*| WEB
     API -->|Prisma| DB
     API -->|BullMQ| RD
     RD -->|Jobs| WK
 
+    style NGX fill:#009639,stroke:#fff,color:#fff
     style DB fill:#336791,stroke:#fff,color:#fff
     style RD fill:#DC382D,stroke:#fff,color:#fff
     style API fill:#339933,stroke:#fff,color:#fff
@@ -318,6 +321,10 @@ graph LR
 ```
 
 > **⚠️ Worker-контейнер** включает Xvfb + google-chrome-stable + ffmpeg + curl-impersonate. Используется **Patchright** (patched Playwright CDP) — НЕ Puppeteer и НЕ Selenium. Браузер запускается с `headless: false` внутри виртуального дисплея Xvfb `:99`, что позволяет обходить антифрод-детекцию TikTok и YouTube. Все cookies зашифрованы AES-256-GCM и хранятся в отдельном Docker volume `cookies`.
+>
+> **🔒 Nginx** проксирует весь трафик: `/api/*` и `/socket.io/*` → Express API, остальное → Next.js. Добавлены security headers (X-Content-Type-Options, X-Frame-Options, Referrer-Policy). HTTPS готов к настройке через certbot (порт 443 + SSL volume примонтированы).
+>
+> **🔑 Redis 7** запускается с `--requirepass` — аутентификация обязательна. Пароль задаётся через `REDIS_PASSWORD` в `.env`.
 
 ---
 
@@ -377,7 +384,7 @@ graph TD
 
 ```mermaid
 graph LR
-    subgraph Queues["7 BullMQ Queues"]
+    subgraph Queues["8 BullMQ Queues"]
         Q1["upload<br/>Залив видео"]
         Q2["warmup<br/>10-day curriculum"]
         Q3["cookies<br/>Export cookies"]
@@ -385,6 +392,7 @@ graph LR
         Q5["analytics-cron<br/>JSON API stats"]
         Q6["cleanup<br/>Очистка файлов"]
         Q7["shadowban-check<br/>Детекция шэдоубана"]
+        Q8["login<br/>Авторизация login:pass"]
     end
 
     API[API Server] -->|dispatch| Queues
@@ -398,6 +406,7 @@ graph LR
     style Q5 fill:#ff1469,stroke:#fff,color:#fff
     style Q6 fill:#40D3F5,stroke:#1c2026,color:#1c2026
     style Q7 fill:#ff1469,stroke:#fff,color:#fff
+    style Q8 fill:#40D3F5,stroke:#1c2026,color:#1c2026
 ```
 
 | Очередь | Хэндлер | Триггер | Описание |
@@ -409,6 +418,7 @@ graph LR
 | `analytics-cron` | `analytics.ts` | Cron (каждые 6ч) | curl-impersonate JSON API (~200ms/профиль) + **persist followers/views в БД** + fan-out per account |
 | `cleanup` | `cleanup.ts` | Автоматически | Удаление файлов после загрузки |
 | `shadowban-check` | `shadowban-detector.ts` | Cron (каждые 12ч) | 3+ видео <100 views → SHADOWBAN_SUSPECTED |
+| `login` | `login.ts` | Кнопка | Авторизация через login:password с AES-256-GCM расшифровкой, 2FA/captcha detection |
 
 
 ---
@@ -485,8 +495,8 @@ graph LR
 
 | Метод | Эндпоинт | Описание |
 |-------|----------|----------|
-| `POST` | `/api/auth/register` | Регистрация (email, password). Rate limit: 10 req / 15 мин |
-| `POST` | `/api/auth/login` | Вход (JWT → HttpOnly Cookie). Rate limit: 10 req / 15 мин |
+| `POST` | `/api/auth/register` | Регистрация (email, password). Rate limit: 5 req / 15 мин |
+| `POST` | `/api/auth/login` | Вход (JWT → HttpOnly Cookie). Rate limit: 5 req / 15 мин |
 | `POST` | `/api/auth/logout` | Выход (очистка cookie) |
 | `GET` | `/api/auth/me` | Текущий пользователь |
 
@@ -502,6 +512,8 @@ graph LR
 | `POST` | `/api/accounts/warmup` | Запуск 10-day warmup curriculum |
 | `PATCH` | `/api/accounts/:id` | Обновить (привязать прокси, статус) |
 | `DELETE` | `/api/accounts/:id` | Удалить аккаунт |
+| `DELETE` | `/api/accounts/bulk` | Массовое удаление (+ отмена pending задач) |
+| `POST` | `/api/accounts/bulk-delete` | Альтернатива DELETE /bulk через POST (proxy-safe) |
 
 ### Прокси
 
@@ -538,8 +550,9 @@ graph LR
 | `PATCH` | `/api/admin/users/:id` | Изменить лимиты / роль (Zod-валидация) |
 | `POST` | `/api/admin/users/:id/ban` | Забанить пользователя (self-ban protection) |
 | `GET` | `/api/admin/firewall` | Заблокированные IP |
-| `POST` | `/api/admin/firewall` | Добавить IP в blacklist |
+| `POST` | `/api/admin/firewall` | Добавить IP в blacklist (валидация net.isIP) |
 | `POST` | `/api/admin/firewall/unblock` | Удалить IP из blacklist |
+| `POST` | `/api/admin/users/:id/unban` | Разбанить пользователя |
 
 ---
 
@@ -547,29 +560,37 @@ graph LR
 
 | Мера | Реализация |
 |------|-----------|
-| **JWT Auth** | HttpOnly Cookies, TTL synced with JWT_EXPIRES_IN, bcrypt hashing |
+| **JWT Auth** | HttpOnly Cookies, bcrypt 12 rounds, SameSite=Strict |
 | **Cookie Encryption** | AES-256-GCM с MASTER_KEY (32 bytes base64), fail-fast при невалидном ключе |
 | **Key Rotation** | `scripts/rotate-master-key.mjs` — zero-downtime ротация шифрования |
-| **RBAC** | Middleware `requireAdmin` для `/admin/*` маршрутов |
-| **Firewall** | IP blacklist через Redis → 403 Forbidden |
-| **Tenant Isolation** | Все модели Prisma имеют `userId` FK — пользователь видит только свои данные |
-| **Rate Limiting** | 10 запросов / 15 мин на `/auth/register` и `/auth/login` (Redis-backed) |
+| **RBAC** | Middleware `requireAdmin` для `/admin/*` маршрутов, ADMIN-only force-override |
+| **Firewall** | IP blacklist через Redis SET → 403 Forbidden, `net.isIP()` валидация |
+| **Tenant Isolation** | Все запросы Prisma содержат `userId` scope — пользователь видит только свои данные |
+| **Rate Limiting** | 5 запросов / 15 мин на auth endpoints, 100/мин на API (in-memory, TODO: Redis-backed) |
 | **CORS** | Strict origin через `CORS_ORIGIN` переменную |
 | **Helmet** | Security headers на всех API-ответах |
+| **Nginx Security Headers** | `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `X-XSS-Protection` |
+| **Redis Authentication** | Redis 7 запускается с `--requirepass`, пароль в `REDIS_URL` |
+| **DB Credentials in Env** | Пароль PostgreSQL вынесен из docker-compose в `.env` переменные |
 | **ESLint Banned Imports** | puppeteer, selenium, cheerio заблокированы на уровне lint |
+| **Zod Input Validation** | Все PATCH/POST endpoints используют `.strict()` Zod-схемы, блокирующие инъекцию полей |
+| **Duplicate Prevention** | Создание и импорт прокси проверяют `host:port` на дубликаты (`409 Conflict`) |
+| **Job Dispatch Guard** | `dispatchAccountJob()` отклоняет задачи для BANNED/PAUSED аккаунтов (кроме login queue) |
+| **Upload Idempotency** | Upload handler проверяет `isUploaded` перед загрузкой — BullMQ retry не вызывает дубликатов |
+| **Cookie Cache Freshness** | Disk cache сравнивает `updatedAt` с DB `cookiesUpdatedAt` — stale cache автоматически обновляется |
+| **Bulk Delete Safety** | Массовое удаление аккаунтов автоматически отменяет PENDING/RUNNING задачи |
+| **Cookie Export Audit** | `/workspace/cookies/export` логирует `[AUDIT]` с userId, email и количеством cookies |
 | **Fingerprint Consistency** | 7 правил валидации: OS↔platform, GPU↔OS, screen≥viewport, locale↔timezone, hardware bounds, Chrome version pinning, touch coherence |
 | **Carrier Stability Rule** | 14-day proxy pin window для TikTok: блокировка смены carrier/country, LTE-only для свежих аккаунтов |
 | **Shadowban 24h Gate** | Детекция shadowban только по видео старше 24ч (предотвращение ложных срабатываний) |
-| **No Secrets in Response** | Encrypted cookies никогда не отправляются на фронтенд, `address` field (credentials) stripped из proxy responses |
-| **Platform-Aware Validation** | Session validator использует platform-specific URLs (TikTok API vs YouTube /account) с HTTP redirect detection |
-| **Geo-Based Fingerprint** | Timezone в fingerprints привязан к geo-данным прокси с warning при неизвестных странах |
+| **No Secrets in Response** | Encrypted cookies никогда не отправляются на фронтенд, `address` field stripped, API key в Authorization header |
+| **Cross-Tenant Proxy Guard** | Worker proxy lookup scoped by `userId` — User A не может использовать rotation key User B |
+| **Web JWT Validation** | Next.js middleware проверяет JWT структуру (3 base64url части), очищает garbage cookie |
+| **Proportional Warmup Phases** | Engagement probability масштабируется пропорционально фазе, не hardcoded offsets |
 | **MASTER_KEY Required** | API и Worker делают hard fail (`process.exit(1)`) при отсутствии или невалидном MASTER_KEY |
-| **Centralized Cookie Persist** | `persistCookies()` — единая функция для всех handlers: одновременная запись на диск И в DB |
-| **Status Transition Guard** | PATCH account status запрещает переход BANNED/SHADOWBAN→ALIVE без admin force-override |
-| **Sequential Warmup** | `lastWarmupDay` в DB обеспечивает последовательный прогрев даже при простое сервера (не скачет по дням) |
-| **Proxy URL Validation** | `buildProxyUrl()` бросает ошибку при невалидном URL вместо silent fallback |
-| **Upload Confirmation** | TikTok upload проверяет наличие ошибок на странице после публикации |
-| **YouTube Redirect Detection** | Session validator обрабатывает HTTP 302/303 редиректы на Google login |
+| **Centralized Cookie Persist** | `persistCookies()` — единая функция: одновременная запись на диск И в DB |
+| **Singleton BullMQ Queues** | Worker использует shared `bullmq.ts` — нет утечки Redis-коннектов при fan-out |
+| **Upload Error Detection** | TikTok upload бросает ошибку при обнаружении error text (не silent mark as uploaded) |
 
 ---
 
@@ -577,18 +598,18 @@ graph LR
 
 ```bash
 # ── Database ──────────────────────────────────────────
-DATABASE_URL=postgresql://melonity:***@db:5432/melonitymedia
+POSTGRES_USER=melonity
+POSTGRES_PASSWORD=replace_me_strong_password
+POSTGRES_DB=melonitymedia
+DATABASE_URL=postgresql://melonity:replace_me_strong_password@db:5432/melonitymedia
 
 # ── Redis (BullMQ + Cache + Firewall) ─────────────────
-REDIS_URL=redis://redis:6379
-
-# ── Docker Port Mapping (host ports, to avoid conflicts) ──
-PORT_DB=5433
-PORT_REDIS=6380
+# Redis 7 запускается с --requirepass, пароль ОБЯЗАТЕЛЕН в URL
+REDIS_PASSWORD=replace_me_redis_password
+REDIS_URL=redis://:replace_me_redis_password@redis:6379
 
 # ── JWT Auth ──────────────────────────────────────────
 JWT_SECRET=replace_me_64_hex_chars
-JWT_EXPIRES_IN=7d
 
 # ── Cookie Encryption (AES-256-GCM) ───────────────────
 # Generate ONCE per environment with:
@@ -609,6 +630,13 @@ CORS_ORIGIN=http://localhost:3000
 
 # ── Frontend (exposed to browser) ─────────────────────
 NEXT_PUBLIC_API_URL=http://localhost:4000
+
+# ── Chrome Version (fingerprint + UA pinning) ─────────
+EXPECTED_CHROME_MAJOR=148
+
+# ── CapSolver (TikTok / hCaptcha solver) ──────────────
+CAPSOLVER_API_KEY=
+CAPSOLVER_API_URL=https://api.capsolver.com
 ```
 
 ---

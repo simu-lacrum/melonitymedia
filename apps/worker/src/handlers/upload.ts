@@ -52,9 +52,27 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
   try {
     await prisma.video.update({ where: { id: data.videoId }, data: { status: 'PROCESSING' } });
 
-    // ── Resolve everything fresh from the DB ────────────────
     const ctxAcc = await loadAccountContext(data.accountId);
     const { platform, fingerprint, proxyUrl } = ctxAcc;
+
+    // H-8 FIX: Check account status before proceeding with upload
+    const accountStatus = await prisma.socialAccount.findUnique({
+      where: { id: data.accountId },
+      select: { status: true },
+    });
+    if (accountStatus && ['BANNED', 'SHADOWBAN_SUSPECTED', 'PAUSED'].includes(accountStatus.status)) {
+      throw new Error(`Account ${data.accountId} has status '${accountStatus.status}' — upload aborted.`);
+    }
+
+    // M-4 FIX: Idempotency guard — check if this video was already uploaded
+    const videoRecord = await prisma.video.findUnique({
+      where: { id: data.videoId },
+      select: { isUploaded: true, status: true },
+    });
+    if (videoRecord?.isUploaded || videoRecord?.status === 'UPLOADED') {
+      logger.warn(`Video ${data.videoId} already uploaded — skipping duplicate.`);
+      return;
+    }
 
     logger.info(`Начинаю загрузку: "${data.title}" → ${platform}`);
 
@@ -337,8 +355,8 @@ async function _uploadToTikTok(
   const confirmBodyText = await page.textContent('body') ?? '';
   const hasError = /failed|error|couldn't|не удалось|ошибка/i.test(confirmBodyText);
   if (hasError) {
-    logger.warn('TikTok upload may have failed — error text detected on page');
-    // Don't throw — let the status be marked cautiously, but log the warning
+    // M-9 FIX: Throw on detected error instead of silently marking as uploaded
+    throw new Error('TikTok upload failed — error text detected on confirmation page');
   }
 
   logger.info('TikTok подтвердил загрузку ✓');

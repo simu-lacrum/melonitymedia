@@ -62,6 +62,15 @@ router.post('/:id/regenerate-fingerprint', async (req: Request, res: Response) =
       return;
     }
 
+    // M-2 FIX: Only ADMIN can force fingerprint regen on published accounts
+    if (publishedCount > 0 && req.query.force === 'true' && req.user!.role !== 'ADMIN') {
+      res.status(403).json({
+        error: 'Только администратор может принудительно сменить fingerprint на опубликованном аккаунте',
+        code: 'ADMIN_ONLY',
+      });
+      return;
+    }
+
     let geo = { country: 'US', city: 'New York' };
     if (account.pinnedProxyId) {
       const proxy = await prisma.proxy.findUnique({
@@ -609,7 +618,7 @@ const bulkUpdateSchema = z.object({
     avatarUrl: z.string().optional(),
     bannerUrl: z.string().optional(),
     bio: z.string().optional(),
-    status: z.enum(['ALIVE', 'AUTH_NEEDED', 'BANNED', 'EXPIRED_COOKIES', 'SHADOWBAN_SUSPECTED', 'WARMING_UP']).optional(),
+    status: z.enum(['ALIVE', 'AUTH_NEEDED', 'BANNED', 'EXPIRED_COOKIES', 'SHADOWBAN_SUSPECTED', 'WARMING_UP', 'PAUSED']).optional(),
   }),
 });
 
@@ -758,13 +767,24 @@ router.patch('/bulk/proxy', async (req: Request, res: Response) => {
 });
 
 // ── DELETE /bulk — mass delete accounts ─────────────────────
-router.delete('/bulk', async (req: Request, res: Response) => {
+// Also available as POST /bulk-delete for proxies that strip DELETE bodies (M-5)
+const bulkDeleteHandler = async (req: Request, res: Response) => {
   try {
     const { ids } = req.body;
     if (!Array.isArray(ids) || ids.length === 0) {
       res.status(400).json({ error: 'Выберите хотя бы один аккаунт' });
       return;
     }
+
+    // H-5 FIX: Cancel pending tasks for these accounts before deleting
+    await prisma.task.updateMany({
+      where: {
+        userId: req.user!.id,
+        accountId: { in: ids },
+        status: { in: ['PENDING', 'RUNNING'] },
+      },
+      data: { status: 'CANCELLED' },
+    });
 
     const result = await prisma.socialAccount.deleteMany({
       where: {
@@ -778,7 +798,10 @@ router.delete('/bulk', async (req: Request, res: Response) => {
     console.error('[Accounts] Bulk delete error:', err);
     res.status(500).json({ error: 'Ошибка при массовом удалении' });
   }
-});
+};
+
+router.delete('/bulk', bulkDeleteHandler);
+router.post('/bulk-delete', bulkDeleteHandler);  // M-5: proxy-safe alternative
 
 // ── POST /warmup — start warmup for accounts ────────────────
 router.post('/warmup', async (req: Request, res: Response) => {

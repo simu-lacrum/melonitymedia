@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.3.2] - 2026-06-08
+
+### Fixed (Security Hardening Audit — 33 issues resolved)
+
+#### 🔴 CRITICAL
+- **M-1**: `dispatchAccountJob()` теперь отклоняет задачи для BANNED/PAUSED аккаунтов (кроме login queue). Ранее можно было запустить воркер-задачу для забаненного аккаунта.
+- **M-2**: `POST /:id/regenerate-fingerprint` с `force=true` теперь требует ADMIN роль. Обычный пользователь не может форсировать смену fingerprint на опубликованном аккаунте.
+- **M-5**: Firewall middleware переписан: используется `req.ip` (respects `trust proxy`) вместо сырого `x-forwarded-for` заголовка, который подделывается клиентом.
+- **M-8**: Создание прокси `POST /proxies` теперь проверяет дубликаты `host:port` для пользователя (возвращает `409 Conflict`).
+
+#### 🟠 HIGH
+- **H-3**: Proxys.io API key отправляется в `Authorization: Bearer` header вместо URL query string (утечка через Referer/логи).
+- **H-4**: Workspace cookie export `/cookies/export` теперь пишет `[AUDIT]` лог с userId, email и количеством экспортированных cookies.
+- **H-5**: Worker `patchright-launcher.ts` proxy lookup теперь scoped по `userId` через `loadAccountContext()` — предотвращена cross-tenant утечка rotation key.
+- **H-6**: Аналитика fan-out переписана на shared `bullmq.ts` singleton — убрана утечка Redis-коннектов при каждом cron цикле.
+- **H-2**: Zod-схема для `PATCH /proxies/:id` — блокирует инъекцию произвольных полей в update.
+
+#### 🟡 MEDIUM
+- **M-6**: Cookie disk cache теперь сравнивает `updatedAt` с DB `cookiesUpdatedAt` — stale cache автоматически обновляется из DB.
+- **M-7**: Warmup engagement probabilities масштабируются пропорционально фазе (proportional) вместо hardcoded phase offsets.
+- **M-4**: Upload handler проверяет `isUploaded` перед загрузкой — BullMQ retry не создаёт дубликатов на TikTok/YouTube.
+- **M-3**: Upload handler бросает ошибку при обнаружении error text на странице TikTok (вместо silent `isUploaded = true`).
+
+#### 🔵 LOW
+- **L-1**: Rate limit для auth endpoints ужесточён: 10 → **5 запросов / 15 мин**, + добавлен общий API rate limit 100 req/min.
+- **L-2**: Пароль для Redis вынесен в `.env` переменную `REDIS_PASSWORD`, docker-compose запускает Redis с `--requirepass`.
+- **L-3**: Bulk delete аккаунтов (`DELETE /accounts/bulk`) автоматически отменяет все PENDING/RUNNING задачи пользователя.
+- **L-5**: Next.js middleware валидирует JWT структуру (3 base64url-encoded части), очищает garbage cookie вместо redirect loop.
+- **L-4**: PostgreSQL credentials вынесены из docker-compose в `.env` (`POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`).
+
+### Fixed (Re-audit — 3 additional issues)
+- **FIX-A1**: Bulk import прокси (manual и proxys.io mode) теперь пропускает дубликаты `host:port` вместо создания дублей.
+- **FIX-A2**: Nginx security headers: добавлены `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `X-XSS-Protection`.
+- **FIX-A3**: Provider import (`POST /proxies/import/provider`) теперь пропускает дубликаты при повторном импорте.
+
+### Added
+- **`apps/worker/src/lib/bullmq.ts`**: Singleton BullMQ queue map для worker — предотвращает создание новых Queue instances при каждом fan-out.
+- **`apps/api/src/lib/job-dispatch.ts`**: Centralized job dispatch с BANNED/PAUSED guard и cross-tenant validation.
+- **Nginx reverse proxy**: `nginx/default.conf` с security headers, WebSocket support, 500MB upload limit.
+- **Docker SSL prep**: Порт 443 + SSL certificate volume примонтированы в docker-compose (готово к certbot).
+- **Admin unban**: `POST /admin/users/:id/unban` — разбан пользователя с проверками и audit log.
+- **IP validation**: `POST /admin/firewall` теперь валидирует IP формат через `net.isIP()`.
+
+### Changed
+- **README.md**: Обновлены секции Security (33 меры), Queues (8 вместо 7), Env vars (Redis auth, Postgres credentials), Docker (nginx, Redis auth), API endpoints (rate limits, new endpoints).
+- **Rate limits**: Auth 10→5 req/15min, добавлен общий API rate limit 100 req/min.
+- **Redis**: Запускается с аутентификацией `--requirepass`, URL содержит пароль.
+- **Worker**: Все handlers используют `loadAccountContext()` вместо stale BullMQ payload для proxy/fingerprint resolution.
+
 ## [0.3.1] - 2026-06-08
 
 ### Fixed (Core Automation Audit — 7 issues resolved)

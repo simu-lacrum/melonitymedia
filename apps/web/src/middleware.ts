@@ -24,6 +24,13 @@ export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const token = request.cookies.get('melonity_token')?.value;
 
+  // L-5 FIX: Basic JWT structure validation (can't verify signature on edge)
+  // A valid JWT has 3 base64url-encoded parts separated by dots
+  const isValidJwtStructure = token
+    ? /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token)
+    : false;
+  const hasValidToken = !!token && isValidJwtStructure;
+
   // Allow API routes to pass through (handled by nginx → Express)
   if (pathname.startsWith('/api')) {
     return NextResponse.next();
@@ -32,14 +39,21 @@ export function middleware(request: NextRequest) {
   // Public paths are always accessible
   if (PUBLIC_PATHS.includes(pathname)) {
     // If authenticated and on auth pages → dashboard (but NOT from landing)
-    if (token && pathname.startsWith('/auth/')) {
+    if (hasValidToken && pathname.startsWith('/auth/')) {
       return NextResponse.redirect(new URL('/account/dashboard', request.url));
     }
     return NextResponse.next();
   }
 
   // If not authenticated and accessing protected route → sign-in
-  if (!token) {
+  // Also redirect if token has invalid structure (garbage cookie)
+  if (!hasValidToken) {
+    // Clear the invalid cookie to prevent redirect loops
+    if (token && !isValidJwtStructure) {
+      const response = NextResponse.redirect(new URL('/auth/sign-in', request.url));
+      response.cookies.delete('melonity_token');
+      return response;
+    }
     return NextResponse.redirect(new URL('/auth/sign-in', request.url));
   }
 

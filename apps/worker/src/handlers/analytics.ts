@@ -64,29 +64,23 @@ export async function analyticsHandler(job: Job<any>): Promise<ProfileStats | { 
       select: { id: true, userId: true, secUid: true, nickname: true },
     });
 
-    // Re-use the same queue that this job came from to add child jobs
-    const { Queue } = await import('bullmq');
-    const queue = new Queue('analytics-cron', {
-      connection: {
-        host: new URL(process.env.REDIS_URL || 'redis://localhost:6379').hostname,
-        port: parseInt(new URL(process.env.REDIS_URL || 'redis://localhost:6379').port || '6379'),
-      },
-    });
+    // H-6 FIX: Use shared bullmq addJob instead of creating a new Queue each time
+    const { addJob } = await import('../lib/bullmq.js');
 
     let dispatched = 0;
     for (const acc of accounts) {
-      await queue.add(`analytics-${acc.id}`, {
+      await addJob('analytics-cron', {
         userId: acc.userId,
         accountId: acc.id,
         secUid: acc.secUid,
         nickname: acc.nickname,
       }, {
         delay: dispatched * 5_000, // 5s stagger to avoid rate-limits
+        jobId: `analytics-${acc.id}`,
       });
       dispatched++;
     }
 
-    await queue.close();
     console.log(`[Analytics] Cron fan-out: dispatched ${dispatched} jobs`);
     return { dispatched };
   }
