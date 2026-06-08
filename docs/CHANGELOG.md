@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.3.1] - 2026-06-08
+
+### Fixed (Core Automation Audit — 7 issues resolved)
+
+#### 🔴 CRITICAL
+- **CRITICAL-1**: `buildExtra()` in `workspace.ts` was broken for EDIT_PROFILE — frontend sent `{ nickname, bio, avatarUrl }` flat in config, but worker expected `data.changes.name` / `data.changes.bio`. Profile edits silently did nothing. Fixed: `buildExtra()` now maps each task type individually (EDIT_PROFILE, WARMUP, UPLOAD, default).
+- **CRITICAL-2**: Avatar upload was never implemented in `edit-profile.ts` — only `name` and `bio` were handled. Added full avatar flow: download from URL → temp file → click avatar area → upload via file input → confirm crop dialog. Supports both TikTok and YouTube Studio selectors.
+
+#### 🟡 HIGH
+- **HIGH-3**: Warmup hashtags from workspace UI were nested inside `config` object but worker expected `data.hashtags` at top level. Fixed: `buildExtra()` for WARMUP now flattens hashtags to root payload.
+- **HIGH-4**: Warmup was single-day only — user had to manually re-launch each day. Added self-rescheduling: after completing day N (when N < totalDays), warmup handler automatically schedules day N+1 via BullMQ with 20-28h randomized delay. Full 10-day warmup now runs automatically.
+- **HIGH-5**: Upload description from workspace UI was ignored — `buildExtra()` used `video.description` from DB record instead of `config.description` from user input. Fixed priority: `config.description → video.description → ""`.
+
+#### 🟢 MEDIUM
+- **MEDIUM-6**: Video uniquification used only `accountId` as FFmpeg transform seed — same account uploading different videos got identical transforms (crop, brightness, hue). Changed seed to `accountId:inputPath` for per-video unique transforms.
+- **MEDIUM-7**: Identified that YouTube warmup engagement is not yet implemented (TikTok-only). Documented as known limitation.
+
+### Added
+- **Cron Scheduler**: `apps/api/src/lib/cron-scheduler.ts` — registers BullMQ repeatable jobs on API startup:
+  - Analytics collection every 6 hours (`analytics-cron`)
+  - Shadowban detection every 12 hours (`shadowban-check`)
+- **Analytics Persistence**: `analyticsHandler` now writes fetched followers/views to `SocialAccount` table via `prisma.socialAccount.update()`. Previously data was only emitted via Socket.io without DB persistence — dashboard charts showed no data.
+- **Analytics Fan-Out**: Cron analytics job now fans out to individual per-account jobs with staggered delays (2-5s per account) to prevent API rate limits.
+- **Warmup Auto-Continuation**: Self-rescheduling mechanism in `warmup.ts` — after each day completes, next day is auto-queued with 20-28 hour randomized delay to avoid pattern detection.
+- **Avatar Upload**: Full avatar upload capability in `editProfileHandler` — downloads image from user-provided URL, clicks avatar edit area, uploads via file input, confirms crop dialog.
+
+### Changed
+- **`buildExtra()` rewrite** (`workspace.ts`): Now handles 4 task types individually instead of a single `UPLOAD` vs `default` split:
+  - `EDIT_PROFILE` → `{ taskId, changes: { name, bio, avatarUrl } }`
+  - `WARMUP` → `{ taskId, hashtags, warmupDays }` (flattened)
+  - `UPLOAD` → `{ taskId, videoId, videoPath, title, description, hashtags }` (config.description priority)
+  - Default (COOKIES) → `{ taskId, config }` (unchanged)
+- **Uniquifier seed** (`uniquifier.ts`): Changed from `createSeededRandom(accountId)` to `createSeededRandom(accountId:inputPath)`.
+- **API startup** (`index.ts`): Added `registerCronJobs()` call on server start to initialize repeatable BullMQ jobs.
+
 ## [0.3.0] - 2026-06-07
 
 ### Added

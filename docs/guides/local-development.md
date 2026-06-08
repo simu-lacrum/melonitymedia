@@ -172,8 +172,9 @@ npm run dev
    - Day 1-3: passive FYP scroll
    - Day 4-6: light engagement (likes, 1 comment)
    - Day 7-10: active engagement (likes, comments, saves, follows)
-3. Колонка **«Warmup Day»** покажет прогресс `X / 10`.
-4. Когда `warmupCompletedAt != null` → аккаунт допускается в очередь `upload`.
+3. **Авто-продолжение:** после завершения каждого дня, следующий планируется автоматически через 20-28ч. Не нужно запускать вручную каждый день.
+4. Колонка **«Warmup Day»** покажет прогресс `X / 10`.
+5. Когда `warmupCompletedAt != null` → аккаунт допускается в очередь `upload`.
 
 ### 6.5. Первый залив
 

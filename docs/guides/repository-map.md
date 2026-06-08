@@ -41,6 +41,7 @@ MelonityMedia/
 | `src/lib/prisma.ts` | Singleton Prisma Client |
 | `src/lib/redis.ts` | Singleton Redis/ioredis |
 | `src/lib/bullmq.ts` | Фабрика BullMQ очередей |
+| `src/lib/cron-scheduler.ts` | **Cron планировщик** — регистрирует BullMQ repeatable jobs при старте API: analytics-cron (6ч), shadowban-check (12ч) |
 | `prisma/schema.prisma` | Схема БД v3: User, SocialAccount (cookie-auth + fingerprint + pinnedProxyId), Proxy (type/carrier/ASN), Video, Task, Preset, AuditLog |
 | `src/lib/proxy-pin-rules.ts` | **Carrier Stability Rule** — валидация смены прокси: 4 кода нарушений (PIN_WINDOW_ACTIVE, CARRIER_CHANGE_BLOCKED, COUNTRY_CHANGE_BLOCKED, PROXY_NOT_LTE_FOR_TIKTOK) |
 
@@ -88,7 +89,7 @@ MelonityMedia/
 | `src/core/proxy/lte-rotation.ts` | LTE mobile proxy IP rotation с 15-min cooldown enforcement |
 | `src/core/proxy/carrier-validator.ts` | BGP path + ASN validation (детекция datacenter proxies: AWS, Hetzner, etc.) |
 | `src/core/tls/curl-impersonate-client.ts` | Chrome TLS fingerprint impersonation (браузерные JA3/JA4) |
-| `src/core/video/uniquifier.ts` | FFmpeg pipeline: pixel shift, hue offset, audio pitch — deterministic per account |
+| `src/core/video/uniquifier.ts` | FFmpeg pipeline: pixel shift, hue offset, audio pitch — deterministic per account+video (seed: `accountId:inputPath`) |
 
 ### Handlers — Обработчики задач
 
@@ -96,10 +97,10 @@ MelonityMedia/
 |------|----------|
 | `src/index.ts` | Точка входа: подключение **8 BullMQ очередей**, MASTER_KEY валидация |
 | `src/handlers/upload.ts` | Залив уникализированного видео через Patchright + ghost-cursor |
-| `src/handlers/warmup.ts` | **10-day progressive curriculum**: passive → light → active engagement |
+| `src/handlers/warmup.ts` | **10-day progressive curriculum**: passive → light → active engagement + **self-rescheduling** (авто-планировка следующего дня 20-28ч) |
 | `src/handlers/cookies.ts` | Export/refresh cookies через Patchright session |
-| `src/handlers/edit-profile.ts` | Редактирование профиля (аватар, био) через ghost-cursor |
-| `src/handlers/analytics.ts` | **curl-impersonate JSON API** (~200ms/профиль, без браузера) |
+| `src/handlers/edit-profile.ts` | Редактирование профиля: **аватар** (upload по URL), био, никнейм через ghost-cursor (TikTok + YouTube) |
+| `src/handlers/analytics.ts` | **curl-impersonate JSON API** (~200ms/профиль, без браузера) + **persist followers/views в БД** |
 | `src/handlers/cleanup.ts` | Очистка временных файлов после загрузки |
 | `src/handlers/shadowban-detector.ts` | Детекция шэдоубана: 3+ consecutive видео >=24ч после публикации с <100 views = SHADOWBAN_SUSPECTED + отмена pending uploads |
 | `src/handlers/index.ts` | Barrel export всех handlers |

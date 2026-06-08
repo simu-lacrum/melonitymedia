@@ -390,13 +390,20 @@ interface UploadJobPayload {
 interface WarmupJobPayload {
   accountId: string;
   warmupDays: number;       // 3-21, from account.warmupDays (default 10)
+  hashtags?: string[];      // user-provided hashtags for FYP niche targeting
 
-  // Worker internally calculates warmupDay from account.warmupStartedAt.
+  // Worker internally calculates warmupDay from account.lastWarmupDay + 1.
   // Phase boundaries scale proportionally to warmupDays:
   //   Phase 1 (passive): first 30% of total — scroll FYP, watch videos, no interactions
   //   Phase 2 (light):   next 30% — like 3-5 videos, leave 1 comment per session
   //   Phase 3 (active):  remaining 40% — like 5-10, comment 2-3, save 1, follow 1
   //   Day N+1+: Ready for upload
+  //
+  // SELF-RESCHEDULING (v3.3):
+  //   After completing day N (when N < warmupDays), handler auto-schedules
+  //   the next day's job via BullMQ with a randomized delay of 20-28 hours.
+  //   User only needs to start warmup once — all subsequent days are automatic.
+  //   On the final day: status → ALIVE, warmupCompletedAt → now().
 
   // All actions use:
   // - Patchright with per-account fingerprint
@@ -424,11 +431,22 @@ interface CookiesJobPayload {
 ```typescript
 interface EditProfileJobPayload {
   accountId: string;
-  avatarPath: string | null;
-  bannerPath: string | null;
-  bio: string | null;
+  changes: {
+    name?: string;        // new display name / nickname
+    bio?: string;         // new bio text
+    avatarUrl?: string;   // URL to download avatar from → upload to TikTok/YouTube
+  };
 
-  // Worker uses ghost-cursor for all interactions
+  // Worker flow (v3.3):
+  // 1. Loads account context (cookies, fingerprint, proxy)
+  // 2. Launches Patchright with per-account fingerprint
+  // 3. Navigates to profile settings page
+  // 4. If changes.name: clicks name field, clears, types new name (ghost-cursor + typing emulator)
+  // 5. If changes.bio: clicks bio field, clears, types new bio
+  // 6. If changes.avatarUrl: downloads image → temp file → clicks avatar area →
+  //    uploads via file input → confirms crop dialog
+  // 7. Clicks save button
+  // 8. Persists cookies via persistCookies()
 }
 ```
 
@@ -441,8 +459,16 @@ interface AnalyticsJobPayload {
   // Worker uses curl-impersonate (no browser!):
   // 1. Fetches /api/user/detail/?secUid=... with Chrome TLS fingerprint
   // 2. Parses JSON response (~200ms per profile)
-  // 3. Updates followers/views in DB
+  // 3. Persists followers/views to SocialAccount in DB via prisma.socialAccount.update()
+  //    (v3.3 fix: previously only emitted via Socket.io without DB persistence)
+  // 4. Emits Socket.io event for real-time dashboard updates
 }
+
+// Cron scheduling (registered by apps/api/src/lib/cron-scheduler.ts):
+//   analytics-cron: every 6 hours (BullMQ repeatable)
+//   shadowban-check: every 12 hours (BullMQ repeatable)
+// Fan-out: cron job iterates all user accounts and dispatches
+// individual per-account jobs with staggered delays (2-5s) to prevent rate limits.
 ```
 
 ### Queue: `cleanup`
