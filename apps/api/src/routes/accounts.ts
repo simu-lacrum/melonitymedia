@@ -450,8 +450,20 @@ router.post('/:id/retry-login', async (req: Request, res: Response) => {
       return;
     }
 
-    if (!['AUTH_NEEDED', 'EXPIRED_COOKIES', 'BANNED'].includes(account.status)) {
-      res.status(400).json({ error: 'Повторный вход доступен только для аккаунтов со статусом AUTH_NEEDED, EXPIRED_COOKIES или BANNED' });
+    const retryableStatuses = ['AUTH_NEEDED', 'EXPIRED_COOKIES'];
+    const isBanned = account.status === 'BANNED';
+    const forceRetry = req.query.force === 'true';
+
+    if (isBanned && !forceRetry) {
+      res.status(400).json({
+        error: 'Аккаунт заблокирован. Повторный вход маловероятно поможет. Добавьте ?force=true для принудительной попытки.',
+        status: account.status,
+      });
+      return;
+    }
+
+    if (!isBanned && !retryableStatuses.includes(account.status)) {
+      res.status(400).json({ error: 'Повторный вход доступен только для аккаунтов со статусом AUTH_NEEDED или EXPIRED_COOKIES' });
       return;
     }
 

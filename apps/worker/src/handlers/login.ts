@@ -194,8 +194,8 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
       throw new LoginError('INVALID_CREDENTIALS', 'No encrypted credentials found');
     }
 
-    const login = decryptField(Buffer.from(acc.loginEncrypted), Buffer.from(acc.loginIv!), Buffer.from(acc.loginAuthTag!));
-    const password = decryptField(Buffer.from(acc.passwordEncrypted), Buffer.from(acc.passwordIv!), Buffer.from(acc.passwordAuthTag!));
+    const login = decryptField(acc.loginEncrypted as Buffer, acc.loginIv as Buffer, acc.loginAuthTag as Buffer);
+    const password = decryptField(acc.passwordEncrypted as Buffer, acc.passwordIv as Buffer, acc.passwordAuthTag as Buffer);
 
     logger.info(`🔐 Вход: ${ctx.platform} → ${login.slice(0, 3)}***`);
     await job.updateProgress(10);

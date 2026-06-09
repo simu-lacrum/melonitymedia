@@ -60,6 +60,23 @@ export async function analyticsHandler(job: Job<any>): Promise<ProfileStats | { 
   // When triggered by a BullMQ repeatable (has _cron flag),
   // fan out individual analytics jobs for all ALIVE accounts.
   if (data._cron) {
+    // ── Safety net: unstick stale VERIFYING accounts ─────
+    // If a login dispatch silently failed (Redis blip, worker crash),
+    // accounts remain in VERIFYING forever. Reset any that have been
+    // stuck for more than 15 minutes so the user can see AUTH_NEEDED
+    // and retry manually.
+    const staleThreshold = new Date(Date.now() - 15 * 60 * 1000);
+    const stale = await prisma.socialAccount.updateMany({
+      where: {
+        status: 'VERIFYING',
+        updatedAt: { lt: staleThreshold },
+      },
+      data: { status: 'AUTH_NEEDED' },
+    });
+    if (stale.count > 0) {
+      console.log(`[Analytics] Safety net: reset ${stale.count} stale VERIFYING accounts to AUTH_NEEDED`);
+    }
+
     const accounts = await prisma.socialAccount.findMany({
       where: { status: 'ALIVE' },
       select: { id: true, userId: true, secUid: true, nickname: true },

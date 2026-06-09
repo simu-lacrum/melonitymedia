@@ -12,6 +12,7 @@
 import { Job } from 'bullmq';
 import { SocketLogger } from '../lib/socket-logger.js';
 import { emitWorkerError } from '../lib/error-classifier.js';
+import { prisma } from '../lib/prisma.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -24,6 +25,16 @@ interface CleanupJobData {
 export async function cleanupHandler(job: Job<CleanupJobData>): Promise<void> {
   const { userId, videoId, videoPath } = job.data;
   const logger = new SocketLogger(userId);
+
+  // Resolve accountId from video record (needed for structured error events)
+  let accountId: string = videoId; // fallback
+  try {
+    const video = await prisma.video.findUnique({
+      where: { id: videoId },
+      select: { accountId: true },
+    });
+    if (video?.accountId) accountId = video.accountId;
+  } catch { /* non-critical */ }
 
   try {
     logger.info(`🗑️ Очистка: удаление ${path.basename(videoPath)}...`);
@@ -54,7 +65,7 @@ export async function cleanupHandler(job: Job<CleanupJobData>): Promise<void> {
     await job.updateProgress(100);
 
   } catch (err: unknown) {
-    emitWorkerError(logger, videoId, 'cleanup', err);
+    emitWorkerError(logger, accountId, 'cleanup', err);
     // Don't re-throw: cleanup failures are non-critical
     // The file will be cleaned up by a periodic disk sweep
   } finally {

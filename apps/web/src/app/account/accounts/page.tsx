@@ -256,9 +256,13 @@ export default function AccountsPage() {
     }
   }
 
-  const handleRetryLogin = async (id: string) => {
+  const handleRetryLogin = async (id: string, status?: string) => {
     try {
-      await api.post(`/api/accounts/${id}/retry-login`)
+      const forceParam = status === 'BANNED' ? '?force=true' : ''
+      if (status === 'BANNED') {
+        toast.warning('Аккаунт заблокирован — повторный вход маловероятно поможет')
+      }
+      await api.post(`/api/accounts/${id}/retry-login${forceParam}`)
       toast.success("Повторная верификация запущена")
       setVerifyErrors(prev => { const n = { ...prev }; delete n[id]; return n })
       fetchAccounts()
@@ -447,7 +451,7 @@ export default function AccountsPage() {
                                 <RefreshCw className="size-4 mr-2" />Обновить куки
                               </DropdownMenuItem>
                               {["AUTH_NEEDED", "EXPIRED_COOKIES", "BANNED"].includes(acc.status) && (
-                                <DropdownMenuItem onClick={() => handleRetryLogin(acc.id)}>
+                                <DropdownMenuItem onClick={() => handleRetryLogin(acc.id, acc.status)}>
                                   <RotateCcw className="size-4 mr-2" />Повторить вход
                                 </DropdownMenuItem>
                               )}
