@@ -5,6 +5,9 @@
 // Why rooms? Each user should only see logs from their own
 // worker jobs, not from other users. Rooms enforce this:
 // user joins room "user:{userId}", worker emits to that room.
+//
+// Login verification events (login:success, login:failed,
+// login:2fa_required) are relayed from worker → frontend.
 // ─────────────────────────────────────────────────────────────
 
 import { Server as HttpServer } from 'http';
@@ -57,6 +60,18 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
     // Each user joins their own room for isolated log streaming
     socket.join(`user:${userId}`);
     console.log(`[Socket] User ${userId} connected to /logs`);
+
+    // ── Login verification event relay ────────────────────
+    // Worker emits these events to the /logs namespace.
+    // We relay them to the specific user's room.
+    const loginEvents = ['login:success', 'login:failed', 'login:2fa_required'] as const;
+    for (const event of loginEvents) {
+      socket.on(event, (data: any) => {
+        // Broadcast to all sockets in this user's room
+        // (covers multiple tabs/devices)
+        logsNamespace.to(`user:${userId}`).emit(event, data);
+      });
+    }
 
     socket.on('disconnect', () => {
       console.log(`[Socket] User ${userId} disconnected from /logs`);

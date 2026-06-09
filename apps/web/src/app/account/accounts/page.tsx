@@ -16,9 +16,10 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Search, Plus, Trash2, RefreshCw, MoreVertical, Loader2, Shield } from "lucide-react"
+import { Search, Plus, Trash2, RefreshCw, MoreVertical, Loader2, Shield, KeyRound, RotateCcw, Clock, AlertCircle } from "lucide-react"
 import { api, ApiError } from "@/lib/api"
 import { toast } from "sonner"
+import { io, Socket } from "socket.io-client"
 
 interface SocialAccount {
   id: string
@@ -65,6 +66,19 @@ export default function AccountsPage() {
   const [proxyBindValue, setProxyBindValue] = React.useState("")
   const [bindingProxy, setBindingProxy] = React.useState(false)
 
+  // 2FA dialog state
+  const [twoFAOpen, setTwoFAOpen] = React.useState(false)
+  const [twoFAAccountId, setTwoFAAccountId] = React.useState("")
+  const [twoFACode, setTwoFACode] = React.useState("")
+  const [twoFAHint, setTwoFAHint] = React.useState("")
+  const [twoFAType, setTwoFAType] = React.useState("")
+  const [twoFALoading, setTwoFALoading] = React.useState(false)
+  const [twoFATimeout, setTwoFATimeout] = React.useState(600) // seconds
+  const twoFATimerRef = React.useRef<NodeJS.Timeout | null>(null)
+
+  // Verification error display
+  const [verifyErrors, setVerifyErrors] = React.useState<Record<string, string>>({})
+
   const fetchAccounts = React.useCallback(async () => {
     try {
       setLoading(true)
@@ -88,6 +102,58 @@ export default function AccountsPage() {
         .catch(() => {})
     }
   }, [importOpen, proxyBindOpen])
+
+  // Socket.io connection for login verification events
+  React.useEffect(() => {
+    const socket: Socket = io(
+      `${process.env.NEXT_PUBLIC_API_URL || ""}/logs`,
+      { withCredentials: true, transports: ["websocket", "polling"] }
+    )
+
+    socket.on("login:success", (data: { accountId: string; message: string; username?: string }) => {
+      toast.success(data.message || "Аккаунт верифицирован")
+      setVerifyErrors(prev => { const n = { ...prev }; delete n[data.accountId]; return n })
+      fetchAccounts()
+    })
+
+    socket.on("login:failed", (data: { accountId: string; code: string; message: string }) => {
+      toast.error(data.message || "Ошибка верификации")
+      setVerifyErrors(prev => ({ ...prev, [data.accountId]: data.message }))
+      fetchAccounts()
+    })
+
+    socket.on("login:2fa_required", (data: { accountId: string; type: string; hint: string; timeoutSeconds: number }) => {
+      setTwoFAAccountId(data.accountId)
+      setTwoFAHint(data.hint)
+      setTwoFAType(data.type)
+      setTwoFATimeout(data.timeoutSeconds || 600)
+      setTwoFACode("")
+      setTwoFAOpen(true)
+      toast.info(data.hint || "Требуется код подтверждения")
+    })
+
+    return () => {
+      socket.disconnect()
+    }
+  }, [fetchAccounts])
+
+  // 2FA countdown timer
+  React.useEffect(() => {
+    if (twoFAOpen && twoFATimeout > 0) {
+      twoFATimerRef.current = setInterval(() => {
+        setTwoFATimeout(prev => {
+          if (prev <= 1) {
+            clearInterval(twoFATimerRef.current!)
+            setTwoFAOpen(false)
+            toast.error("Время ожидания кода истекло")
+            return 0
+          }
+          return prev - 1
+        })
+      }, 1000)
+      return () => { if (twoFATimerRef.current) clearInterval(twoFATimerRef.current) }
+    }
+  }, [twoFAOpen])
 
   const filtered = accounts
     .filter(a => platformFilter === "ALL" || a.platform === platformFilter)
@@ -119,13 +185,13 @@ export default function AccountsPage() {
     if (!importText.trim()) return
     try {
       setImportLoading(true)
-      await api.post("/api/accounts/import", {
+      const result = await api.post<{ created: number; failed: number; message: string }>("/api/accounts/import", {
         raw: importText,
         platform: importPlatform,
         proxyId: importProxyId && importProxyId !== "none" ? importProxyId : undefined,
         method: importMethod,
       })
-      toast.success("Аккаунты импортированы")
+      toast.success(result.message || `${result.created} аккаунтов отправлены на верификацию`)
       setImportOpen(false)
       setImportText("")
       setImportPlatform("TIKTOK")
@@ -190,6 +256,32 @@ export default function AccountsPage() {
     }
   }
 
+  const handleRetryLogin = async (id: string) => {
+    try {
+      await api.post(`/api/accounts/${id}/retry-login`)
+      toast.success("Повторная верификация запущена")
+      setVerifyErrors(prev => { const n = { ...prev }; delete n[id]; return n })
+      fetchAccounts()
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Ошибка повторного входа")
+    }
+  }
+
+  const handleSubmit2FA = async () => {
+    if (!twoFACode.trim()) return
+    setTwoFALoading(true)
+    try {
+      await api.post(`/api/accounts/${twoFAAccountId}/verify-code`, { code: twoFACode.trim() })
+      toast.success("Код отправлен, ожидаем подтверждение...")
+      setTwoFAOpen(false)
+      if (twoFATimerRef.current) clearInterval(twoFATimerRef.current)
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Ошибка отправки кода")
+    } finally {
+      setTwoFALoading(false)
+    }
+  }
+
   const renderStatus = (status: string) => {
     const map: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
       ALIVE: { label: "Живой", variant: "default" },
@@ -199,8 +291,17 @@ export default function AccountsPage() {
       SHADOWBAN_SUSPECTED: { label: "Теневой бан?", variant: "outline" },
       WARMING_UP: { label: "Прогрев", variant: "secondary" },
       PAUSED: { label: "Пауза", variant: "secondary" },
+      VERIFYING: { label: "Проверка...", variant: "secondary" },
     }
     const cfg = map[status] || { label: status, variant: "secondary" as const }
+    if (status === "VERIFYING") {
+      return (
+        <Badge variant={cfg.variant} className="animate-pulse gap-1.5">
+          <Loader2 className="size-3 animate-spin" />
+          {cfg.label}
+        </Badge>
+      )
+    }
     return <Badge variant={cfg.variant}>{cfg.label}</Badge>
   }
 
@@ -345,6 +446,11 @@ export default function AccountsPage() {
                               <DropdownMenuItem onClick={() => handleRefreshCookies(acc.id)}>
                                 <RefreshCw className="size-4 mr-2" />Обновить куки
                               </DropdownMenuItem>
+                              {["AUTH_NEEDED", "EXPIRED_COOKIES", "BANNED"].includes(acc.status) && (
+                                <DropdownMenuItem onClick={() => handleRetryLogin(acc.id)}>
+                                  <RotateCcw className="size-4 mr-2" />Повторить вход
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuItem className="text-destructive" onClick={() => handleDeleteSingle(acc.id)}>
                                 <Trash2 className="size-4 mr-2" />Удалить
                               </DropdownMenuItem>
@@ -497,6 +603,64 @@ export default function AccountsPage() {
             <Button onClick={handleConfirmBindProxy} disabled={bindingProxy} className="active:scale-[0.97] transition-transform">
               {bindingProxy ? <Loader2 className="size-4 mr-2 animate-spin" /> : null}
               Привязать
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 2FA Verification Dialog */}
+      <Dialog open={twoFAOpen} onOpenChange={(open) => {
+        if (!open && twoFATimerRef.current) clearInterval(twoFATimerRef.current)
+        setTwoFAOpen(open)
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="size-5" />
+              Код подтверждения
+            </DialogTitle>
+            <DialogDescription>
+              {twoFAHint || "Платформа запросила код подтверждения"}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-4">
+            {/* Timer */}
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Clock className="size-4" />
+              <span>Осталось: {Math.floor(twoFATimeout / 60)}:{(twoFATimeout % 60).toString().padStart(2, "0")}</span>
+              {twoFATimeout < 60 && (
+                <Badge variant="destructive" className="text-xs">Мало времени!</Badge>
+              )}
+            </div>
+
+            {/* Code input */}
+            <div className="flex flex-col gap-2">
+              <Label>Введите код {twoFAType === "email" ? "из email" : twoFAType === "sms" ? "из SMS" : twoFAType === "authenticator" ? "из приложения" : "подтверждения"}</Label>
+              <Input
+                placeholder="123456"
+                value={twoFACode}
+                onChange={(e) => setTwoFACode(e.target.value.replace(/[^0-9]/g, "").slice(0, 8))}
+                className="text-center text-2xl font-mono tracking-[0.3em] h-14"
+                autoFocus
+                onKeyDown={(e) => { if (e.key === "Enter") handleSubmit2FA() }}
+                disabled={twoFALoading}
+              />
+            </div>
+
+            <div className="flex items-start gap-2 text-xs text-muted-foreground bg-accent/50 p-3 rounded-lg">
+              <AlertCircle className="size-4 mt-0.5 shrink-0" />
+              <span>Код будет отправлен воркеру, который введёт его в браузере. После отправки дождитесь результата.</span>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setTwoFAOpen(false)
+              if (twoFATimerRef.current) clearInterval(twoFATimerRef.current)
+            }} disabled={twoFALoading}>Отмена</Button>
+            <Button onClick={handleSubmit2FA} disabled={twoFALoading || !twoFACode.trim()} className="active:scale-[0.97] transition-transform">
+              {twoFALoading ? <><Loader2 className="size-4 mr-2 animate-spin" />Отправка...</> : "Подтвердить"}
             </Button>
           </DialogFooter>
         </DialogContent>

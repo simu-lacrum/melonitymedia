@@ -130,6 +130,7 @@ enum AccountStatus {
   EXPIRED_COOKIES
   SHADOWBAN_SUSPECTED
   WARMING_UP
+  VERIFYING
 }
 
 // ── Proxy ───────────────────────────────────────────────────

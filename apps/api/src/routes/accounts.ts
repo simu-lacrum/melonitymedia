@@ -22,6 +22,7 @@ import { prisma } from '../lib/prisma.js';
 import { authMiddleware } from '../middleware/auth.js';
 import crypto from 'crypto';
 import { generateFingerprint, generateMobileFingerprint } from '../lib/fingerprint.js';
+import { publishVerificationCode } from '../lib/redis-pubsub.js';
 import { dispatchAccountJob } from '../lib/job-dispatch.js';
 
 const router = Router();
@@ -298,13 +299,18 @@ router.post('/import', async (req: Request, res: Response) => {
         // BUG-L9 fix: Use full UUID (no truncation) to preserve full entropy
         // Prisma @default(cuid()) handles auto-created accounts; imported accounts get UUID format
         const accountId = crypto.randomUUID().replace(/-/g, '');
+        // All imported accounts start as VERIFYING — they become ALIVE
+        // only after the worker successfully validates them.
         const data_: any = {
           id: accountId,
           userId: req.user!.id,
           platform: platform as 'TIKTOK' | 'YOUTUBE',
           username: entry.login ?? null,
-          status: 'ALIVE',
+          status: 'VERIFYING',
         };
+
+        // Track import mode for login job dispatch
+        let importMode: 'credentials' | 'cookies' = 'credentials';
 
         // Generate fingerprint (default desktop — user can switch to mobile after)
         const fingerprint = generateFingerprint(accountId);
@@ -312,6 +318,7 @@ router.post('/import', async (req: Request, res: Response) => {
 
         // Encrypt cookies if present
         if (entry.cookies) {
+          importMode = 'cookies';
           // Validate cookies format (JSON or Netscape)
           let cookieJson: string;
           try {
@@ -342,7 +349,8 @@ router.post('/import', async (req: Request, res: Response) => {
           data_.cookiesAuthTag = authTag as any;
           data_.cookiesUpdatedAt = new Date();
         } else if (entry.login && entry.password) {
-          // login:pass only — store encrypted credentials, status=AUTH_NEEDED until login job succeeds
+          importMode = 'credentials';
+          // login:pass only — store encrypted credentials
           const loginEnc = encryptString(entry.login);
           const passEnc = encryptString(entry.password);
           data_.loginEncrypted = loginEnc.encrypted as any;
@@ -351,12 +359,22 @@ router.post('/import', async (req: Request, res: Response) => {
           data_.passwordEncrypted = passEnc.encrypted as any;
           data_.passwordIv = passEnc.iv as any;
           data_.passwordAuthTag = passEnc.authTag as any;
-          data_.status = 'AUTH_NEEDED';
         } else {
           throw new Error('Запись не содержит ни cookies, ни login:password');
         }
 
         await prisma.socialAccount.create({ data: data_ });
+
+        // Dispatch login verification job to worker
+        // This runs in background — frontend tracks via Socket.io
+        dispatchAccountJob({
+          queueName: 'login',
+          userId: req.user!.id,
+          accountId,
+          extra: { mode: importMode },
+        }).catch(err => {
+          console.error(`[Accounts] Login dispatch failed for ${accountId}:`, err);
+        });
         created.push(accountId);
       } catch (err: any) {
         failed.push({ line: i + 1, reason: err.message ?? String(err) });
@@ -379,15 +397,97 @@ router.post('/import', async (req: Request, res: Response) => {
       }
     }
 
-    res.status(201).json({
+    res.status(202).json({
       created: created.length,
       failed: failed.length,
       failedDetails: failed,
       ids: created,
+      message: `${created.length} аккаунтов отправлены на верификацию. Следите за статусом в реальном времени.`,
     });
   } catch (err) {
     console.error('[Accounts] Bulk import error:', err);
     res.status(500).json({ error: 'Ошибка при импорте аккаунтов' });
+  }
+});
+
+// ── POST /:id/verify-code — submit 2FA code from user ────────
+// IMPORTANT: Defined before /:id PATCH/DELETE to avoid route shadowing
+router.post('/:id/verify-code', async (req: Request, res: Response) => {
+  try {
+    const { code } = req.body;
+    if (!code || typeof code !== 'string' || code.trim().length === 0) {
+      res.status(400).json({ error: 'Код подтверждения обязателен' });
+      return;
+    }
+
+    // Verify account belongs to user
+    const account = await prisma.socialAccount.findFirst({
+      where: { id: String(req.params.id), userId: req.user!.id },
+    });
+    if (!account) {
+      res.status(404).json({ error: 'Аккаунт не найден' });
+      return;
+    }
+
+    // Publish code to Redis for the worker to pick up
+    await publishVerificationCode(String(req.params.id), code.trim());
+
+    res.json({ success: true, message: 'Код отправлен воркеру' });
+  } catch (err) {
+    console.error('[Accounts] Verify code error:', err);
+    res.status(500).json({ error: 'Ошибка при отправке кода' });
+  }
+});
+
+// ── POST /:id/retry-login — retry login verification ─────────
+router.post('/:id/retry-login', async (req: Request, res: Response) => {
+  try {
+    const account = await prisma.socialAccount.findFirst({
+      where: { id: String(req.params.id), userId: req.user!.id },
+    });
+    if (!account) {
+      res.status(404).json({ error: 'Аккаунт не найден' });
+      return;
+    }
+
+    if (!['AUTH_NEEDED', 'EXPIRED_COOKIES', 'BANNED'].includes(account.status)) {
+      res.status(400).json({ error: 'Повторный вход доступен только для аккаунтов со статусом AUTH_NEEDED, EXPIRED_COOKIES или BANNED' });
+      return;
+    }
+
+    // Determine mode: if has encrypted login → credentials, else → cookies
+    const hasCredentials = !!account.loginEncrypted;
+    const hasCookies = !!account.cookiesEncrypted;
+    const mode = hasCredentials ? 'credentials' : hasCookies ? 'cookies' : null;
+
+    if (!mode) {
+      res.status(400).json({ error: 'Аккаунт не содержит ни логин:пароль, ни cookies для повторного входа' });
+      return;
+    }
+
+    // Set status back to VERIFYING
+    await prisma.socialAccount.update({
+      where: { id: account.id },
+      data: { status: 'VERIFYING' },
+    });
+
+    // Dispatch login job
+    const result = await dispatchAccountJob({
+      queueName: 'login',
+      userId: req.user!.id,
+      accountId: account.id,
+      extra: { mode },
+    });
+
+    if (result.error) {
+      res.status(400).json({ error: `Не удалось запустить верификацию: ${result.error}` });
+      return;
+    }
+
+    res.json({ success: true, jobId: result.jobId, message: 'Повторная верификация запущена' });
+  } catch (err) {
+    console.error('[Accounts] Retry login error:', err);
+    res.status(500).json({ error: 'Ошибка при повторном входе' });
   }
 });
 
@@ -460,7 +560,7 @@ const bulkUpdateSchema = z.object({
     avatarUrl: z.string().optional(),
     bannerUrl: z.string().optional(),
     bio: z.string().optional(),
-    status: z.enum(['ALIVE', 'AUTH_NEEDED', 'BANNED', 'EXPIRED_COOKIES', 'SHADOWBAN_SUSPECTED', 'WARMING_UP', 'PAUSED']).optional(),
+    status: z.enum(['ALIVE', 'AUTH_NEEDED', 'BANNED', 'EXPIRED_COOKIES', 'SHADOWBAN_SUSPECTED', 'WARMING_UP', 'PAUSED', 'VERIFYING']).optional(),
   }),
 });
 
@@ -616,7 +716,7 @@ const patchAccountSchema = z.object({
   pinnedProxyId: z.string().nullable().optional(),
   status: z.enum([
     'ALIVE', 'PAUSED', 'BANNED', 'EXPIRED_COOKIES',
-    'WARMING_UP', 'SHADOWBAN_SUSPECTED', 'AUTH_NEEDED',
+    'WARMING_UP', 'SHADOWBAN_SUSPECTED', 'AUTH_NEEDED', 'VERIFYING',
   ]).optional(),
   secUid: z.string().optional(),
   warmupDays: z.number().int().min(3).max(21).optional(),

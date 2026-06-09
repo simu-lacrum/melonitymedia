@@ -84,11 +84,11 @@ export async function dispatchAccountJob(args: {
     }
   }
 
-  if (!account.pinnedProxy) {
+  if (!account.pinnedProxy && args.queueName !== 'login') {
     return { accountId: args.accountId, jobId: null, error: "NO_PROXY" };
   }
 
-  if (!account.fingerprint) {
+  if (!account.fingerprint && args.queueName !== 'login') {
     return { accountId: args.accountId, jobId: null, error: "NO_FINGERPRINT" };
   }
 
