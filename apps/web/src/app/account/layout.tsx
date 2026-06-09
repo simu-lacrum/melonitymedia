@@ -11,6 +11,7 @@ import Link from "next/link"
 import { motion } from "framer-motion"
 import { LogOut, Home, Users, Shield, Server, Settings, Loader2 } from "lucide-react"
 import { toast } from "sonner"
+import { io, Socket } from "socket.io-client"
 
 export default function AccountLayout({
   children,
@@ -32,6 +33,60 @@ export default function AccountLayout({
         router.push("/auth/sign-in")
       })
   }, [router])
+
+  // ── Global worker error listener ──────────────────────────
+  // Listens for structured error events from ALL worker handlers
+  // (upload, warmup, login, edit-profile, cookies, analytics, etc.)
+  React.useEffect(() => {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"
+    const origin = apiUrl.replace(/\/api\/?$/, "") || apiUrl
+    const socket: Socket = io(`${origin}/logs`, {
+      withCredentials: true,
+      transports: ["websocket"],
+    })
+
+    interface WorkerErrorEvent {
+      accountId: string
+      handler: string
+      code: string
+      title: string
+      message: string
+      advice: string
+      detail?: string
+      timestamp: string
+    }
+
+    const handlerLabels: Record<string, string> = {
+      upload: "Загрузка видео",
+      warmup: "Прогрев",
+      login: "Вход в аккаунт",
+      "edit-profile": "Редактирование профиля",
+      cookies: "Обновление cookies",
+      analytics: "Сбор аналитики",
+      shadowban: "Проверка shadowban",
+      cleanup: "Очистка файлов",
+    }
+
+    socket.on("worker:error", (data: WorkerErrorEvent) => {
+      const label = handlerLabels[data.handler] || data.handler
+      toast.error(data.title, {
+        description: `${data.message}\n\n💡 ${data.advice}`,
+        duration: 12000,
+        action: {
+          label: "Подробнее",
+          onClick: () => {
+            toast.info(`[${label}] ${data.detail || data.message}`, {
+              duration: 20000,
+            })
+          },
+        },
+      })
+    })
+
+    return () => {
+      socket.disconnect()
+    }
+  }, [])
 
   const handleLogout = async () => {
     try {

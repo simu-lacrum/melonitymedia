@@ -14,6 +14,7 @@ import { Job } from 'bullmq';
 import { launchStealthContext, closeBrowser } from '../core/browser/patchright-launcher.js';
 import { persistCookies, type BrowserCookie } from '../core/auth/cookie-store.js';
 import { SocketLogger } from '../lib/socket-logger.js';
+import { emitWorkerError } from '../lib/error-classifier.js';
 import { loadAccountContext } from '../lib/account-context.js';
 import { prisma } from '../lib/prisma.js';
 import type { Browser } from 'patchright';
@@ -96,8 +97,7 @@ export async function cookiesHandler(job: Job<CookiesJobData>): Promise<string> 
     return JSON.stringify({ count: browserCookies.length, updatedAt: new Date().toISOString() });
 
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    logger.error(`❌ Ошибка обновления cookies: ${message}`);
+    emitWorkerError(logger, data.accountId, 'cookies', err);
     throw err;
   } finally {
     await closeBrowser(browser);

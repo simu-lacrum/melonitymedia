@@ -21,6 +21,7 @@ import { uniquifyVideo, cleanupUniquifiedVideo } from '../core/video/uniquifier.
 import { createPageCursor, humanClick, humanScroll } from '../core/humanity/biomouse.js';
 import { humanType } from '../core/humanity/typing-emulator.js';
 import { SocketLogger } from '../lib/socket-logger.js';
+import { emitWorkerError } from '../lib/error-classifier.js';
 import { loadAccountContext } from '../lib/account-context.js';
 import { prisma } from '../lib/prisma.js';
 import type { Browser } from 'patchright';
@@ -198,8 +199,7 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
 
   } catch (err: unknown) {
     await prisma.video.update({ where: { id: data.videoId }, data: { status: 'FAILED' } }).catch(() => {});
-    const message = err instanceof Error ? err.message : String(err);
-    logger.error(`❌ Ошибка загрузки: ${message}`);
+    emitWorkerError(logger, data.accountId, 'upload', err);
     throw err;
   } finally {
     // Save updated session cookies BEFORE closing browser (M-1 fix)

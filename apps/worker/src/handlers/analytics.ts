@@ -16,6 +16,7 @@ import { Job } from 'bullmq';
 import { impersonatedFetch } from '../core/tls/curl-impersonate-client.js';
 import { loadCookiesFromEncryptedStore, type BrowserCookie } from '../core/auth/cookie-store.js';
 import { SocketLogger } from '../lib/socket-logger.js';
+import { emitWorkerError } from '../lib/error-classifier.js';
 import { loadAccountContext } from '../lib/account-context.js';
 import { prisma } from '../lib/prisma.js';
 import type { AccountFingerprint } from '../core/browser/fingerprint-manager.js';
@@ -121,8 +122,7 @@ export async function analyticsHandler(job: Job<any>): Promise<ProfileStats | { 
     return stats;
 
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    logger.error(`❌ Ошибка аналитики: ${message}`);
+    emitWorkerError(logger, data.accountId, 'analytics', err);
     throw err;
   } finally {
     logger.disconnect();

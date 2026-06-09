@@ -20,6 +20,7 @@ import { persistCookies } from '../core/auth/cookie-store.js';
 import { createPageCursor, humanClick, humanScroll, humanIdleMove } from '../core/humanity/biomouse.js';
 import { humanType, humanPressEnter } from '../core/humanity/typing-emulator.js';
 import { SocketLogger } from '../lib/socket-logger.js';
+import { emitWorkerError } from '../lib/error-classifier.js';
 import { prisma } from '../lib/prisma.js';
 import { loadAccountContext } from '../lib/account-context.js';
 import type { Browser, Page } from 'patchright';
@@ -174,8 +175,7 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     await job.updateProgress(100);
 
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    logger.error(`❌ Ошибка прогрева: ${message}`);
+    emitWorkerError(logger, data.accountId, 'warmup', err);
     throw err;
   } finally {
     // Persist cookies to BOTH disk AND DB before closing browser (BUG-C5 fix)

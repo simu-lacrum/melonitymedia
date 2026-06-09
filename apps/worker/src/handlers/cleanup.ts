@@ -11,6 +11,7 @@
 
 import { Job } from 'bullmq';
 import { SocketLogger } from '../lib/socket-logger.js';
+import { emitWorkerError } from '../lib/error-classifier.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -53,8 +54,7 @@ export async function cleanupHandler(job: Job<CleanupJobData>): Promise<void> {
     await job.updateProgress(100);
 
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    logger.error(`❌ Ошибка очистки: ${message}`);
+    emitWorkerError(logger, videoId, 'cleanup', err);
     // Don't re-throw: cleanup failures are non-critical
     // The file will be cleaned up by a periodic disk sweep
   } finally {

@@ -67,11 +67,16 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
     const loginEvents = ['login:success', 'login:failed', 'login:2fa_required'] as const;
     for (const event of loginEvents) {
       socket.on(event, (data: any) => {
-        // Broadcast to all sockets in this user's room
-        // (covers multiple tabs/devices)
         logsNamespace.to(`user:${userId}`).emit(event, data);
       });
     }
+
+    // ── Worker error event relay ─────────────────────────
+    // Structured errors from ALL worker handlers (upload, warmup, etc.)
+    // with code, title, message, and actionable advice.
+    socket.on('worker:error', (data: any) => {
+      logsNamespace.to(`user:${userId}`).emit('worker:error', data);
+    });
 
     socket.on('disconnect', () => {
       console.log(`[Socket] User ${userId} disconnected from /logs`);

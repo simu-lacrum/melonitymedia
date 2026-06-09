@@ -18,6 +18,7 @@
 import { Job } from 'bullmq';
 import { prisma } from '../lib/prisma.js';
 import { SocketLogger } from '../lib/socket-logger.js';
+import { emitWorkerError } from '../lib/error-classifier.js';
 
 // ── Constants ───────────────────────────────────────────────
 
@@ -81,8 +82,7 @@ export async function shadowbanDetectorHandler(
     };
 
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    logger.error(`❌ Ошибка проверки shadowban: ${message}`);
+    emitWorkerError(logger, accountId, 'shadowban', err);
     throw err;
   } finally {
     logger.disconnect();

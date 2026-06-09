@@ -14,6 +14,7 @@ import { createPageCursor, humanClick } from '../core/humanity/biomouse.js';
 import { humanType } from '../core/humanity/typing-emulator.js';
 import { persistCookies, type BrowserCookie } from '../core/auth/cookie-store.js';
 import { SocketLogger } from '../lib/socket-logger.js';
+import { emitWorkerError } from '../lib/error-classifier.js';
 import { loadAccountContext } from '../lib/account-context.js';
 import type { Browser } from 'patchright';
 
@@ -177,8 +178,7 @@ export async function editProfileHandler(job: Job<EditProfileJobData>): Promise<
     await job.updateProgress(100);
 
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    logger.error(`❌ Ошибка редактирования: ${message}`);
+    emitWorkerError(logger, data.accountId, 'edit-profile', err);
     throw err;
   } finally {
     // Persist cookies to BOTH disk AND DB (BUG-H2 fix)
