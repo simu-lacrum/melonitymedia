@@ -106,7 +106,7 @@ export default function AccountsPage() {
   const handleDelete = async () => {
     if (!confirm(`Удалить ${selectedIds.length} аккаунтов?`)) return
     try {
-      await api.delete("/api/accounts/bulk", { ids: selectedIds })
+      await api.post("/api/accounts/bulk-delete", { ids: selectedIds })
       toast.success(`Удалено ${selectedIds.length} аккаунтов`)
       setSelectedIds([])
       fetchAccounts()
@@ -142,7 +142,7 @@ export default function AccountsPage() {
   const handleDeleteSingle = async (id: string) => {
     if (!confirm("Удалить аккаунт?")) return
     try {
-      await api.delete("/api/accounts/bulk", { ids: [id] })
+      await api.post("/api/accounts/bulk-delete", { ids: [id] })
       toast.success("Аккаунт удалён")
       fetchAccounts()
     } catch {

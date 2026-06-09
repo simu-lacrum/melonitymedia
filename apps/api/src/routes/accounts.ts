@@ -451,6 +451,160 @@ router.post('/:id/cookies', async (req: Request, res: Response) => {
   }
 });
 
+// ── PATCH /bulk — mass update accounts ──────────────────────
+// IMPORTANT: Must be defined BEFORE /:id to prevent Express from
+// matching 'bulk' as the :id parameter.
+const bulkUpdateSchema = z.object({
+  accountIds: z.array(z.string()).min(1),
+  update: z.object({
+    avatarUrl: z.string().optional(),
+    bannerUrl: z.string().optional(),
+    bio: z.string().optional(),
+    status: z.enum(['ALIVE', 'AUTH_NEEDED', 'BANNED', 'EXPIRED_COOKIES', 'SHADOWBAN_SUSPECTED', 'WARMING_UP', 'PAUSED']).optional(),
+  }),
+});
+
+router.patch('/bulk', async (req: Request, res: Response) => {
+  try {
+    const parsed = bulkUpdateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.errors[0].message });
+      return;
+    }
+
+    const { accountIds, update } = parsed.data;
+
+    const result = await prisma.socialAccount.updateMany({
+      where: {
+        id: { in: accountIds },
+        userId: req.user!.id,
+      },
+      data: update,
+    });
+
+    res.json({ updated: result.count });
+  } catch (err) {
+    console.error('[Accounts] Bulk update error:', err);
+    res.status(500).json({ error: 'Ошибка при массовом обновлении' });
+  }
+});
+
+// ── PATCH /bulk/proxy — dedicated bulk proxy binding ─────────
+const bulkProxySchema = z.object({
+  accountIds: z.array(z.string()).min(1, 'Выберите хотя бы один аккаунт'),
+  proxyId: z.string().min(1, 'Выберите прокси'),
+});
+
+router.patch('/bulk/proxy', async (req: Request, res: Response) => {
+  try {
+    const parsed = bulkProxySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.errors[0].message });
+      return;
+    }
+
+    const { accountIds, proxyId } = parsed.data;
+    const force = req.query.force === "true" && req.user!.role === "ADMIN";
+
+    const newProxy = await prisma.proxy.findUniqueOrThrow({
+      where: { id: proxyId, userId: req.user!.id },
+      select: { id: true, carrier: true, country: true, type: true },
+    });
+
+    type Plan = {
+      accountId: string;
+      violation: ReturnType<typeof validatePinChange>;
+      oldProxyId: string | null;
+    };
+    const plans: Plan[] = [];
+
+    for (const accountId of accountIds) {
+      const account = await prisma.socialAccount.findUniqueOrThrow({
+        where: { id: accountId, userId: req.user!.id },
+        select: {
+          id: true,
+          platform: true,
+          pinnedProxyId: true,
+          proxyPinnedAt: true,
+          createdAt: true,
+        },
+      });
+
+      const oldProxy = account.pinnedProxyId
+        ? await prisma.proxy.findUnique({
+            where: { id: account.pinnedProxyId },
+            select: { id: true, carrier: true, country: true, type: true },
+          })
+        : null;
+
+      const violation = validatePinChange({ account, oldProxy, newProxy });
+      plans.push({ accountId, violation, oldProxyId: oldProxy?.id ?? null });
+    }
+
+    const blockers = plans.filter(p => p.violation);
+    if (blockers.length > 0 && !force) {
+      res.status(409).json({
+        success: false,
+        code: blockers[0].violation!.code,
+        error: `${blockers.length} аккаунт(ов) заблокированы Carrier Stability Rule. ` +
+               `Используйте force=true (только ADMIN) для override.`,
+        blockedAccountIds: blockers.map(b => b.accountId),
+        violations: blockers.map(b => ({
+          accountId: b.accountId,
+          code: b.violation!.code,
+          message: b.violation!.message,
+          details: {
+            daysRemaining: b.violation!.daysRemaining,
+            oldCarrier: b.violation!.oldCarrier,
+            newCarrier: b.violation!.newCarrier,
+            oldCountry: b.violation!.oldCountry,
+            newCountry: b.violation!.newCountry,
+          },
+        })),
+      });
+      return;
+    }
+
+    await prisma.$transaction(async (tx: any) => {
+      const now = new Date();
+      for (const plan of plans) {
+        if (plan.violation && force) {
+          await tx.auditLog.create({
+            data: {
+              userId: req.user!.id,
+              action: "proxy.pin.force_override",
+              ip: req.ip ?? null,
+              details: {
+                entityType: "SocialAccount",
+                entityId: plan.accountId,
+                violation: plan.violation.code,
+                oldProxyId: plan.oldProxyId,
+                newProxyId: newProxy.id,
+                oldCarrier: plan.violation.oldCarrier ?? null,
+                newCarrier: plan.violation.newCarrier ?? null,
+                oldCountry: plan.violation.oldCountry ?? null,
+                newCountry: plan.violation.newCountry ?? null,
+              },
+            },
+          });
+        }
+        await tx.socialAccount.update({
+          where: { id: plan.accountId },
+          data: { pinnedProxyId: newProxy.id, proxyPinnedAt: now },
+        });
+      }
+    });
+
+    res.json({
+      updated: plans.length,
+      forcedOverrides: plans.filter(p => p.violation).length,
+    });
+  } catch (err) {
+    console.error('[Accounts] Bulk proxy bind error:', err);
+    res.status(500).json({ error: 'Ошибка при привязке прокси' });
+  }
+});
+
 // ── PATCH /:id — update single account ──────────────────────
 const patchAccountSchema = z.object({
   username: z.string().min(1).optional(),
@@ -587,186 +741,9 @@ router.patch('/:id', async (req: Request, res: Response) => {
   }
 });
 
-// ── DELETE /:id ─────────────────────────────────────────────
-router.delete('/:id', async (req: Request, res: Response) => {
-  try {
-    const existing = await prisma.socialAccount.findFirst({
-      where: { id: (req.params.id as string), userId: req.user!.id },
-    });
-
-    if (!existing) {
-      res.status(404).json({ error: 'Аккаунт не найден' });
-      return;
-    }
-
-    await prisma.socialAccount.delete({ where: { id: (req.params.id as string) } });
-    res.json({ success: true });
-  } catch (err) {
-    console.error('[Accounts] Delete error:', err);
-    res.status(500).json({ error: 'Ошибка при удалении аккаунта' });
-  }
-});
-
-// ── POST /bulk-update — mass assign proxy, status, etc. ─────
-const bulkUpdateSchema = z.object({
-  accountIds: z.array(z.string()).min(1),
-  update: z.object({
-    // NOTE: pinnedProxyId is intentionally REMOVED here. Proxy reassignment
-    // must go through POST /bulk-proxy which enforces the carrier stability
-    // rule (validatePinChange). Allowing it here would silently bypass the
-    // 14-day pin window and carrier/country guards.
-    avatarUrl: z.string().optional(),
-    bannerUrl: z.string().optional(),
-    bio: z.string().optional(),
-    status: z.enum(['ALIVE', 'AUTH_NEEDED', 'BANNED', 'EXPIRED_COOKIES', 'SHADOWBAN_SUSPECTED', 'WARMING_UP', 'PAUSED']).optional(),
-  }),
-});
-
-router.patch('/bulk', async (req: Request, res: Response) => {
-  try {
-    const parsed = bulkUpdateSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.errors[0].message });
-      return;
-    }
-
-    const { accountIds, update } = parsed.data;
-
-    const result = await prisma.socialAccount.updateMany({
-      where: {
-        id: { in: accountIds },
-        userId: req.user!.id,
-      },
-      data: update,
-    });
-
-    res.json({ updated: result.count });
-  } catch (err) {
-    console.error('[Accounts] Bulk update error:', err);
-    res.status(500).json({ error: 'Ошибка при массовом обновлении' });
-  }
-});
-
-// ── PATCH /bulk/proxy — dedicated bulk proxy binding ─────────
-const bulkProxySchema = z.object({
-  accountIds: z.array(z.string()).min(1, 'Выберите хотя бы один аккаунт'),
-  proxyId: z.string().min(1, 'Выберите прокси'),
-});
-
-router.patch('/bulk/proxy', async (req: Request, res: Response) => {
-  try {
-    const parsed = bulkProxySchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.errors[0].message });
-      return;
-    }
-
-    const { accountIds, proxyId } = parsed.data;
-    const force = req.query.force === "true" && req.user!.role === "ADMIN";
-
-    const newProxy = await prisma.proxy.findUniqueOrThrow({
-      where: { id: proxyId, userId: req.user!.id },
-      select: { id: true, carrier: true, country: true, type: true },
-    });
-
-    // Phase 1: validate ALL accounts before mutating anything.
-    type Plan = {
-      accountId: string;
-      violation: ReturnType<typeof validatePinChange>;
-      oldProxyId: string | null;
-    };
-    const plans: Plan[] = [];
-
-    for (const accountId of accountIds) {
-      const account = await prisma.socialAccount.findUniqueOrThrow({
-        where: { id: accountId, userId: req.user!.id },
-        select: {
-          id: true,
-          platform: true,
-          pinnedProxyId: true,
-          proxyPinnedAt: true,
-          createdAt: true,
-        },
-      });
-
-      const oldProxy = account.pinnedProxyId
-        ? await prisma.proxy.findUnique({
-            where: { id: account.pinnedProxyId },
-            select: { id: true, carrier: true, country: true, type: true },
-          })
-        : null;
-
-      const violation = validatePinChange({ account, oldProxy, newProxy });
-      plans.push({ accountId, violation, oldProxyId: oldProxy?.id ?? null });
-    }
-
-    // If any violation exists and force is false, reject the WHOLE batch.
-    const blockers = plans.filter(p => p.violation);
-    if (blockers.length > 0 && !force) {
-      res.status(409).json({
-        success: false,
-        code: blockers[0].violation!.code,
-        error: `${blockers.length} аккаунт(ов) заблокированы Carrier Stability Rule. ` +
-               `Используйте force=true (только ADMIN) для override.`,
-        blockedAccountIds: blockers.map(b => b.accountId),
-        violations: blockers.map(b => ({
-          accountId: b.accountId,
-          code: b.violation!.code,
-          message: b.violation!.message,
-          details: {
-            daysRemaining: b.violation!.daysRemaining,
-            oldCarrier: b.violation!.oldCarrier,
-            newCarrier: b.violation!.newCarrier,
-            oldCountry: b.violation!.oldCountry,
-            newCountry: b.violation!.newCountry,
-          },
-        })),
-      });
-      return;
-    }
-
-    // Phase 2: atomic write + AuditLog for every force-overridden violation.
-    await prisma.$transaction(async (tx: any) => {
-      const now = new Date();
-      for (const plan of plans) {
-        if (plan.violation && force) {
-          await tx.auditLog.create({
-            data: {
-              userId: req.user!.id,
-              action: "proxy.pin.force_override",
-              ip: req.ip ?? null,
-              details: {
-                entityType: "SocialAccount",
-                entityId: plan.accountId,
-                violation: plan.violation.code,
-                oldProxyId: plan.oldProxyId,
-                newProxyId: newProxy.id,
-                oldCarrier: plan.violation.oldCarrier ?? null,
-                newCarrier: plan.violation.newCarrier ?? null,
-                oldCountry: plan.violation.oldCountry ?? null,
-                newCountry: plan.violation.newCountry ?? null,
-              },
-            },
-          });
-        }
-        await tx.socialAccount.update({
-          where: { id: plan.accountId },
-          data: { pinnedProxyId: newProxy.id, proxyPinnedAt: now },
-        });
-      }
-    });
-
-    res.json({
-      updated: plans.length,
-      forcedOverrides: plans.filter(p => p.violation).length,
-    });
-  } catch (err) {
-    console.error('[Accounts] Bulk proxy bind error:', err);
-    res.status(500).json({ error: 'Ошибка при привязке прокси' });
-  }
-});
-
 // ── DELETE /bulk — mass delete accounts ─────────────────────
+// IMPORTANT: Must be defined BEFORE /:id to prevent Express from
+// matching 'bulk' as the :id parameter.
 // Also available as POST /bulk-delete for proxies that strip DELETE bodies (M-5)
 const bulkDeleteHandler = async (req: Request, res: Response) => {
   try {
@@ -802,6 +779,29 @@ const bulkDeleteHandler = async (req: Request, res: Response) => {
 
 router.delete('/bulk', bulkDeleteHandler);
 router.post('/bulk-delete', bulkDeleteHandler);  // M-5: proxy-safe alternative
+
+// ── DELETE /:id ─────────────────────────────────────────────
+router.delete('/:id', async (req: Request, res: Response) => {
+  try {
+    const existing = await prisma.socialAccount.findFirst({
+      where: { id: (req.params.id as string), userId: req.user!.id },
+    });
+
+    if (!existing) {
+      res.status(404).json({ error: 'Аккаунт не найден' });
+      return;
+    }
+
+    await prisma.socialAccount.delete({ where: { id: (req.params.id as string) } });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Accounts] Delete error:', err);
+    res.status(500).json({ error: 'Ошибка при удалении аккаунта' });
+  }
+});
+
+// NOTE: PATCH /bulk and PATCH /bulk/proxy are defined above PATCH /:id
+// to prevent Express route shadowing.
 
 // ── POST /warmup — start warmup for accounts ────────────────
 router.post('/warmup', async (req: Request, res: Response) => {
