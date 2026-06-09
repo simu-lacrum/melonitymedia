@@ -271,6 +271,10 @@ router.post('/import', async (req: Request, res: Response) => {
     const resolvedAuthMode: 'cookies' | 'login_pass' | 'auto' = method === 'credentials' ? 'login_pass' : method === 'cookies' ? 'cookies' : authMode;
     const entries = parseBulkImport(importText, resolvedAuthMode);
 
+    console.log(`[Accounts] Import: method=${method}, resolvedMode=${resolvedAuthMode}, entries=${entries.length}, raw_lines=${importText.split('\\n').filter(Boolean).length}`);
+    if (entries.length > 0) {
+      console.log(`[Accounts] First entry keys: ${Object.keys(entries[0]).join(', ')}; has login=${!!entries[0].login}, has password=${!!entries[0].password}, has cookies=${!!entries[0].cookies}`);
+    }
 
     if (entries.length === 0) {
       res.status(400).json({ error: 'Не удалось распарсить ни одной записи (ожидается login:password или login:password:cookies, по одной на строку)' });
@@ -282,6 +286,11 @@ router.post('/import', async (req: Request, res: Response) => {
     }
 
     const masterKey = Buffer.from(process.env.MASTER_KEY ?? '', 'base64');
+    if (masterKey.length !== 32) {
+      console.error(`[Accounts] MASTER_KEY invalid: expected 32 bytes, got ${masterKey.length}`);
+      res.status(500).json({ error: 'Ошибка конфигурации сервера: MASTER_KEY не настроен или невалидный (ожидается 32 байта base64)' });
+      return;
+    }
 
     function encryptString(plain: string) {
       const iv = crypto.randomBytes(12);
@@ -377,7 +386,9 @@ router.post('/import', async (req: Request, res: Response) => {
         });
         created.push(accountId);
       } catch (err: any) {
-        failed.push({ line: i + 1, reason: err.message ?? String(err) });
+        const reason = err.message ?? String(err);
+        console.error(`[Accounts] Import line ${i + 1} failed:`, reason);
+        failed.push({ line: i + 1, reason });
       }
     }
     // Auto-bind proxy to imported accounts if proxyId was specified

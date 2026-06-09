@@ -185,18 +185,55 @@ export default function AccountsPage() {
     if (!importText.trim()) return
     try {
       setImportLoading(true)
-      const result = await api.post<{ created: number; failed: number; message: string }>("/api/accounts/import", {
+      const result = await api.post<{
+        created: number
+        failed: number
+        failedDetails?: Array<{ line: number; reason: string }>
+        message: string
+      }>("/api/accounts/import", {
         raw: importText,
         platform: importPlatform,
         proxyId: importProxyId && importProxyId !== "none" ? importProxyId : undefined,
         method: importMethod,
       })
-      toast.success(result.message || `${result.created} аккаунтов отправлены на верификацию`)
-      setImportOpen(false)
-      setImportText("")
-      setImportPlatform("TIKTOK")
-      setImportMethod("cookies")
-      setImportProxyId("")
+
+      // Show failure details if any accounts failed
+      if (result.failedDetails && result.failedDetails.length > 0) {
+        const details = result.failedDetails
+          .slice(0, 5) // Show max 5 errors
+          .map(f => `Строка ${f.line}: ${f.reason}`)
+          .join("\n")
+        const moreText = result.failedDetails.length > 5
+          ? `\n...и ещё ${result.failedDetails.length - 5} ошибок`
+          : ""
+
+        if (result.created === 0) {
+          // All failed — error toast
+          toast.error(`Не удалось импортировать аккаунты`, {
+            description: details + moreText,
+            duration: 15000,
+          })
+        } else {
+          // Partial success — warning + details
+          toast.success(`${result.created} из ${result.created + result.failed} аккаунтов импортировано`)
+          toast.warning(`${result.failed} аккаунтов не удалось импортировать`, {
+            description: details + moreText,
+            duration: 12000,
+          })
+        }
+      } else if (result.created > 0) {
+        toast.success(result.message || `${result.created} аккаунтов отправлены на верификацию`)
+      } else {
+        toast.error("Не удалось распарсить аккаунты. Проверьте формат: login:password (по одной записи на строку)")
+      }
+
+      if (result.created > 0) {
+        setImportOpen(false)
+        setImportText("")
+        setImportPlatform("TIKTOK")
+        setImportMethod("cookies")
+        setImportProxyId("")
+      }
       fetchAccounts()
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Не удалось импортировать")
