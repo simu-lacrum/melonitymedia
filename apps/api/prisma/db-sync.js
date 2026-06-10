@@ -17,6 +17,20 @@ async function main() {
     await prisma.$executeRawUnsafe(
       `ALTER TYPE "AccountStatus" ADD VALUE IF NOT EXISTS 'VERIFYING'`
     );
+
+    // Add lastError column if it doesn't exist
+    // Stores human-readable reason when login/verification fails (shown in UI)
+    await prisma.$executeRawUnsafe(`
+      DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'SocialAccount' AND column_name = 'lastError'
+        ) THEN
+          ALTER TABLE "SocialAccount" ADD COLUMN "lastError" TEXT;
+        END IF;
+      END $$;
+    `);
+
     console.log('[db-sync] Schema synced OK');
   } catch (err) {
     // Non-fatal: log but don't crash the server
