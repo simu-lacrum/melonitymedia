@@ -10,6 +10,8 @@
 set -e
 
 echo "[Worker] Starting Xvfb virtual display :99 (1920x1080x24)..."
+# Clean stale lock files from previous container runs
+rm -f /tmp/.X99-lock /tmp/.X11-unix/X99 2>/dev/null || true
 Xvfb :99 -screen 0 1920x1080x24 -ac &
 XVFB_PID=$!
 export DISPLAY=:99

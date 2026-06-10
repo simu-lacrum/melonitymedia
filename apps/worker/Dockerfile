@@ -73,6 +73,9 @@ COPY apps/api/prisma ./apps/api/prisma/
 # Install dependencies (patchright downloads its own browser)
 RUN npm ci --workspace=apps/worker --include-workspace-root
 
+# Generate Prisma client from the API schema
+RUN cd apps/api && npx prisma generate
+
 # Copy worker source
 COPY apps/worker/src ./apps/worker/src
 
