@@ -32,8 +32,32 @@ interface ClickOptions {
  *   await humanClick(page, cursor, 'button.upload');
  */
 export async function createPageCursor(page: Page): Promise<GhostCursor> {
-  // ghost-cursor works with Playwright pages directly
-  return createCursor(page as unknown as Parameters<typeof createCursor>[0]);
+  // ghost-cursor was written for Puppeteer and uses several Puppeteer-only APIs.
+  // We shim them to work with Patchright (Playwright fork):
+  //
+  // 1. page.browser()        → page.context().browser()
+  // 2. page.target()._targetId → stub (used for getRandomPagePoint)
+  // 3. page._client            → CDP session (used for mouse events + DOM queries)
+
+  const patchedPage = page as any;
+
+  // Shim browser()
+  if (typeof patchedPage.browser !== 'function') {
+    patchedPage.browser = () => page.context().browser();
+  }
+
+  // Shim target()
+  if (typeof patchedPage.target !== 'function') {
+    patchedPage.target = () => ({ _targetId: 'page' });
+  }
+
+  // Shim _client — ghost-cursor uses it for CDP Input.dispatchMouseEvent
+  if (!patchedPage._client) {
+    const cdpSession = await page.context().newCDPSession(page);
+    patchedPage._client = cdpSession;
+  }
+
+  return createCursor(patchedPage as unknown as Parameters<typeof createCursor>[0]);
 }
 
 // ── Human Click ─────────────────────────────────────────────
