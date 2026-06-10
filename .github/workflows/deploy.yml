@@ -26,6 +26,17 @@ jobs:
             echo "══════ Fixing .env ══════"
             sed -i 's|NEXT_PUBLIC_API_URL=https://cluster-cheats.shop/api|NEXT_PUBLIC_API_URL=https://cluster-cheats.shop|' .env
 
+            # Fix Redis auth: REDIS_URL must include the password
+            # Docker-compose uses REDIS_PASSWORD env var (default: changeme_redis)
+            REDIS_PASS=$(grep '^REDIS_PASSWORD=' .env | cut -d= -f2 || echo "changeme_redis")
+            if [ -z "$REDIS_PASS" ]; then REDIS_PASS="changeme_redis"; fi
+            # Replace REDIS_URL without password → with password
+            sed -i "s|REDIS_URL=redis://redis:6379|REDIS_URL=redis://:${REDIS_PASS}@redis:6379|" .env
+            sed -i "s|REDIS_URL=redis://localhost:6379|REDIS_URL=redis://:${REDIS_PASS}@redis:6379|" .env
+            # Add REDIS_PASSWORD if missing
+            grep -q '^REDIS_PASSWORD=' .env || echo "REDIS_PASSWORD=${REDIS_PASS}" >> .env
+            echo "  REDIS_URL=$(grep REDIS_URL .env | head -1)"
+
             echo "══════ Building & restarting containers ══════"
             docker compose up -d --build --force-recreate --remove-orphans
 
