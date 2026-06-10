@@ -32,5 +32,16 @@ jobs:
             echo "══════ Cleaning up old images ══════"
             docker image prune -f
 
-            echo "══════ Deploy complete ══════"
+            echo "══════ Waiting 30s for containers to start ══════"
+            sleep 30
+
+            echo "══════ Container status ══════"
             docker compose ps
+
+            echo "══════ API logs (last 30 lines) ══════"
+            docker compose logs api --tail=30 --no-color 2>&1 || true
+
+            echo "══════ Worker logs (last 50 lines) ══════"
+            docker compose logs worker --tail=50 --no-color 2>&1 || true
+
+            echo "══════ Deploy complete ══════"

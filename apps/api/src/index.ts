@@ -120,6 +120,48 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// ── Debug Diagnostics (queue status + stuck accounts) ───────
+app.get('/api/health/debug', async (_req, res) => {
+  try {
+    const { loginQueue } = await import('./lib/bullmq.js');
+    const { prisma } = await import('./lib/prisma.js');
+
+    const [waiting, active, completed, failed, delayed] = await Promise.all([
+      loginQueue.getWaitingCount(),
+      loginQueue.getActiveCount(),
+      loginQueue.getCompletedCount(),
+      loginQueue.getFailedCount(),
+      loginQueue.getDelayedCount(),
+    ]);
+
+    // Get recent failed jobs with error details
+    const failedJobs = await loginQueue.getFailed(0, 5);
+    const failedDetails = failedJobs.map(j => ({
+      id: j.id,
+      data: j.data,
+      failedReason: j.failedReason,
+      attemptsMade: j.attemptsMade,
+      timestamp: j.timestamp,
+    }));
+
+    // Count stuck VERIFYING accounts
+    const stuckAccounts = await prisma.socialAccount.findMany({
+      where: { status: 'VERIFYING' },
+      select: { id: true, username: true, createdAt: true, platform: true },
+      take: 20,
+    });
+
+    res.json({
+      loginQueue: { waiting, active, completed, failed, delayed },
+      failedDetails,
+      stuckVerifying: stuckAccounts,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── 404 Handler ─────────────────────────────────────────────
 app.use((_req, res) => {
   res.status(404).json({ error: 'Endpoint not found' });
