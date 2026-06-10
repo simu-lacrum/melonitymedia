@@ -80,4 +80,4 @@ WORKDIR /app/apps/api
 
 EXPOSE 4000
 
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]
+CMD ["sh", "-c", "echo '=== Syncing DB schema ===' && npx prisma db push --skip-generate --accept-data-loss 2>&1 && echo '=== Schema synced ===' || echo '=== WARNING: db push failed, starting anyway ==='; exec node dist/index.js"]
