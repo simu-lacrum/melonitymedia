@@ -29,6 +29,7 @@ interface SocialAccount {
   followers: number
   lastActive?: string
   updatedAt: string
+  lastError?: string | null
   pinnedProxy?: {
     id: string
     host: string
@@ -323,10 +324,25 @@ export default function AccountsPage() {
     }
   }
 
-  const renderStatus = (status: string) => {
+  const statusHints: Record<string, string> = {
+    AUTH_NEEDED: "Логин/пароль неверные или аккаунт заблокирован. Проверьте данные и попробуйте снова.",
+    EXPIRED_COOKIES: "Срок действия cookies истёк. Обновите cookies или переимпортируйте аккаунт.",
+    BANNED: "Аккаунт заблокирован TikTok. Попробуйте другой аккаунт.",
+    SHADOWBAN_SUSPECTED: "Подозрение на теневой бан. Снизьте активность и подождите 24-48ч.",
+  }
+
+  const statusActions: Record<string, string> = {
+    AUTH_NEEDED: "Нажмите «Повторить» или удалите и заново импортируйте аккаунт с правильными данными.",
+    EXPIRED_COOKIES: "Импортируйте аккаунт заново с актуальными cookies.",
+    BANNED: "Удалите аккаунт и используйте другой.",
+    SHADOWBAN_SUSPECTED: "Приостановите публикации на 24-48ч, затем проверьте снова.",
+  }
+
+  const renderStatus = (acc: SocialAccount) => {
+    const status = acc.status
     const map: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-      ALIVE: { label: "Живой", variant: "default" },
-      AUTH_NEEDED: { label: "Нужна авториз.", variant: "outline" },
+      ALIVE: { label: "Живой ✅", variant: "default" },
+      AUTH_NEEDED: { label: "Ошибка входа", variant: "destructive" },
       BANNED: { label: "Бан", variant: "destructive" },
       EXPIRED_COOKIES: { label: "Куки умерли", variant: "destructive" },
       SHADOWBAN_SUSPECTED: { label: "Теневой бан?", variant: "outline" },
@@ -335,6 +351,7 @@ export default function AccountsPage() {
       VERIFYING: { label: "Проверка...", variant: "secondary" },
     }
     const cfg = map[status] || { label: status, variant: "secondary" as const }
+
     if (status === "VERIFYING") {
       return (
         <Badge variant={cfg.variant} className="animate-pulse gap-1.5">
@@ -343,6 +360,42 @@ export default function AccountsPage() {
         </Badge>
       )
     }
+
+    const genericHint = statusHints[status]
+    const action = statusActions[status]
+    // Prefer server-side lastError (specific), fall back to generic hint
+    const errorDetail = acc.lastError || genericHint
+
+    if (errorDetail) {
+      return (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-2">
+            <Badge variant={cfg.variant} className="gap-1">
+              <AlertCircle className="size-3" />
+              {cfg.label}
+            </Badge>
+            {["AUTH_NEEDED", "EXPIRED_COOKIES"].includes(status) && (
+              <button
+                onClick={() => handleRetryLogin(acc.id, status)}
+                className="text-xs text-primary hover:underline flex items-center gap-1 whitespace-nowrap"
+              >
+                <RotateCcw className="size-3" />
+                Повторить
+              </button>
+            )}
+          </div>
+          <p className="text-[11px] text-muted-foreground leading-tight max-w-[240px]">
+            {errorDetail}
+          </p>
+          {action && (
+            <p className="text-[11px] text-primary/70 leading-tight max-w-[240px]">
+              💡 {action}
+            </p>
+          )}
+        </div>
+      )
+    }
+
     return <Badge variant={cfg.variant}>{cfg.label}</Badge>
   }
 
@@ -465,7 +518,7 @@ export default function AccountsPage() {
                             {acc.platform === "TIKTOK" ? "TikTok" : "YouTube"}
                           </Badge>
                         </TableCell>
-                        <TableCell>{renderStatus(acc.status)}</TableCell>
+                        <TableCell>{renderStatus(acc)}</TableCell>
                         <TableCell>
                           <code className="text-xs bg-accent px-2 py-1 rounded">
                             {acc.pinnedProxy

@@ -565,10 +565,16 @@ export async function applyFingerprint(page: Page, fp: AccountFingerprint): Prom
     timezoneId: fp.timezone,
   });
 
-  // Locale
-  await cdp.send('Emulation.setLocaleOverride', {
-    locale: fp.locale,
-  });
+  // Locale — Patchright may already set locale at context level,
+  // so this can fail with "Another locale override is already in effect".
+  // That's fine — the locale IS set, just not by us.
+  try {
+    await cdp.send('Emulation.setLocaleOverride', {
+      locale: fp.locale,
+    });
+  } catch {
+    // Already overridden by Patchright context — safe to ignore
+  }
 
   const isMobile = fp.deviceClass === 'mobile';
 

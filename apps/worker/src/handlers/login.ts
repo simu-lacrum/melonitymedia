@@ -139,7 +139,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
       if (status === 'alive') {
         await prisma.socialAccount.update({
           where: { id: data.accountId },
-          data: { status: 'ALIVE' },
+          data: { status: 'ALIVE', lastError: null },
         });
         await job.updateProgress(100);
         logger.info(`✅ Cookies валидны, аккаунт активирован`);
@@ -468,6 +468,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
       where: { id: data.accountId },
       data: {
         status: 'ALIVE',
+        lastError: null,
         ...(extractedUsername ? { username: extractedUsername } : {}),
       },
     });
@@ -496,9 +497,19 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
         message = 'Ошибка сети или прокси. Проверьте прокси и попробуйте снова.';
       }
 
+      // Translate internal error to user-friendly message
+      let userMessage = message;
+      if (/setLocaleOverride|Protocol error/i.test(msg)) {
+        userMessage = 'Внутренняя ошибка браузера. Попробуйте повторить вход.';
+      } else if (/timeout|Timeout/i.test(msg)) {
+        userMessage = 'Превышено время ожидания. Проверьте прокси и попробуйте снова.';
+      } else if (/captcha|CAPTCHA/i.test(msg)) {
+        userMessage = 'TikTok запросил капчу. Попробуйте позже или используйте другой прокси.';
+      }
+
       await prisma.socialAccount.update({
         where: { id: data.accountId },
-        data: { status: 'AUTH_NEEDED' },
+        data: { status: 'AUTH_NEEDED', lastError: userMessage },
       }).catch(() => {});
 
       emitLoginEvent(logger, data.accountId, 'login:failed', { code, message });

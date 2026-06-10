@@ -84,6 +84,7 @@ model SocialAccount {
   fingerprintStale  Boolean      @default(false) // true when Chrome version diverges after upgrade
 
   status      AccountStatus @default(ALIVE)
+  lastError   String?       // human-readable reason for AUTH_NEEDED/error status
 
   // Proxy pinning — one proxy per account, stable for 14+ days
   pinnedProxyId    String?       // currently pinned proxy
