@@ -83,14 +83,28 @@ type TwoFAType = 'email' | 'sms' | 'authenticator' | 'unknown';
 
 async function detect2FAType(page: any, platform: 'TIKTOK' | 'YOUTUBE'): Promise<{ has2FA: boolean; type: TwoFAType; hint: string }> {
   if (platform === 'TIKTOK') {
+    // Check 1: code input field present (classic 2FA)
     const codeInput = await page.locator('input[name="code"], input[autocomplete*="one-time"]').count();
     if (codeInput > 0) {
-      // Try to detect type from page text
       const bodyText = await page.textContent('body') || '';
       if (/email|почт/i.test(bodyText)) return { has2FA: true, type: 'email', hint: 'TikTok запросил код из email' };
       if (/sms|смс|phone|телефон/i.test(bodyText)) return { has2FA: true, type: 'sms', hint: 'TikTok запросил код из SMS' };
       if (/authenticator|2fa|двухфакторн/i.test(bodyText)) return { has2FA: true, type: 'authenticator', hint: 'TikTok запросил код из приложения-аутентификатора' };
       return { has2FA: true, type: 'unknown', hint: 'TikTok запросил код подтверждения' };
+    }
+
+    // Check 2: TikTok email/SMS verification page without code input
+    // TikTok sometimes shows a "verify via email" page with a button, not a code input.
+    // URL patterns: /login/verify, /verify, or body text mentions verification.
+    const currentUrl = page.url();
+    const bodyText = await page.textContent('body') || '';
+    const isVerifyUrl = /verify|verification|challenge/i.test(currentUrl);
+    const isVerifyText = /verify.*email|send.*code|verification.*code|подтвер|отправ.*код|check.*email|проверь.*почт/i.test(bodyText);
+
+    if (isVerifyUrl || isVerifyText) {
+      if (/email|почт|mail/i.test(bodyText)) return { has2FA: true, type: 'email', hint: 'TikTok просит подтвердить вход через email' };
+      if (/sms|смс|phone|телефон/i.test(bodyText)) return { has2FA: true, type: 'sms', hint: 'TikTok просит подтвердить вход через SMS' };
+      return { has2FA: true, type: 'unknown', hint: 'TikTok запросил подтверждение входа' };
     }
   } else {
     // YouTube/Google 2FA
@@ -248,12 +262,13 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
       await job.updateProgress(50);
       await page.waitForTimeout(2000);
 
-      // Check bad credentials first
+      // Check bad credentials first — use strict patterns to avoid false positives
+      // from body text that might contain "incorrect" in unrelated TikTok UI text
       const errorText = await page.textContent('body') || '';
-      if (/password.*incorrect|неверный|wrong.*password/i.test(errorText)) {
+      if (/password.*incorrect|incorrect.*password|неверный.*парол|парол.*невер|wrong.*password|password.*wrong/i.test(errorText)) {
         await prisma.socialAccount.update({
           where: { id: data.accountId },
-          data: { status: 'AUTH_NEEDED' },
+          data: { status: 'AUTH_NEEDED', lastError: 'Неверный пароль. Проверьте учётные данные и попробуйте снова.' },
         });
         emitLoginEvent(logger, data.accountId, 'login:failed', {
           code: 'INVALID_CREDENTIALS',
@@ -397,36 +412,113 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
         { timeout: 30_000 },
       );
     } catch {
-      // Timeout waiting for redirect — could be captcha, 2FA, or other issue
+      // Timeout waiting for redirect — could be captcha, 2FA, email verification, or other issue
       const currentUrl = page.url();
+      const bodyText = await page.textContent('body') || '';
       logger.warn(`⚠️ Не удалось дождаться перенаправления. URL: ${currentUrl}`);
 
-      // Try to detect what went wrong
-      const bodyText = await page.textContent('body') || '';
-      if (/captcha|verify.*human/i.test(bodyText)) {
+      // ── Check for email/SMS verification (TikTok often asks this) ──
+      const isVerificationPage = /verify|verification|challenge/i.test(currentUrl)
+        || /verify.*email|send.*code|verification.*code|подтвер|отправ.*код|check.*email|проверь.*почт|enter.*code|введите.*код/i.test(bodyText);
+
+      if (isVerificationPage) {
+        // Re-run 2FA detection — the page might now have a code input
+        const lateFA = await detect2FAType(page, ctx.platform);
+        if (lateFA.has2FA) {
+          logger.warn(`🔒 Обнаружена верификация (после redirect timeout): ${lateFA.hint}`);
+          emitLoginEvent(logger, data.accountId, 'login:2fa_required', {
+            type: lateFA.type,
+            hint: lateFA.hint,
+            platform: ctx.platform,
+            timeoutSeconds: 600,
+          });
+
+          const code = await waitForVerificationCode(data.accountId, 10 * 60 * 1000);
+          if (!code) {
+            const errMsg = 'Требуется подтверждение через email/SMS. Время ожидания кода истекло (10 мин).';
+            await prisma.socialAccount.update({
+              where: { id: data.accountId },
+              data: { status: 'AUTH_NEEDED', lastError: errMsg },
+            });
+            emitLoginEvent(logger, data.accountId, 'login:failed', {
+              code: 'TWO_FA_TIMEOUT',
+              message: errMsg,
+            });
+            throw new LoginError('TWO_FA_TIMEOUT', 'Email/SMS verification timeout');
+          }
+
+          // Enter the code
+          logger.info(`📱 Код получен, ввожу...`);
+          const codeSelector = ctx.platform === 'TIKTOK'
+            ? 'input[name="code"], input[autocomplete*="one-time"], input[type="text"], input[type="tel"]'
+            : 'input[type="tel"], input[autocomplete="one-time-code"]';
+          try {
+            await humanType(page, codeSelector, code);
+            await page.waitForTimeout(500);
+            await humanClick(page, cursor, 'button[type="submit"], button:has-text("Verify"), button:has-text("Подтвердить"), button:has-text("Next"), button:has-text("Далее")', { postClickDelay: 3000 });
+          } catch {
+            // Auto-submit or no submit button
+          }
+
+          // Wait for successful redirect after code entry
+          try {
+            await page.waitForURL(
+              ctx.platform === 'TIKTOK'
+                ? /tiktok\.com\/(foryou|@|en|ru|.*\/feed)/
+                : /youtube\.com\/(?:feed|watch|@|channel|c)|myaccount\.google\.com/,
+              { timeout: 15_000 },
+            );
+            // Success! Fall through to cookie extraction below.
+          } catch {
+            const errMsg = 'Код введён, но вход не завершился. Попробуйте снова.';
+            await prisma.socialAccount.update({
+              where: { id: data.accountId },
+              data: { status: 'AUTH_NEEDED', lastError: errMsg },
+            });
+            throw new LoginError('TWO_FA_INVALID', errMsg);
+          }
+        } else {
+          // Verification page detected but no code input — inform user
+          const errMsg = 'TikTok запросил подтверждение входа (email/SMS). Зайдите в аккаунт вручную, подтвердите, затем повторите.';
+          await prisma.socialAccount.update({
+            where: { id: data.accountId },
+            data: { status: 'AUTH_NEEDED', lastError: errMsg },
+          });
+          emitLoginEvent(logger, data.accountId, 'login:failed', {
+            code: 'TWO_FA_TIMEOUT',
+            message: errMsg,
+          });
+          throw new LoginError('TWO_FA_TIMEOUT', 'Email verification required but no code input found');
+        }
+      }
+      // ── Not verification — check other failure modes ──
+      else if (/captcha|verify.*human/i.test(bodyText)) {
+        const errMsg = 'Платформа показала капчу, которую не удалось решить автоматически.';
         emitLoginEvent(logger, data.accountId, 'login:failed', {
           code: 'CAPTCHA_FAILED',
-          message: 'Платформа показала капчу, которую не удалось решить автоматически.',
+          message: errMsg,
         });
-        await prisma.socialAccount.update({ where: { id: data.accountId }, data: { status: 'AUTH_NEEDED' } });
+        await prisma.socialAccount.update({ where: { id: data.accountId }, data: { status: 'AUTH_NEEDED', lastError: errMsg } });
         throw new LoginError('CAPTCHA_FAILED', 'Captcha not resolved');
       }
-
-      if (/suspended|заблокирован|disabled/i.test(bodyText)) {
+      else if (/suspended|заблокирован|disabled/i.test(bodyText)) {
+        const errMsg = 'Аккаунт приостановлен платформой.';
         emitLoginEvent(logger, data.accountId, 'login:failed', {
           code: 'ACCOUNT_SUSPENDED',
-          message: 'Аккаунт приостановлен платформой.',
+          message: errMsg,
         });
-        await prisma.socialAccount.update({ where: { id: data.accountId }, data: { status: 'BANNED' } });
+        await prisma.socialAccount.update({ where: { id: data.accountId }, data: { status: 'BANNED', lastError: errMsg } });
         throw new LoginError('ACCOUNT_SUSPENDED', 'Account suspended');
       }
-
-      emitLoginEvent(logger, data.accountId, 'login:failed', {
-        code: 'UNKNOWN_ERROR',
-        message: `Не удалось завершить вход. Текущий URL: ${currentUrl}`,
-      });
-      await prisma.socialAccount.update({ where: { id: data.accountId }, data: { status: 'AUTH_NEEDED' } });
-      throw new LoginError('UNKNOWN_ERROR', `Login flow stuck at ${currentUrl}`);
+      else {
+        const errMsg = `Вход не завершился. Страница: ${currentUrl}. Попробуйте снова или войдите вручную.`;
+        emitLoginEvent(logger, data.accountId, 'login:failed', {
+          code: 'UNKNOWN_ERROR',
+          message: errMsg,
+        });
+        await prisma.socialAccount.update({ where: { id: data.accountId }, data: { status: 'AUTH_NEEDED', lastError: errMsg } });
+        throw new LoginError('UNKNOWN_ERROR', `Login flow stuck at ${currentUrl}`);
+      }
     }
 
     await job.updateProgress(80);
