@@ -107,6 +107,7 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
         ...(url.password ? { password: decodeURIComponent(url.password) } : {}),
       };
       console.log(`[Patchright] Using proxy: ${url.protocol}//${url.hostname}:${url.port} for account ${opts.accountId}`);
+      console.log(`[Patchright] Proxy config: server=${proxyConfig.server} user=${proxyConfig.username ? '***' : 'none'} pass=${proxyConfig.password ? '***' : 'none'}`);
     } catch {
       // Fallback: pass as-is if URL parsing fails
       proxyConfig = { server: opts.proxyUrl };
