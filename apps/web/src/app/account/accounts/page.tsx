@@ -67,15 +67,23 @@ export default function AccountsPage() {
   const [proxyBindValue, setProxyBindValue] = React.useState("")
   const [bindingProxy, setBindingProxy] = React.useState(false)
 
-  // 2FA dialog state
-  const [twoFAOpen, setTwoFAOpen] = React.useState(false)
-  const [twoFAAccountId, setTwoFAAccountId] = React.useState("")
+  // 2FA dialog state — supports multiple simultaneous requests
+  interface TwoFARequest {
+    accountId: string
+    username: string  // display name for the account
+    hint: string
+    type: string      // email | sms | authenticator | unknown
+    platform: string
+    deadline: number  // unix timestamp (ms) when timeout expires
+  }
+  const [twoFAQueue, setTwoFAQueue] = React.useState<TwoFARequest[]>([])
   const [twoFACode, setTwoFACode] = React.useState("")
-  const [twoFAHint, setTwoFAHint] = React.useState("")
-  const [twoFAType, setTwoFAType] = React.useState("")
   const [twoFALoading, setTwoFALoading] = React.useState(false)
-  const [twoFATimeout, setTwoFATimeout] = React.useState(600) // seconds
+  const [twoFACountdown, setTwoFACountdown] = React.useState(0) // seconds remaining for current
   const twoFATimerRef = React.useRef<NodeJS.Timeout | null>(null)
+
+  // Current 2FA request (first in queue)
+  const currentTwoFA = twoFAQueue.length > 0 ? twoFAQueue[0] : null
 
   // Verification error display
   const [verifyErrors, setVerifyErrors] = React.useState<Record<string, string>>({})
@@ -91,6 +99,10 @@ export default function AccountsPage() {
       setLoading(false)
     }
   }, [])
+
+  // Ref to always access latest accounts inside socket handlers
+  const accountsRef = React.useRef(accounts)
+  React.useEffect(() => { accountsRef.current = accounts }, [accounts])
 
   React.useEffect(() => {
     fetchAccounts()
@@ -136,23 +148,40 @@ export default function AccountsPage() {
     socket.on("login:success", (data: { accountId: string; message: string; username?: string }) => {
       toast.success(data.message || "Аккаунт верифицирован")
       setVerifyErrors(prev => { const n = { ...prev }; delete n[data.accountId]; return n })
+      // Remove from 2FA queue if present
+      setTwoFAQueue(prev => prev.filter(r => r.accountId !== data.accountId))
       fetchAccounts()
     })
 
     socket.on("login:failed", (data: { accountId: string; code: string; message: string }) => {
       toast.error(data.message || "Ошибка верификации")
       setVerifyErrors(prev => ({ ...prev, [data.accountId]: data.message }))
+      // Remove from 2FA queue if present
+      setTwoFAQueue(prev => prev.filter(r => r.accountId !== data.accountId))
       fetchAccounts()
     })
 
-    socket.on("login:2fa_required", (data: { accountId: string; type: string; hint: string; timeoutSeconds: number }) => {
-      setTwoFAAccountId(data.accountId)
-      setTwoFAHint(data.hint)
-      setTwoFAType(data.type)
-      setTwoFATimeout(data.timeoutSeconds || 600)
+    socket.on("login:2fa_required", (data: { accountId: string; type: string; hint: string; timeoutSeconds: number; platform?: string }) => {
+      // Find the account to get username for display (use ref for latest data)
+      const matchAccount = accountsRef.current.find(a => a.id === data.accountId)
+      const displayName = matchAccount?.username || `ID: ${data.accountId.slice(0, 8)}`
+
+      const request: TwoFARequest = {
+        accountId: data.accountId,
+        username: displayName,
+        hint: data.hint,
+        type: data.type,
+        platform: data.platform || "TIKTOK",
+        deadline: Date.now() + (data.timeoutSeconds || 600) * 1000,
+      }
+
+      setTwoFAQueue(prev => {
+        // Don't add duplicate for same account
+        if (prev.some(r => r.accountId === data.accountId)) return prev
+        return [...prev, request]
+      })
       setTwoFACode("")
-      setTwoFAOpen(true)
-      toast.info(data.hint || "Требуется код подтверждения")
+      toast.info(`${displayName}: ${data.hint || "Требуется код подтверждения"}`)
     })
 
     // ── Real-time account status change (from worker) ──
@@ -169,23 +198,29 @@ export default function AccountsPage() {
     }
   }, [fetchAccounts])
 
-  // 2FA countdown timer
+  // 2FA countdown timer — tracks current request's deadline
   React.useEffect(() => {
-    if (twoFAOpen && twoFATimeout > 0) {
-      twoFATimerRef.current = setInterval(() => {
-        setTwoFATimeout(prev => {
-          if (prev <= 1) {
-            clearInterval(twoFATimerRef.current!)
-            setTwoFAOpen(false)
-            toast.error("Время ожидания кода истекло")
-            return 0
-          }
-          return prev - 1
-        })
-      }, 1000)
-      return () => { if (twoFATimerRef.current) clearInterval(twoFATimerRef.current) }
+    if (!currentTwoFA) {
+      setTwoFACountdown(0)
+      if (twoFATimerRef.current) clearInterval(twoFATimerRef.current)
+      return
     }
-  }, [twoFAOpen])
+
+    // Calculate initial countdown
+    const updateCountdown = () => {
+      const remaining = Math.max(0, Math.floor((currentTwoFA.deadline - Date.now()) / 1000))
+      setTwoFACountdown(remaining)
+      if (remaining <= 0) {
+        // Time expired — remove this request from queue
+        toast.error(`Время ожидания кода для ${currentTwoFA.username} истекло`)
+        setTwoFAQueue(prev => prev.filter(r => r.accountId !== currentTwoFA.accountId))
+      }
+    }
+
+    updateCountdown()
+    twoFATimerRef.current = setInterval(updateCountdown, 1000)
+    return () => { if (twoFATimerRef.current) clearInterval(twoFATimerRef.current) }
+  }, [currentTwoFA?.accountId, currentTwoFA?.deadline])
 
   const filtered = accounts
     .filter(a => platformFilter === "ALL" || a.platform === platformFilter)
@@ -341,13 +376,14 @@ export default function AccountsPage() {
   }
 
   const handleSubmit2FA = async () => {
-    if (!twoFACode.trim()) return
+    if (!twoFACode.trim() || !currentTwoFA) return
     setTwoFALoading(true)
     try {
-      await api.post(`/api/accounts/${twoFAAccountId}/verify-code`, { code: twoFACode.trim() })
-      toast.success("Код отправлен, ожидаем подтверждение...")
-      setTwoFAOpen(false)
-      if (twoFATimerRef.current) clearInterval(twoFATimerRef.current)
+      await api.post(`/api/accounts/${currentTwoFA.accountId}/verify-code`, { code: twoFACode.trim() })
+      toast.success(`${currentTwoFA.username}: код отправлен, ожидаем подтверждение...`)
+      // Remove current request from queue — next one will show automatically
+      setTwoFAQueue(prev => prev.filter(r => r.accountId !== currentTwoFA.accountId))
+      setTwoFACode("")
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Ошибка отправки кода")
     } finally {
@@ -733,10 +769,15 @@ export default function AccountsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 2FA Verification Dialog */}
-      <Dialog open={twoFAOpen} onOpenChange={(open) => {
-        if (!open && twoFATimerRef.current) clearInterval(twoFATimerRef.current)
-        setTwoFAOpen(open)
+      {/* 2FA Verification Dialog — queue-aware */}
+      <Dialog open={!!currentTwoFA} onOpenChange={(open) => {
+        if (!open) {
+          // Dismiss current request
+          if (currentTwoFA) {
+            setTwoFAQueue(prev => prev.filter(r => r.accountId !== currentTwoFA.accountId))
+          }
+          setTwoFACode("")
+        }
       }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -744,46 +785,87 @@ export default function AccountsPage() {
               <KeyRound className="size-5" />
               Код подтверждения
             </DialogTitle>
-            <DialogDescription>
-              {twoFAHint || "Платформа запросила код подтверждения"}
-            </DialogDescription>
+            {currentTwoFA && (
+              <DialogDescription className="flex flex-col gap-1">
+                <span>{currentTwoFA.hint || "Платформа запросила код подтверждения"}</span>
+              </DialogDescription>
+            )}
           </DialogHeader>
 
-          <div className="flex flex-col gap-4">
-            {/* Timer */}
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Clock className="size-4" />
-              <span>Осталось: {Math.floor(twoFATimeout / 60)}:{(twoFATimeout % 60).toString().padStart(2, "0")}</span>
-              {twoFATimeout < 60 && (
-                <Badge variant="destructive" className="text-xs">Мало времени!</Badge>
+          {currentTwoFA && (
+            <div className="flex flex-col gap-4">
+              {/* Account info — prominently shown */}
+              <div className="flex items-center gap-3 bg-accent/50 p-3 rounded-lg border border-border">
+                <Avatar className="size-10">
+                  <AvatarFallback className="text-sm bg-primary/10 text-primary font-semibold">
+                    {(currentTwoFA.username || "?").slice(0, 2).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-foreground truncate">{currentTwoFA.username}</div>
+                  <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                      {currentTwoFA.platform === "TIKTOK" ? "TikTok" : "YouTube"}
+                    </Badge>
+                    <span>•</span>
+                    <span>{currentTwoFA.type === "email" ? "📧 Email" : currentTwoFA.type === "sms" ? "📱 SMS" : currentTwoFA.type === "authenticator" ? "🔐 Authenticator" : "🔑 Код"}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Queue counter */}
+              {twoFAQueue.length > 1 && (
+                <div className="flex items-center justify-between text-xs bg-primary/5 px-3 py-2 rounded-lg border border-primary/10">
+                  <span className="text-primary font-medium">
+                    Ожидают подтверждения: {twoFAQueue.length} аккаунтов
+                  </span>
+                  <span className="text-muted-foreground">
+                    Текущий: 1 из {twoFAQueue.length}
+                  </span>
+                </div>
               )}
-            </div>
 
-            {/* Code input */}
-            <div className="flex flex-col gap-2">
-              <Label>Введите код {twoFAType === "email" ? "из email" : twoFAType === "sms" ? "из SMS" : twoFAType === "authenticator" ? "из приложения" : "подтверждения"}</Label>
-              <Input
-                placeholder="123456"
-                value={twoFACode}
-                onChange={(e) => setTwoFACode(e.target.value.replace(/[^0-9]/g, "").slice(0, 8))}
-                className="text-center text-2xl font-mono tracking-[0.3em] h-14"
-                autoFocus
-                onKeyDown={(e) => { if (e.key === "Enter") handleSubmit2FA() }}
-                disabled={twoFALoading}
-              />
-            </div>
+              {/* Timer */}
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Clock className="size-4" />
+                <span>Осталось: {Math.floor(twoFACountdown / 60)}:{(twoFACountdown % 60).toString().padStart(2, "0")}</span>
+                {twoFACountdown < 60 && twoFACountdown > 0 && (
+                  <Badge variant="destructive" className="text-xs">Мало времени!</Badge>
+                )}
+              </div>
 
-            <div className="flex items-start gap-2 text-xs text-muted-foreground bg-accent/50 p-3 rounded-lg">
-              <AlertCircle className="size-4 mt-0.5 shrink-0" />
-              <span>Код будет отправлен воркеру, который введёт его в браузере. После отправки дождитесь результата.</span>
-            </div>
-          </div>
+              {/* Code input */}
+              <div className="flex flex-col gap-2">
+                <Label>Введите код {currentTwoFA.type === "email" ? "из email" : currentTwoFA.type === "sms" ? "из SMS" : currentTwoFA.type === "authenticator" ? "из приложения" : "подтверждения"}</Label>
+                <Input
+                  placeholder="123456"
+                  value={twoFACode}
+                  onChange={(e) => setTwoFACode(e.target.value.replace(/[^0-9]/g, "").slice(0, 8))}
+                  className="text-center text-2xl font-mono tracking-[0.3em] h-14"
+                  autoFocus
+                  onKeyDown={(e) => { if (e.key === "Enter") handleSubmit2FA() }}
+                  disabled={twoFALoading}
+                />
+              </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => {
-              setTwoFAOpen(false)
-              if (twoFATimerRef.current) clearInterval(twoFATimerRef.current)
-            }} disabled={twoFALoading}>Отмена</Button>
+              <div className="flex items-start gap-2 text-xs text-muted-foreground bg-accent/50 p-3 rounded-lg">
+                <AlertCircle className="size-4 mt-0.5 shrink-0" />
+                <span>Код будет отправлен воркеру, который введёт его в браузере. После отправки дождитесь результата.</span>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="flex-row gap-2 sm:justify-between">
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => {
+                if (currentTwoFA) {
+                  setTwoFAQueue(prev => prev.filter(r => r.accountId !== currentTwoFA.accountId))
+                }
+                setTwoFACode("")
+              }} disabled={twoFALoading}>
+                {twoFAQueue.length > 1 ? "Пропустить" : "Отмена"}
+              </Button>
+            </div>
             <Button onClick={handleSubmit2FA} disabled={twoFALoading || !twoFACode.trim()} className="active:scale-[0.97] transition-transform">
               {twoFALoading ? <><Loader2 className="size-4 mr-2 animate-spin" />Отправка...</> : "Подтвердить"}
             </Button>
@@ -803,3 +885,4 @@ function timeAgo(dateStr: string): string {
   if (hours < 24) return `${hours} ч назад`
   return `${Math.floor(hours / 24)} дн назад`
 }
+
