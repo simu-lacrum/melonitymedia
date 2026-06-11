@@ -1,15 +1,16 @@
 // ─────────────────────────────────────────────────────────────
-// Warmup Handler v3 — Configurable Progressive Curriculum
+// Warmup Handler v4 — Niche-Focused Progressive Curriculum
 //
-// MAJOR CHANGES from v2:
-// 1. User-configurable warmup duration (3–21 days, default 10)
-// 2. Phase boundaries scale proportionally:
-//    - Phase 1 (passive): days 1 → 30% of total
-//    - Phase 2 (light):   next 30%
-//    - Phase 3 (active):  remaining 40%
-// 3. Day counter derived from warmupStartedAt (DB, not payload)
-// 4. Uses Patchright + ghost-cursor for human behavior
-// 5. Tracks warmup day via DB (warmupStartedAt + warmupDays)
+// MAJOR CHANGES from v3:
+// 1. Niche-focused browsing: uses TikTok search (#hashtag) to find
+//    videos in user's niche instead of random FYP
+// 2. Reduced like/follow ratios to avoid bot detection
+// 3. Follow cap (max 2-3 per session) with probability 5%
+// 4. Longer session durations (20-30 min like real users)
+// 5. Better comment pool (3-5 word phrases, not emoji spam)
+// 6. Resilient selectors: aria-label/text fallbacks for all data-e2e
+// 7. YouTube Shorts warmup support
+// 8. Passive phase allows 1-2 likes to look human
 //
 // Each day runs as a separate BullMQ job — cron dispatches daily.
 // ─────────────────────────────────────────────────────────────────
@@ -47,13 +48,57 @@ interface WarmupPhaseContext {
 }
 
 // ── Warmup Comments Pool ────────────────────────────────────
-// Generic positive comments that won't trigger spam filters
+// Human-like comments (3-5 words minimum). Single emoji = spam flag!
 
 const COMMENT_POOL = [
-  '❤️', '🔥🔥', 'wow', 'nice!!', 'cool', '😍', 'love this',
-  'amazing', 'so good', '👏👏', 'awesome', 'great content',
-  '💯', 'love it', 'perfect', '🙌', 'beautiful', 'incredible',
+  'this is so good 🔥', 'love this vibe ❤️', 'wait this is actually fire',
+  'okay this is amazing wow', 'need more of this 🙌', 'bro this is perfect',
+  'how is this so good lol', 'this made my day honestly', 'underrated content fr',
+  'the editing tho 👏', 'I keep coming back to this', 'saving this for later',
+  'no way this is real 😍', 'literally obsessed with this', "chef's kiss 💯",
+  'this deserves way more views', "can't stop watching this lmao",
+  'the talent here is insane', 'why is nobody talking about this',
+  'this just made my whole week', 'the effort in this is crazy',
 ];
+
+// ── Resilient Selectors ────────────────────────────────────
+// TikTok rotates data-e2e attributes. We use fallback chains.
+
+const SEL = {
+  TIKTOK: {
+    LIKE: '[data-e2e="like-icon"], [data-e2e="like-btn"], ' +
+      'button[aria-label*="Like" i], button[aria-label*="like" i], ' +
+      'span[data-e2e="like-icon"]',
+    COMMENT_BTN: '[data-e2e="comment-icon"], [data-e2e="comment-btn"], ' +
+      'button[aria-label*="Comment" i], button[aria-label*="comment" i]',
+    COMMENT_INPUT: '[data-e2e="comment-input"], [contenteditable="true"][data-e2e*="comment"], ' +
+      '[placeholder*="Add comment" i], [placeholder*="comment" i], ' +
+      '[contenteditable="true"][class*="comment"]',
+    FOLLOW: '[data-e2e="follow-button"], [data-e2e="follow-btn"], ' +
+      'button:has-text("Follow"), button:has-text("Подписаться")',
+    SAVE: '[data-e2e="browse-icon"], [data-e2e="save-icon"], [data-e2e="bookmark-icon"], ' +
+      'button[aria-label*="Save" i], button[aria-label*="Сохранить" i], ' +
+      'button[aria-label*="Bookmark" i]',
+    SEARCH_INPUT: 'input[data-e2e="search-user-input"], input[type="search"], ' +
+      'input[aria-label*="Search" i], input[placeholder*="Search" i]',
+    SEARCH_BTN: 'button[data-e2e="search-icon"], button[type="submit"], ' +
+      'button[aria-label*="Search" i]',
+    VIDEO_CARD: '[data-e2e="challenge-item"] a, [data-e2e="search-card-desc"] a, ' +
+      '[data-e2e="challenge-card"] a, a[href*="/video/"]',
+    HASHTAG_LINK: '[data-e2e="challenge-item"] a, [data-e2e="search-common-link"], ' +
+      'a[href*="/tag/"]',
+  },
+  YOUTUBE: {
+    LIKE: 'button[aria-label*="like" i], button[aria-label*="Нравится" i], ' +
+      '#like-button button, ytd-toggle-button-renderer button',
+    COMMENT_BTN: '#comments-button button, button[aria-label*="Comment" i]',
+    COMMENT_INPUT: '#contenteditable-root, #placeholder-area, ' +
+      '[contenteditable="true"][aria-label*="comment" i]',
+    SUBSCRIBE: '#subscribe-button button, button[aria-label*="Subscribe" i], ' +
+      'button:has-text("Subscribe"), button:has-text("Подписаться")',
+    SHORTS_CONTAINER: 'ytd-reel-video-renderer, ytd-shorts',
+  },
+} as const;
 
 // ── Main ────────────────────────────────────────────────────
 
@@ -75,9 +120,6 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     const totalDays = ctxAcc.warmupDays;
 
     // BUG-M7 fix: use sequential day progression instead of calendar-based.
-    // If the worker was offline for 3 days, we should NOT skip phases 3→6.
-    // Instead, we increment from the last completed warmup day + 1.
-    // data.warmupDay override is still supported for admin re-runs.
     let warmupDay: number;
     if (data.warmupDay !== undefined) {
       warmupDay = data.warmupDay;
@@ -103,21 +145,11 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     const page = ctx.page;
     const cursor = await createPageCursor(page);
 
-    const baseUrl =
-      ctxAcc.platform === 'TIKTOK'
-        ? 'https://www.tiktok.com/foryou'
-        : 'https://www.youtube.com/shorts';
-
-    await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(_randomDelay(3000, 5000));
-
     // Phase boundaries (proportional to total warmup days)
     const passiveEnd = Math.max(1, Math.ceil(totalDays * 0.3));
     const lightEnd = Math.max(passiveEnd + 1, Math.ceil(totalDays * 0.6));
 
-    // Use user-provided hashtags for warmup — no hardcoded defaults
-    // Warmup browsing should match the account's actual content niche
-    // to train TikTok's recommendation model correctly (BUG-M3 fix)
+    // Use user-provided hashtags for niche-focused warmup
     const mergedHashtags = Array.isArray(data.hashtags) && data.hashtags.length > 0
       ? [...new Set(data.hashtags)]
       : [];  // No hashtags = pure FYP browsing, which is also valid
@@ -128,6 +160,29 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
       platform: ctxAcc.platform,
       hashtags: mergedHashtags,
     };
+
+    // ── Navigate to initial niche content ──────────────────
+    // If hashtags provided, start by searching for them (trains TikTok algo)
+    // Otherwise, just go to FYP
+    if (ctxAcc.platform === 'TIKTOK') {
+      if (mergedHashtags.length > 0) {
+        const startTag = mergedHashtags[Math.floor(Math.random() * mergedHashtags.length)];
+        await _navigateToHashtagSearch(page, cursor, startTag, logger);
+      } else {
+        await page.goto('https://www.tiktok.com/foryou', { waitUntil: 'domcontentloaded' });
+      }
+    } else {
+      // YouTube — Shorts feed or search
+      if (mergedHashtags.length > 0) {
+        const startTag = mergedHashtags[Math.floor(Math.random() * mergedHashtags.length)];
+        await page.goto(`https://www.youtube.com/results?search_query=%23${encodeURIComponent(startTag)}&sp=EgIQAQ%253D%253D`, {
+          waitUntil: 'domcontentloaded',
+        });
+      } else {
+        await page.goto('https://www.youtube.com/shorts', { waitUntil: 'domcontentloaded' });
+      }
+    }
+    await page.waitForTimeout(_randomDelay(3000, 5000));
 
     if (warmupDay <= passiveEnd) {
       await _passiveWatching(page, cursor, phaseCtx, logger, job);
@@ -202,9 +257,59 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
 }
 
 
+// ── Hashtag Search Navigation ───────────────────────────────
+// Navigate to TikTok search and look up a hashtag. This trains the
+// algorithm to show niche content on FYP and makes browsing look human.
+
+async function _navigateToHashtagSearch(
+  page: Page,
+  cursor: Awaited<ReturnType<typeof createPageCursor>>,
+  hashtag: string,
+  logger: SocketLogger,
+): Promise<void> {
+  logger.info(`🔍 Поиск по хештегу #${hashtag} в TikTok...`);
+
+  // Method 1: Direct search URL (most reliable)
+  try {
+    await page.goto(
+      `https://www.tiktok.com/search?q=%23${encodeURIComponent(hashtag)}`,
+      { waitUntil: 'domcontentloaded', timeout: 20000 },
+    );
+    await page.waitForTimeout(_randomDelay(2000, 4000));
+
+    // Try to click on a video from search results
+    try {
+      await humanClick(page, cursor, SEL.TIKTOK.VIDEO_CARD, { postClickDelay: 2000 });
+      logger.info(`  ▶ Открыто видео из результатов поиска #${hashtag}`);
+      return;
+    } catch {
+      // No video cards found — try tag page
+    }
+  } catch {
+    logger.warn(`  ⚠️ Не удалось открыть поиск — пробую страницу хештега`);
+  }
+
+  // Method 2: Direct tag page
+  try {
+    await page.goto(
+      `https://www.tiktok.com/tag/${encodeURIComponent(hashtag)}`,
+      { waitUntil: 'domcontentloaded', timeout: 15000 },
+    );
+    await page.waitForTimeout(_randomDelay(2000, 3000));
+    await humanClick(page, cursor, SEL.TIKTOK.VIDEO_CARD, { postClickDelay: 2000 });
+    logger.info(`  ▶ Открыто видео со страницы #${hashtag}`);
+  } catch {
+    // Fallback to FYP
+    logger.warn(`  ⚠️ Не удалось открыть #${hashtag} — переход на FYP`);
+    await page.goto('https://www.tiktok.com/foryou', { waitUntil: 'domcontentloaded' });
+  }
+}
+
+
 // ── Day 1-3: Passive Watching ───────────────────────────────
-// Just scroll FYP, watch videos, no engagement at all.
-// New accounts that like/comment on day 1 = suspicious.
+// Scroll FYP / niche content, watch videos, minimal engagement.
+// New accounts that mass-like on day 1 = suspicious.
+// Allow 1-2 likes per session to look human (even passive users like occasionally).
 
 async function _passiveWatching(
   page: Page,
@@ -213,12 +318,23 @@ async function _passiveWatching(
   logger: SocketLogger,
   job: Job,
 ): Promise<void> {
-  const watchCount = _randomDelay(8, 15);
-  logger.info(`Day ${data.warmupDay}: Пассивный просмотр FYP (${watchCount} видео)`);
+  const watchCount = _randomDelay(10, 18);
+  logger.info(`Day ${data.warmupDay}: Пассивный просмотр (${watchCount} видео, 0-2 лайка)`);
+
+  let likes = 0;
+  const maxLikes = _randomDelay(0, 2); // 0-2 likes per passive session
 
   for (let i = 0; i < watchCount; i++) {
-    // Watch each video for 10-30 seconds
-    const watchTime = _randomDelay(10000, 30000);
+    // Occasionally switch to a different hashtag (niche training)
+    if (data.hashtags.length > 0 && Math.random() < 0.15 && i > 0) {
+      const tag = data.hashtags[Math.floor(Math.random() * data.hashtags.length)];
+      if (data.platform === 'TIKTOK') {
+        await _navigateToHashtagSearch(page, cursor, tag, logger);
+      }
+    }
+
+    // Watch each video for 15-60 seconds (like a real user watching full videos)
+    const watchTime = _randomDelay(15000, 60000);
     await page.waitForTimeout(watchTime);
 
     // Random mouse idle movement (humans move mouse while watching)
@@ -226,18 +342,31 @@ async function _passiveWatching(
       await humanIdleMove(page, cursor);
     }
 
+    // Very occasional like (1-2 per session max)
+    if (likes < maxLikes && Math.random() < 0.1) {
+      try {
+        const likeSel = data.platform === 'TIKTOK' ? SEL.TIKTOK.LIKE : SEL.YOUTUBE.LIKE;
+        await humanClick(page, cursor, likeSel, { postClickDelay: 500 });
+        likes++;
+        logger.info(`  ❤️ Лайк видео ${i + 1} (${likes}/${maxLikes})`);
+      } catch { /* element not found */ }
+    }
+
     // Scroll to next video
     await humanScroll(page, _randomDelay(300, 600));
-    await page.waitForTimeout(_randomDelay(1000, 2000));
+    await page.waitForTimeout(_randomDelay(1500, 3000));
 
     await job.updateProgress(Math.round((i / watchCount) * 100));
     logger.info(`  Просмотрено видео ${i + 1}/${watchCount} (${Math.round(watchTime / 1000)}с)`);
   }
+
+  logger.info(`  Итого: ${likes} лайков (пассив)`);
 }
 
 // ── Day 4-6: Light Engagement ───────────────────────────────
-// Start liking some videos (30-50% of watched).
-// One comment per session. A few saves.
+// Start liking niche videos (20-40% of watched).
+// One meaningful comment per session. Occasional saves.
+// Browsing is focused on user's hashtags.
 
 async function _lightEngagement(
   page: Page,
@@ -246,68 +375,101 @@ async function _lightEngagement(
   logger: SocketLogger,
   job: Job,
 ): Promise<void> {
-  const watchCount = _randomDelay(10, 18);
-  // M-3 FIX: Use proportional phase calculation instead of hardcoded Day 4 offset
+  const watchCount = _randomDelay(12, 20);
+  // M-3 FIX: Use proportional phase calculation
   const passiveEnd = Math.max(1, Math.ceil(data.warmupDays * 0.3));
   const lightStart = passiveEnd + 1;
   const lightEnd = Math.max(passiveEnd + 1, Math.ceil(data.warmupDays * 0.6));
   const lightSpan = Math.max(1, lightEnd - lightStart + 1);
   const dayInPhase = data.warmupDay - lightStart;
-  const likeProb = 0.3 + (dayInPhase / lightSpan) * 0.2; // 30% → 50% across the phase
+  const likeProb = 0.2 + (dayInPhase / lightSpan) * 0.2; // 20% → 40% across the phase
   let liked = 0;
   let commented = false;
 
   logger.info(`Day ${data.warmupDay}: Лёгкая активность (${watchCount} видео, like ~${Math.round(likeProb * 100)}%)`);
 
   // BUG-H4 fix: compute comment target index ONCE before the loop
-  // Previously _randomDelay was called on every iteration inside the loop,
-  // making comment placement non-deterministic per iteration.
-  const commentAtIndex = data.warmupDay >= 5 ? _randomDelay(3, Math.max(3, watchCount - 2)) : -1;
+  const commentAtIndex = _randomDelay(4, Math.max(4, watchCount - 2));
 
   for (let i = 0; i < watchCount; i++) {
-    // Occasionally go to a hashtag page to watch videos related to the topic
-    if (data.platform === 'TIKTOK' && Math.random() < 0.2 && data.hashtags.length > 0) {
+    // Navigate to niche hashtag content (30% chance)
+    if (data.hashtags.length > 0 && Math.random() < 0.3 && i > 0) {
       const randomTag = data.hashtags[Math.floor(Math.random() * data.hashtags.length)];
-      logger.info(`  🔍 Переход по хештегу #${randomTag}`);
-      try {
-        await page.goto(`https://www.tiktok.com/tag/${randomTag}`, { waitUntil: 'domcontentloaded' });
-        await page.waitForTimeout(_randomDelay(2000, 4000));
-        // Click on the first video in the tag page
-        await humanClick(page, cursor, '[data-e2e="challenge-item"] a', { postClickDelay: 2000 });
-      } catch { /* fallback to fyp if failed */ }
+      if (data.platform === 'TIKTOK') {
+        await _navigateToHashtagSearch(page, cursor, randomTag, logger);
+      } else {
+        try {
+          await page.goto(
+            `https://www.youtube.com/results?search_query=%23${encodeURIComponent(randomTag)}&sp=EgIQAQ%253D%253D`,
+            { waitUntil: 'domcontentloaded' },
+          );
+          await page.waitForTimeout(_randomDelay(2000, 4000));
+          // Click on first shorts video
+          try {
+            await humanClick(page, cursor, 'a[href*="/shorts/"]', { postClickDelay: 2000 });
+          } catch { /* fallback to scroll */ }
+        } catch { /* ignore */ }
+      }
     }
 
-    // Watch video
-    const watchTime = _randomDelay(8000, 25000);
+    // Watch video — longer durations (real users watch 15-45s)
+    const watchTime = _randomDelay(15000, 45000);
     await page.waitForTimeout(watchTime);
 
-    // Like with probability
-    if (Math.random() < likeProb && data.platform === 'TIKTOK') {
+    // Like with probability — only niche content
+    if (Math.random() < likeProb) {
       try {
-        await humanClick(page, cursor, '[data-e2e="like-icon"]', { postClickDelay: 500 });
+        const likeSel = data.platform === 'TIKTOK' ? SEL.TIKTOK.LIKE : SEL.YOUTUBE.LIKE;
+        await humanClick(page, cursor, likeSel, { postClickDelay: 500 });
         liked++;
         logger.info(`  ❤️ Лайк видео ${i + 1}`);
       } catch { /* element not found */ }
     }
 
-    // One comment per session (day 5+)
+    // One comment per session (meaningful, not emoji spam)
     if (!commented && i === commentAtIndex) {
       const comment = COMMENT_POOL[Math.floor(Math.random() * COMMENT_POOL.length)];
       try {
         if (data.platform === 'TIKTOK') {
-          await humanClick(page, cursor, '[data-e2e="comment-icon"]', { postClickDelay: 1000 });
+          await humanClick(page, cursor, SEL.TIKTOK.COMMENT_BTN, { postClickDelay: 1500 });
           await page.waitForTimeout(_randomDelay(1000, 2000));
-          await humanType(page, '[data-e2e="comment-input"]', comment);
+          await humanType(page, SEL.TIKTOK.COMMENT_INPUT, comment);
           await humanPressEnter(page);
           commented = true;
           logger.info(`  💬 Комментарий: "${comment}"`);
+        } else {
+          await humanClick(page, cursor, SEL.YOUTUBE.COMMENT_BTN, { postClickDelay: 1500 });
+          await page.waitForTimeout(_randomDelay(1500, 3000));
+          await humanType(page, SEL.YOUTUBE.COMMENT_INPUT, comment);
+          // YouTube: click "Comment" button to submit
+          try {
+            await humanClick(page, cursor,
+              '#submit-button button, button[aria-label*="Comment" i], button:has-text("Comment")',
+              { postClickDelay: 2000 },
+            );
+          } catch { /* auto-submit or not found */ }
+          commented = true;
+          logger.info(`  💬 Комментарий (YouTube): "${comment}"`);
         }
       } catch { /* skip */ }
     }
 
+    // Save (bookmark) occasionally — 10%
+    if (Math.random() < 0.1 && data.platform === 'TIKTOK') {
+      try {
+        await humanClick(page, cursor, SEL.TIKTOK.SAVE, { postClickDelay: 500 });
+        logger.info(`  🔖 Сохранено видео ${i + 1}`);
+      } catch { /* skip */ }
+    }
+
+    // Random idle move
+    if (Math.random() < 0.3) {
+      await humanIdleMove(page, cursor);
+    }
+
     // Scroll to next
     await humanScroll(page, _randomDelay(300, 600));
-    await page.waitForTimeout(_randomDelay(1000, 3000));
+    await page.waitForTimeout(_randomDelay(1500, 3000));
 
     await job.updateProgress(Math.round((i / watchCount) * 100));
   }
@@ -316,8 +478,9 @@ async function _lightEngagement(
 }
 
 // ── Day 7-10: Active Engagement ─────────────────────────────
-// Higher like rate (60-80%), 2-3 comments, saves, follow 1-2 users.
-// By day 10, the account looks like an organic user.
+// Higher like rate (35-55%), 2-3 comments, saves, follow 1-3 users.
+// Follow ONLY niche accounts (those who post hashtag content).
+// By day 10, the account looks like an organic user in the niche.
 
 async function _activeEngagement(
   page: Page,
@@ -326,69 +489,101 @@ async function _activeEngagement(
   logger: SocketLogger,
   job: Job,
 ): Promise<void> {
-  const watchCount = _randomDelay(12, 20);
-  // M-3 FIX: Use proportional phase calculation instead of hardcoded Day 7 offset
+  const watchCount = _randomDelay(15, 25);
+  // M-3 FIX: Use proportional phase calculation
   const lightEnd = Math.max(2, Math.ceil(data.warmupDays * 0.6));
   const activeStart = lightEnd + 1;
   const activeSpan = Math.max(1, data.warmupDays - activeStart + 1);
   const dayInPhase = data.warmupDay - activeStart;
-  const likeProb = 0.6 + (dayInPhase / activeSpan) * 0.2; // 60% → 80% across the phase
+  const likeProb = 0.35 + (dayInPhase / activeSpan) * 0.2; // 35% → 55% across the phase
   let liked = 0;
   let comments = 0;
   const maxComments = _randomDelay(2, 3);
+  let follows = 0;
+  const maxFollows = _randomDelay(1, 3); // Max 1-3 follows per session
 
-  logger.info(`Day ${data.warmupDay}: Активная активность (${watchCount} видео, like ~${Math.round(likeProb * 100)}%)`);
+  logger.info(`Day ${data.warmupDay}: Активная активность (${watchCount} видео, like ~${Math.round(likeProb * 100)}%, max follows: ${maxFollows})`);
 
   for (let i = 0; i < watchCount; i++) {
-    // Navigating to hashtag pages more frequently during active engagement
-    if (data.platform === 'TIKTOK' && Math.random() < 0.3 && data.hashtags.length > 0) {
+    // Navigate to niche hashtag content more frequently (40%)
+    if (data.hashtags.length > 0 && Math.random() < 0.4 && i > 0) {
       const randomTag = data.hashtags[Math.floor(Math.random() * data.hashtags.length)];
-      logger.info(`  🔍 Поиск и переход по хештегу #${randomTag}`);
-      try {
-        await page.goto(`https://www.tiktok.com/tag/${randomTag}`, { waitUntil: 'domcontentloaded' });
-        await page.waitForTimeout(_randomDelay(2000, 4000));
-        await humanClick(page, cursor, '[data-e2e="challenge-item"] a', { postClickDelay: 2000 });
-      } catch { /* fallback to fyp if failed */ }
+      if (data.platform === 'TIKTOK') {
+        await _navigateToHashtagSearch(page, cursor, randomTag, logger);
+      } else {
+        try {
+          await page.goto(
+            `https://www.youtube.com/results?search_query=%23${encodeURIComponent(randomTag)}&sp=EgIQAQ%253D%253D`,
+            { waitUntil: 'domcontentloaded' },
+          );
+          await page.waitForTimeout(_randomDelay(2000, 4000));
+          try {
+            await humanClick(page, cursor, 'a[href*="/shorts/"]', { postClickDelay: 2000 });
+          } catch { /* fallback */ }
+        } catch { /* ignore */ }
+      }
     }
 
-    const watchTime = _randomDelay(6000, 20000);
+    // Watch video — 15-45 seconds
+    const watchTime = _randomDelay(15000, 45000);
     await page.waitForTimeout(watchTime);
 
-    // Like
-    if (Math.random() < likeProb && data.platform === 'TIKTOK') {
+    // Like — only with probability (NOT every video!)
+    if (Math.random() < likeProb) {
       try {
-        await humanClick(page, cursor, '[data-e2e="like-icon"]', { postClickDelay: 500 });
+        const likeSel = data.platform === 'TIKTOK' ? SEL.TIKTOK.LIKE : SEL.YOUTUBE.LIKE;
+        await humanClick(page, cursor, likeSel, { postClickDelay: 500 });
         liked++;
       } catch { /* skip */ }
     }
 
-    // Comments (up to maxComments per session)
-    if (comments < maxComments && Math.random() < 0.3) {
+    // Comments (up to maxComments per session, 25% chance per video)
+    if (comments < maxComments && Math.random() < 0.25) {
       const comment = COMMENT_POOL[Math.floor(Math.random() * COMMENT_POOL.length)];
       try {
         if (data.platform === 'TIKTOK') {
-          await humanClick(page, cursor, '[data-e2e="comment-icon"]', { postClickDelay: 1000 });
+          await humanClick(page, cursor, SEL.TIKTOK.COMMENT_BTN, { postClickDelay: 1500 });
           await page.waitForTimeout(_randomDelay(1000, 2000));
-          await humanType(page, '[data-e2e="comment-input"]', comment);
+          await humanType(page, SEL.TIKTOK.COMMENT_INPUT, comment);
           await humanPressEnter(page);
           comments++;
+          logger.info(`  💬 Комментарий: "${comment}"`);
+        } else {
+          await humanClick(page, cursor, SEL.YOUTUBE.COMMENT_BTN, { postClickDelay: 1500 });
+          await page.waitForTimeout(_randomDelay(1500, 3000));
+          await humanType(page, SEL.YOUTUBE.COMMENT_INPUT, comment);
+          try {
+            await humanClick(page, cursor,
+              '#submit-button button, button[aria-label*="Comment" i]',
+              { postClickDelay: 2000 },
+            );
+          } catch { /* auto-submit */ }
+          comments++;
+          logger.info(`  💬 Комментарий (YouTube): "${comment}"`);
         }
       } catch { /* skip */ }
     }
 
-    // Save (bookmark) occasionally
-    if (Math.random() < 0.15 && data.platform === 'TIKTOK') {
+    // Save (bookmark) occasionally — 12%
+    if (Math.random() < 0.12 && data.platform === 'TIKTOK') {
       try {
-        await humanClick(page, cursor, '[data-e2e="browse-icon"]', { postClickDelay: 500 });
+        await humanClick(page, cursor, SEL.TIKTOK.SAVE, { postClickDelay: 500 });
         logger.info(`  🔖 Сохранено видео ${i + 1}`);
       } catch { /* skip */ }
     }
 
-    // Follow occasionally (max 1-2 per session)
-    if (Math.random() < 0.08 && data.platform === 'TIKTOK') {
+    // Follow — ONLY niche accounts, 5% chance, capped at maxFollows
+    if (follows < maxFollows && Math.random() < 0.05) {
       try {
-        await humanClick(page, cursor, '[data-e2e="follow-button"]', { postClickDelay: 1000 });
-        logger.info(`  ➕ Подписка на автора`);
+        if (data.platform === 'TIKTOK') {
+          await humanClick(page, cursor, SEL.TIKTOK.FOLLOW, { postClickDelay: 1000 });
+          follows++;
+          logger.info(`  ➕ Подписка на автора (${follows}/${maxFollows})`);
+        } else {
+          await humanClick(page, cursor, SEL.YOUTUBE.SUBSCRIBE, { postClickDelay: 1000 });
+          follows++;
+          logger.info(`  ➕ Подписка на канал (${follows}/${maxFollows})`);
+        }
       } catch { /* skip */ }
     }
 
@@ -398,11 +593,11 @@ async function _activeEngagement(
     }
 
     await humanScroll(page, _randomDelay(300, 600));
-    await page.waitForTimeout(_randomDelay(1000, 3000));
+    await page.waitForTimeout(_randomDelay(1500, 3000));
     await job.updateProgress(Math.round((i / watchCount) * 100));
   }
 
-  logger.info(`  Итого: ${liked} лайков, ${comments} комментариев`);
+  logger.info(`  Итого: ${liked} лайков, ${comments} комментариев, ${follows} подписок`);
 }
 
 // ── Utility ─────────────────────────────────────────────────

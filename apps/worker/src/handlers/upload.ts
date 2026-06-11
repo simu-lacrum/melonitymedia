@@ -243,14 +243,21 @@ async function _uploadToTikTok(
   proxyUrl?: string,
   fingerprint?: any
 ): Promise<void> {
-  // Navigate to TikTok upload
-  logger.info('Переход на страницу загрузки TikTok...');
-  await page.goto('https://www.tiktok.com/upload', { waitUntil: 'networkidle' });
+  // Navigate to TikTok Studio upload (2025+) — fallback to legacy /upload
+  logger.info('Переход на страницу загрузки TikTok Studio...');
+  await page.goto('https://www.tiktok.com/tiktokstudio/upload', { waitUntil: 'networkidle', timeout: 30000 });
   await page.waitForTimeout(_randomDelay(3000, 5000));
 
+  // Check if Studio loaded or we need legacy URL
+  let currentUrl = page.url();
+  if (!/tiktokstudio/i.test(currentUrl) && !/upload/i.test(currentUrl)) {
+    logger.warn('TikTok Studio не загрузился — пробую legacy /upload');
+    await page.goto('https://www.tiktok.com/upload', { waitUntil: 'networkidle', timeout: 30000 });
+    await page.waitForTimeout(_randomDelay(3000, 5000));
+    currentUrl = page.url();
+  }
+
   // Check auth status — BUG-10 fix: check URL instead of body text
-  // Body text scanning hits false positives ("Log in" in sidebar/footer)
-  const currentUrl = page.url();
   if (/\/login|accounts\.tiktok\.com/i.test(currentUrl)) {
     throw new Error('Не удалось войти в TikTok — cookies невалидны (перенаправлен на login)');
   }
@@ -268,8 +275,13 @@ async function _uploadToTikTok(
 
   // Fill caption with human typing
   try {
-    const captionSelector = '[data-text="true"], .public-DraftEditor-content, [contenteditable="true"]';
-    await page.waitForSelector(captionSelector, { timeout: 10_000 });
+    // Resilient caption selectors — TikTok Studio + legacy DraftJS
+    const captionSelector =
+      '[data-text="true"], .public-DraftEditor-content, ' +
+      '[contenteditable="true"][role="textbox"], ' +
+      '[aria-label*="caption" i], [aria-label*="описание" i], ' +
+      '[contenteditable="true"]';
+    await page.waitForSelector(captionSelector, { timeout: 15_000 });
     await humanClick(page, cursor, captionSelector);
 
     // Build full caption: title + description + hashtags
@@ -309,17 +321,21 @@ async function _uploadToTikTok(
 
   // Click Post button with human mouse
   try {
-    const postSelector = 'button[data-e2e="upload-btn"]';
-    await page.waitForSelector(postSelector, { timeout: 5_000 });
+    // Resilient post button — data-e2e + text-based fallbacks
+    const postSelector =
+      'button[data-e2e="upload-btn"], button[data-e2e="post-btn"], ' +
+      'button:has-text("Post"), button:has-text("Опубликовать"), ' +
+      'div[role="button"]:has-text("Post"), div[role="button"]:has-text("Опубликовать")';
+    await page.waitForSelector(postSelector, { timeout: 10_000 });
     await humanClick(page, cursor, postSelector, { postClickDelay: 1000 });
     logger.info('Нажата кнопка публикации...');
   } catch {
-    // Fallback: find any Post/Upload button
-    const buttons = page.locator('button');
+    // Fallback: iterate all buttons and find Post/Upload
+    const buttons = page.locator('button, div[role="button"]');
     const count = await buttons.count();
     for (let i = 0; i < count; i++) {
       const text = await buttons.nth(i).textContent();
-      if (text?.includes('Post') || text?.includes('Опубликовать') || text?.includes('Upload')) {
+      if (text && /^\s*(Post|Опубликовать|Upload|Загрузить)\s*$/i.test(text)) {
         await buttons.nth(i).click();
         logger.info('Нажата кнопка публикации (fallback)');
         break;
@@ -413,11 +429,21 @@ async function _uploadToYouTube(
   logger.info('Авторизация YouTube успешна');
   await job.updateProgress(45);
 
-  // Click CREATE button → Upload video
+  // Click CREATE button → Upload video (resilient selectors)
   try {
-    await humanClick(page, cursor, '#upload-icon, ytcp-button#create-icon-button', { postClickDelay: 500 });
+    await humanClick(page, cursor,
+      '#upload-icon, #create-icon, ytcp-button#create-icon-button, ' +
+      'button[aria-label*="Create" i], button[aria-label*="Создать" i]',
+      { postClickDelay: 500 },
+    );
     await page.waitForTimeout(_randomDelay(500, 1000));
-    await humanClick(page, cursor, 'tp-yt-paper-item[test-id="upload-beta"], a[test-id="upload-beta"]', { postClickDelay: 1500 });
+    await humanClick(page, cursor,
+      'tp-yt-paper-item[test-id="upload-beta"], a[test-id="upload-beta"], ' +
+      '#text-item-0, tp-yt-paper-item:has-text("Upload video"), ' +
+      'tp-yt-paper-item:has-text("Upload videos"), ' +
+      'tp-yt-paper-item:has-text("Загрузить видео")',
+      { postClickDelay: 1500 },
+    );
   } catch {
     // Fallback: direct navigation to upload URL
     logger.warn('CREATE button not found, fallback to direct upload URL');
@@ -486,9 +512,15 @@ async function _uploadToYouTube(
   await page.waitForTimeout(_randomDelay(2000, 4000));
   await job.updateProgress(75);
 
-  // "Made for kids?" radio — select "No, it's not made for kids"
+  // "Made for kids?" radio — select "No, it's not made for kids" (resilient)
   try {
-    await humanClick(page, cursor, 'tp-yt-paper-radio-button[name="VIDEO_MADE_FOR_KIDS_MFK"][aria-disabled="false"]:not([checked]), tp-yt-paper-radio-button[name="VIDEO_MADE_FOR_KIDS_NOT_MFK"]', { postClickDelay: 800 });
+    await humanClick(page, cursor,
+      'tp-yt-paper-radio-button[name="VIDEO_MADE_FOR_KIDS_NOT_MFK"], ' +
+      'tp-yt-paper-radio-button[name="VIDEO_MADE_FOR_KIDS_MFK"]:not([checked]), ' +
+      '#radioLabel:has-text("No, it\'s not"), ' +
+      'tp-yt-paper-radio-button:has-text("not made for kids")',
+      { postClickDelay: 800 },
+    );
   } catch {
     logger.warn('Не удалось выбрать "Not made for kids" — продолжаем');
   }
@@ -503,9 +535,14 @@ async function _uploadToYouTube(
     }
   }
 
-  // Public visibility
+  // Public visibility (resilient)
   try {
-    await humanClick(page, cursor, 'tp-yt-paper-radio-button[name="PUBLIC"]', { postClickDelay: 500 });
+    await humanClick(page, cursor,
+      'tp-yt-paper-radio-button[name="PUBLIC"], ' +
+      '#radioLabel:has-text("Public"), ' +
+      'tp-yt-paper-radio-button:has-text("Public")',
+      { postClickDelay: 500 },
+    );
   } catch {
     logger.warn('Не удалось выбрать Public');
   }
