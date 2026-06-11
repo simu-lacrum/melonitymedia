@@ -33,8 +33,9 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
   // /logs namespace — live worker terminal
   const logsNamespace = io.of('/logs');
 
-  // Auth middleware: verify JWT from handshake
+  // Auth middleware: verify JWT from handshake OR accept worker userId
   logsNamespace.use((socket, next) => {
+    // Option 1: JWT token (from frontend browser)
     const token =
       socket.handshake.auth?.token ||
       socket.handshake.headers?.cookie
@@ -42,32 +43,43 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
         .find((c: string) => c.trim().startsWith('melonity_token='))
         ?.replace(/^\s*melonity_token=/, '');
 
-    if (!token) {
-      return next(new Error('Authentication required'));
+    if (token) {
+      try {
+        const payload = jwt.verify(token, JWT_SECRET) as TokenPayload;
+        (socket as any).userId = payload.id;
+        (socket as any).isWorker = false;
+        return next();
+      } catch {
+        return next(new Error('Invalid token'));
+      }
     }
 
-    try {
-      const payload = jwt.verify(token, JWT_SECRET) as TokenPayload;
-      (socket as any).userId = payload.id;
-      next();
-    } catch {
-      next(new Error('Invalid token'));
+    // Option 2: Worker auth with userId (from worker service)
+    const workerUserId = socket.handshake.auth?.userId;
+    if (workerUserId && typeof workerUserId === 'string') {
+      (socket as any).userId = workerUserId;
+      (socket as any).isWorker = true;
+      return next();
     }
+
+    return next(new Error('Authentication required'));
   });
 
   logsNamespace.on('connection', (socket) => {
     const userId = (socket as any).userId as string;
-    // Each user joins their own room for isolated log streaming
+    const isWorker = (socket as any).isWorker as boolean;
+    // Each connection joins the user's room for isolated log streaming
     socket.join(`user:${userId}`);
-    console.log(`[Socket] User ${userId} connected to /logs`);
+    console.log(`[Socket] ${isWorker ? 'Worker' : 'User'} ${userId} connected to /logs`);
 
     // ── Login verification event relay ────────────────────
-    // Worker emits these events to the /logs namespace.
-    // We relay them to the specific user's room.
+    // Worker emits these events. We relay them to ALL sockets
+    // in the user's room (including frontend clients).
     const loginEvents = ['login:success', 'login:failed', 'login:2fa_required'] as const;
     for (const event of loginEvents) {
       socket.on(event, (data: any) => {
-        logsNamespace.to(`user:${userId}`).emit(event, data);
+        // Broadcast to room (excluding the sender to avoid echo)
+        socket.to(`user:${userId}`).emit(event, data);
       });
     }
 
@@ -75,11 +87,17 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
     // Structured errors from ALL worker handlers (upload, warmup, etc.)
     // with code, title, message, and actionable advice.
     socket.on('worker:error', (data: any) => {
-      logsNamespace.to(`user:${userId}`).emit('worker:error', data);
+      socket.to(`user:${userId}`).emit('worker:error', data);
+    });
+
+    // ── Account status change events ────────────────────
+    // Worker emits when account status changes so frontend can update in real-time
+    socket.on('account:status_changed', (data: any) => {
+      socket.to(`user:${userId}`).emit('account:status_changed', data);
     });
 
     socket.on('disconnect', () => {
-      console.log(`[Socket] User ${userId} disconnected from /logs`);
+      console.log(`[Socket] ${isWorker ? 'Worker' : 'User'} ${userId} disconnected from /logs`);
     });
   });
 

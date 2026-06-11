@@ -262,32 +262,67 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
       await job.updateProgress(50);
       await page.waitForTimeout(2000);
 
-      // Check bad credentials first — use strict patterns to avoid false positives
-      // from body text that might contain "incorrect" in unrelated TikTok UI text
-      const errorText = await page.textContent('body') || '';
-      if (/password.*incorrect|incorrect.*password|неверный.*парол|парол.*невер|wrong.*password|password.*wrong/i.test(errorText)) {
-        await prisma.socialAccount.update({
-          where: { id: data.accountId },
-          data: { status: 'AUTH_NEEDED', lastError: 'Неверный пароль. Проверьте учётные данные и попробуйте снова.' },
-        });
-        emitLoginEvent(logger, data.accountId, 'login:failed', {
-          code: 'INVALID_CREDENTIALS',
-          message: 'Неверный пароль. Проверьте учётные данные и попробуйте снова.',
-        });
-        throw new LoginError('INVALID_CREDENTIALS', 'Wrong password');
-      }
+      // ── FIRST: check for 2FA/verification BEFORE password errors ──
+      // TikTok's verification page body text can contain words like "неверный"
+      // in unrelated UI elements, causing false "wrong password" detection.
+      const earlyFA = await detect2FAType(page, ctx.platform);
+      if (!earlyFA.has2FA) {
+        // Only check for password errors if NOT on a verification page
+        // Use specific error selectors instead of full body text to avoid false positives
+        let hasPasswordError = false;
+        try {
+          // TikTok shows login errors in specific toast/alert elements
+          const errorEl = page.locator('[class*="error"], [class*="alert"], [class*="toast"], [data-e2e*="error"], [class*="message-text"]');
+          const errorCount = await errorEl.count();
+          if (errorCount > 0) {
+            const errorText = await errorEl.allTextContents();
+            const combined = errorText.join(' ');
+            if (/password.*incorrect|incorrect.*password|неверный.*парол|парол.*невер|wrong.*password|password.*wrong/i.test(combined)) {
+              hasPasswordError = true;
+            }
+          }
+        } catch {
+          // Selector failed — fallback: do NOT check full body, just skip
+        }
 
-      if (/banned|suspended|заблокирован/i.test(errorText)) {
-        await prisma.socialAccount.update({
-          where: { id: data.accountId },
-          data: { status: 'BANNED' },
-        });
-        emitLoginEvent(logger, data.accountId, 'login:failed', {
-          code: 'ACCOUNT_BANNED',
-          message: 'Аккаунт заблокирован TikTok.',
-        });
-        throw new LoginError('ACCOUNT_BANNED', 'Account is banned by TikTok');
+        if (hasPasswordError) {
+          const errMsg = 'Неверный пароль. Проверьте учётные данные и попробуйте снова.';
+          await prisma.socialAccount.update({
+            where: { id: data.accountId },
+            data: { status: 'AUTH_NEEDED', lastError: errMsg },
+          });
+          emitLoginEvent(logger, data.accountId, 'login:failed', {
+            code: 'INVALID_CREDENTIALS',
+            message: errMsg,
+          });
+          throw new LoginError('INVALID_CREDENTIALS', 'Wrong password');
+        }
+
+        // Check for ban/suspension (only if not on verification page)
+        try {
+          const banEl = page.locator('[class*="error"], [class*="alert"], [class*="banned"]');
+          const banCount = await banEl.count();
+          if (banCount > 0) {
+            const banText = (await banEl.allTextContents()).join(' ');
+            if (/banned|suspended|заблокирован/i.test(banText)) {
+              await prisma.socialAccount.update({
+                where: { id: data.accountId },
+                data: { status: 'BANNED', lastError: 'Аккаунт заблокирован TikTok.' },
+              });
+              emitLoginEvent(logger, data.accountId, 'login:failed', {
+                code: 'ACCOUNT_BANNED',
+                message: 'Аккаунт заблокирован TikTok.',
+              });
+              throw new LoginError('ACCOUNT_BANNED', 'Account is banned by TikTok');
+            }
+          }
+        } catch (e) {
+          if (e instanceof LoginError) throw e;
+          // Selector failed — continue
+        }
       }
+      // If earlyFA.has2FA === true, we skip password checks entirely
+      // and let the 2FA handler below deal with it
     } else {
       // YouTube/Google login
       logger.info(`⌨️ Ввожу email...`);
@@ -564,6 +599,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
         ...(extractedUsername ? { username: extractedUsername } : {}),
       },
     });
+    emitStatusChange(logger, data.accountId, 'ALIVE', null);
 
     await job.updateProgress(100);
     logger.info(`✅ Вход завершён, cookies сохранены${extractedUsername ? `, username: ${extractedUsername}` : ''}`);
@@ -604,6 +640,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
         data: { status: 'AUTH_NEEDED', lastError: userMessage },
       }).catch(() => {});
 
+      emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', userMessage);
       emitLoginEvent(logger, data.accountId, 'login:failed', { code, message });
     }
 
@@ -626,5 +663,18 @@ function emitLoginEvent(
   const socket = (logger as any).socket;
   if (socket) {
     socket.emit(event, { accountId, ...data });
+  }
+}
+
+/** Emit account status change for real-time frontend updates */
+function emitStatusChange(
+  logger: SocketLogger,
+  accountId: string,
+  status: string,
+  lastError?: string | null,
+): void {
+  const socket = (logger as any).socket;
+  if (socket) {
+    socket.emit('account:status_changed', { accountId, status, lastError: lastError ?? undefined });
   }
 }

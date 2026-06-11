@@ -96,6 +96,28 @@ export default function AccountsPage() {
     fetchAccounts()
   }, [fetchAccounts])
 
+  // ── Auto-polling: refresh when accounts are in transitional states ──
+  React.useEffect(() => {
+    const hasTransitional = accounts.some(a =>
+      ['VERIFYING', 'WARMING_UP'].includes(a.status)
+    )
+    if (!hasTransitional) return
+
+    // Poll every 5s while accounts are verifying/warming
+    const interval = setInterval(() => {
+      fetchAccounts()
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [accounts, fetchAccounts])
+
+  // ── Background polling fallback (every 30s) ──
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      fetchAccounts()
+    }, 30000)
+    return () => clearInterval(interval)
+  }, [fetchAccounts])
+
   React.useEffect(() => {
     if (importOpen || proxyBindOpen) {
       api.get<{ proxies: ProxyItem[] }>("/api/proxies")
@@ -131,6 +153,15 @@ export default function AccountsPage() {
       setTwoFACode("")
       setTwoFAOpen(true)
       toast.info(data.hint || "Требуется код подтверждения")
+    })
+
+    // ── Real-time account status change (from worker) ──
+    socket.on("account:status_changed", (data: { accountId: string; status: string; lastError?: string }) => {
+      setAccounts(prev => prev.map(a =>
+        a.id === data.accountId
+          ? { ...a, status: data.status, lastError: data.lastError ?? a.lastError }
+          : a
+      ))
     })
 
     return () => {
