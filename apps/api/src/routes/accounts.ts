@@ -302,15 +302,17 @@ router.post('/import', async (req: Request, res: Response) => {
     const created: string[] = [];
     const failed: Array<{ line: number; reason: string }> = [];
 
-    // Resolve geo from proxy (if proxyId provided) so fingerprint matches proxy location
+    // Resolve geo + device class from proxy so fingerprint matches proxy location & type
     let proxyGeo: { country?: string; city?: string } | undefined;
+    let proxyIsMobile = false;
     if (proxyId) {
       const proxyRecord = await prisma.proxy.findFirst({
         where: { id: proxyId, userId: req.user!.id },
-        select: { country: true, dma: true },
+        select: { country: true, dma: true, type: true },
       });
       if (proxyRecord) {
         proxyGeo = { country: proxyRecord.country ?? undefined, city: proxyRecord.dma ?? undefined };
+        proxyIsMobile = proxyRecord.type === 'LTE_MOBILE';
       }
     }
 
@@ -333,8 +335,10 @@ router.post('/import', async (req: Request, res: Response) => {
         // Track import mode for login job dispatch
         let importMode: 'credentials' | 'cookies' = 'credentials';
 
-        // Generate fingerprint — use proxy geo for locale/timezone coherence
-        const fingerprint = generateFingerprint(accountId, proxyGeo);
+        // Generate fingerprint — mobile if LTE_MOBILE proxy, desktop otherwise
+        const fingerprint = proxyIsMobile
+          ? generateMobileFingerprint(accountId, proxyGeo)
+          : generateFingerprint(accountId, proxyGeo);
         data_.fingerprint = fingerprint as any;
 
         // Encrypt cookies if present

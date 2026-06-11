@@ -176,14 +176,16 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
     proxy: proxyConfig,
   });
 
+  const isMobileDevice = fingerprint.deviceClass === 'mobile';
+
   const context = await browser.newContext({
     viewport: fingerprint.viewport,
     locale: fingerprint.locale,
     timezoneId: fingerprint.timezone,
     userAgent: fingerprint.userAgent,
-    deviceScaleFactor: 1,
-    isMobile: false,
-    hasTouch: false,
+    deviceScaleFactor: fingerprint.devicePixelRatio ?? 1,
+    isMobile: isMobileDevice,
+    hasTouch: fingerprint.maxTouchPoints > 0,
     // Don't request geolocation — TikTok dislikes this
     geolocation: undefined,
   });
