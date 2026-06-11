@@ -336,6 +336,14 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
           // Only treat as rate-limit if we're still on login form
           const onLoginForm = await page.locator('input[name="username"], input[type="password"]').count();
           if (onLoginForm > 0) {
+            // Debug: log matched text and capture screenshot
+            const matched = rateLimitText.match(/maximum.*attempts|too many.*attempts|try again later|слишком.*попыток|повторите.*позже/i);
+            logger.info(`[RATE_LIMIT_DEBUG] Matched text: "${matched?.[0]}" | URL: ${page.url()} | onLoginForm: ${onLoginForm}`);
+            try {
+              const screenshotPath = `/tmp/rate-limit-${data.accountId}-${Date.now()}.png`;
+              await page.screenshot({ path: screenshotPath, fullPage: true });
+              logger.info(`[RATE_LIMIT_DEBUG] Screenshot saved: ${screenshotPath}`);
+            } catch { /* ignore screenshot errors */ }
             const errMsg = 'Слишком много попыток входа. TikTok заблокировал вход — попробуйте позже (через 15-30 минут).';
             await prisma.socialAccount.update({
               where: { id: data.accountId },
