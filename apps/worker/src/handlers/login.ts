@@ -107,19 +107,64 @@ async function detect2FAType(page: any, platform: 'TIKTOK' | 'YOUTUBE'): Promise
       return { has2FA: true, type: 'unknown', hint: 'TikTok запросил подтверждение входа' };
     }
   } else {
-    // YouTube/Google 2FA
-    const telInput = await page.locator('input[type="tel"], input[autocomplete="one-time-code"]').count();
-    if (telInput > 0) {
-      const bodyText = await page.textContent('body') || '';
-      if (/email|gmail|почт/i.test(bodyText)) return { has2FA: true, type: 'email', hint: 'Google запросил код из email' };
-      if (/sms|phone|телефон|номер/i.test(bodyText)) return { has2FA: true, type: 'sms', hint: 'Google запросил код из SMS' };
-      if (/authenticator|google auth/i.test(bodyText)) return { has2FA: true, type: 'authenticator', hint: 'Google запросил код из Authenticator' };
+    // YouTube/Google — extensive challenge detection
+    // Google uses many verification methods. Detect by URL, selectors, and content.
+    const currentUrl = page.url();
+    const bodyText = await page.textContent('body') || '';
+
+    // Google challenge URLs (most reliable signal)
+    const isChallengePage = /accounts\.google\.com\/(signin\/(challenge|v2\/challenge)|CheckCookie|ServiceLogin\/webreauth)/i.test(currentUrl)
+      || /challenge|interstitial|speedbump/i.test(currentUrl);
+
+    // ── Check 1: Code input field (email/SMS/TOTP) ──
+    const codeInput = await page.locator('input[type="tel"], input[autocomplete="one-time-code"], input[name="pin"], input[name="totpPin"], #totpPin').count();
+    if (codeInput > 0) {
+      if (/authenticator|google auth|аутентификат/i.test(bodyText)) return { has2FA: true, type: 'authenticator', hint: 'Google запросил код из приложения-аутентификатора (Google Authenticator)' };
+      if (/sms|text message|текстовое сообщение|phone.*number|номер.*телефон/i.test(bodyText)) return { has2FA: true, type: 'sms', hint: 'Google отправил SMS-код на привязанный номер телефона' };
+      if (/email|gmail|эл.*почт|recovery.*email|резервн.*адрес/i.test(bodyText)) return { has2FA: true, type: 'email', hint: 'Google отправил код на привязанный email' };
       return { has2FA: true, type: 'unknown', hint: 'Google запросил код подтверждения' };
     }
-    // Google "choose verification method" page
-    const challengeText = await page.textContent('body') || '';
-    if (/verify.*identity|подтверд.*личность/i.test(challengeText)) {
-      return { has2FA: true, type: 'unknown', hint: 'Google запросил подтверждение личности' };
+
+    // ── Check 2: "Tap Yes on your phone" / trusted device prompt ──
+    if (/tap.*yes|нажмите.*да|check.*phone|проверьте.*телефон|trying to sign in|пытается.*войти/i.test(bodyText) && isChallengePage) {
+      return { has2FA: true, type: 'sms', hint: 'Google просит подтвердить вход на доверенном устройстве. Откройте уведомление на телефоне и нажмите "Да".' };
+    }
+
+    // ── Check 3: Recovery email/phone selection page ──
+    if (/choose.*method|выберите.*способ|verify.*it.*s.*you|подтвердите.*что.*это|confirm.*recovery|подтверд.*восстановлен/i.test(bodyText) && isChallengePage) {
+      // Try to detect which methods are available
+      if (/recovery.*email|резервн.*email|backup.*email/i.test(bodyText)) return { has2FA: true, type: 'email', hint: 'Google просит подтвердить через резервный email. Проверьте почту.' };
+      if (/recovery.*phone|резервн.*телефон|backup.*phone/i.test(bodyText)) return { has2FA: true, type: 'sms', hint: 'Google просит подтвердить через резервный телефон.' };
+      return { has2FA: true, type: 'unknown', hint: 'Google запросил подтверждение личности. Выберите способ подтверждения.' };
+    }
+
+    // ── Check 4: Security key prompt ──
+    if (/security.*key|ключ.*безопасности|usb.*key|insert.*key|вставьте.*ключ/i.test(bodyText) && isChallengePage) {
+      return { has2FA: true, type: 'unknown', hint: 'Google просит использовать аппаратный ключ безопасности (Security Key). Вставьте ключ и нажмите кнопку.' };
+    }
+
+    // ── Check 5: Google Prompt "type the number" challenge ──
+    if (/type.*number|match.*number|введите.*число|number.*shown/i.test(bodyText) && isChallengePage) {
+      return { has2FA: true, type: 'sms', hint: 'Google показывает число для подтверждения. Откройте уведомление на телефоне и выберите показанное число.' };
+    }
+
+    // ── Check 6: Generic challenge page without specific type ──
+    if (isChallengePage) {
+      if (/verify.*identity|подтверд.*личность|prove.*it.*s.*you|докаж.*что.*это/i.test(bodyText)) {
+        return { has2FA: true, type: 'unknown', hint: 'Google запросил подтверждение личности' };
+      }
+      // Challenge URL but unclear type — still flag it
+      if (bodyText.length > 100) {
+        return { has2FA: true, type: 'unknown', hint: 'Google запросил дополнительную проверку' };
+      }
+    }
+
+    // ── Check 7: "Enter your email/phone" for recovery (not login) ──
+    const recoveryInput = await page.locator('#knowledge-preregistered-email-response, input[name="knowledgePreregisteredEmailResponse"], #phoneNumberId').count();
+    if (recoveryInput > 0) {
+      if (/email|почт/i.test(bodyText)) return { has2FA: true, type: 'email', hint: 'Google просит ввести резервный email для подтверждения' };
+      if (/phone|телефон/i.test(bodyText)) return { has2FA: true, type: 'sms', hint: 'Google просит ввести номер телефона для подтверждения' };
+      return { has2FA: true, type: 'unknown', hint: 'Google запросил дополнительные данные для подтверждения' };
     }
   }
   return { has2FA: false, type: 'unknown', hint: '' };
@@ -324,46 +369,129 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
       // If earlyFA.has2FA === true, we skip password checks entirely
       // and let the 2FA handler below deal with it
     } else {
-      // YouTube/Google login
+      // ════════════════════════════════════════════════════════
+      // YouTube/Google login — same safety patterns as TikTok
+      // ════════════════════════════════════════════════════════
+
+      // ── Step 1: Enter email ──────────────────────────────
       logger.info(`⌨️ Ввожу email...`);
       await humanType(page, 'input[type="email"]', login);
       await humanClick(page, cursor, '#identifierNext button, button[jsname="LgbsSe"]', { postClickDelay: 2000 });
       await page.waitForTimeout(2000 + Math.random() * 2000);
 
-      // Check if email exists
-      const emailError = await page.textContent('body') || '';
-      if (/couldn.?t find|не удалось найти/i.test(emailError)) {
+      // Check if email exists — use Google's specific error elements
+      let emailNotFound = false;
+      try {
+        // Google shows "Couldn't find your Google Account" in specific elements
+        const errorEl = page.locator('.o6cuMc, .dEOOab, [jsname="B34EJ"], #headingSubtext, .Ekjuhf');
+        const errorCount = await errorEl.count();
+        if (errorCount > 0) {
+          const errorText = (await errorEl.allTextContents()).join(' ');
+          if (/couldn.?t find|не удалось найти|no account|нет аккаунта/i.test(errorText)) {
+            emailNotFound = true;
+          }
+        }
+      } catch {
+        // Selector failed — skip
+      }
+
+      if (emailNotFound) {
+        const errMsg = 'Аккаунт Google не найден. Проверьте email.';
         await prisma.socialAccount.update({
           where: { id: data.accountId },
-          data: { status: 'AUTH_NEEDED' },
+          data: { status: 'AUTH_NEEDED', lastError: errMsg },
         });
+        emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
         emitLoginEvent(logger, data.accountId, 'login:failed', {
           code: 'INVALID_CREDENTIALS',
-          message: 'Аккаунт Google не найден. Проверьте email.',
+          message: errMsg,
         });
         throw new LoginError('INVALID_CREDENTIALS', 'Google account not found');
       }
 
+      // ── Step 2: Enter password ───────────────────────────
       logger.info(`⌨️ Ввожу пароль...`);
-      await humanType(page, 'input[type="password"]', password);
-      await humanClick(page, cursor, '#passwordNext button, button[jsname="LgbsSe"]', { postClickDelay: 3000 });
-
-      await job.updateProgress(50);
-      await page.waitForTimeout(3000);
-
-      // Check wrong password
-      const pwdError = await page.textContent('body') || '';
-      if (/wrong.*password|неверный.*пароль/i.test(pwdError)) {
-        await prisma.socialAccount.update({
-          where: { id: data.accountId },
-          data: { status: 'AUTH_NEEDED' },
-        });
-        emitLoginEvent(logger, data.accountId, 'login:failed', {
-          code: 'INVALID_CREDENTIALS',
-          message: 'Неверный пароль Google. Проверьте учётные данные.',
-        });
-        throw new LoginError('INVALID_CREDENTIALS', 'Wrong Google password');
+      // Google sometimes shows a separate password page, wait for it
+      try {
+        await page.waitForSelector('input[type="password"]', { timeout: 10000 });
+      } catch {
+        // Password field didn't appear — might be challenge page already
+        logger.warn('⚠️ Поле пароля не появилось — возможно Google показал challenge');
       }
+
+      const pwdField = await page.locator('input[type="password"]').count();
+      if (pwdField > 0) {
+        await humanType(page, 'input[type="password"]', password);
+        await humanClick(page, cursor, '#passwordNext button, button[jsname="LgbsSe"]', { postClickDelay: 3000 });
+        await job.updateProgress(50);
+        await page.waitForTimeout(3000);
+      } else {
+        // No password field — early 2FA/challenge already active
+        await job.updateProgress(50);
+      }
+
+      // ── Step 3: FIRST check for 2FA/challenge BEFORE password errors ──
+      // Google's challenge pages can contain text matching "wrong password" regexes
+      // in unrelated elements. Check challenge state first.
+      const earlyGoogleFA = await detect2FAType(page, ctx.platform);
+      if (!earlyGoogleFA.has2FA) {
+        // Only check for password errors if NOT on a challenge page
+        let hasPasswordError = false;
+        try {
+          // Google shows wrong password in specific error elements
+          const errorEl = page.locator('.o6cuMc, .dEOOab, [jsname="B34EJ"], .Ekjuhf, [class*="error-msg"]');
+          const errorCount = await errorEl.count();
+          if (errorCount > 0) {
+            const errorText = (await errorEl.allTextContents()).join(' ');
+            if (/wrong.*password|неверный.*парол|incorrect.*password|парол.*невер/i.test(errorText)) {
+              hasPasswordError = true;
+            }
+          }
+        } catch {
+          // Selector failed — skip
+        }
+
+        if (hasPasswordError) {
+          const errMsg = 'Неверный пароль Google. Проверьте учётные данные.';
+          await prisma.socialAccount.update({
+            where: { id: data.accountId },
+            data: { status: 'AUTH_NEEDED', lastError: errMsg },
+          });
+          emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
+          emitLoginEvent(logger, data.accountId, 'login:failed', {
+            code: 'INVALID_CREDENTIALS',
+            message: errMsg,
+          });
+          throw new LoginError('INVALID_CREDENTIALS', 'Wrong Google password');
+        }
+
+        // Check for account disabled/suspended
+        try {
+          const suspendEl = page.locator('.o6cuMc, .dEOOab, [jsname="B34EJ"], #headingText, #headingSubtext');
+          const suspendCount = await suspendEl.count();
+          if (suspendCount > 0) {
+            const suspendText = (await suspendEl.allTextContents()).join(' ');
+            if (/disabled|отключен|suspended|заблокирован|has been disabled|был отключён/i.test(suspendText)) {
+              const errMsg = 'Аккаунт Google отключён или заблокирован.';
+              await prisma.socialAccount.update({
+                where: { id: data.accountId },
+                data: { status: 'BANNED', lastError: errMsg },
+              });
+              emitStatusChange(logger, data.accountId, 'BANNED', errMsg);
+              emitLoginEvent(logger, data.accountId, 'login:failed', {
+                code: 'ACCOUNT_BANNED',
+                message: errMsg,
+              });
+              throw new LoginError('ACCOUNT_BANNED', 'Google account disabled');
+            }
+          }
+        } catch (e) {
+          if (e instanceof LoginError) throw e;
+          // Selector failed — continue
+        }
+      }
+      // If earlyGoogleFA.has2FA === true, skip password errors
+      // and let the 2FA handler below deal with it
     }
 
     // ── 2FA Detection ──────────────────────────────────────
@@ -385,51 +513,111 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
       const code = await waitForVerificationCode(data.accountId, 10 * 60 * 1000);
 
       if (!code) {
+        const errMsg = 'Время ожидания кода истекло (10 мин). Повторите попытку входа.';
         await prisma.socialAccount.update({
           where: { id: data.accountId },
-          data: { status: 'AUTH_NEEDED' },
+          data: { status: 'AUTH_NEEDED', lastError: errMsg },
         });
+        emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
         emitLoginEvent(logger, data.accountId, 'login:failed', {
           code: 'TWO_FA_TIMEOUT',
-          message: 'Время ожидания кода истекло (10 мин). Повторите попытку входа.',
+          message: errMsg,
         });
         throw new LoginError('TWO_FA_TIMEOUT', 'User did not provide 2FA code within 10 minutes');
       }
 
       logger.info(`📱 Код получен, ввожу...`);
 
-      // Enter the code
+      // Enter the code — platform-specific selectors
       if (ctx.platform === 'TIKTOK') {
         await humanType(page, 'input[name="code"], input[autocomplete*="one-time"]', code);
         await page.waitForTimeout(500);
-        // Try to click verify/submit button
         try {
           await humanClick(page, cursor, 'button[type="submit"], button:has-text("Verify"), button:has-text("Подтвердить")', { postClickDelay: 3000 });
         } catch {
           // Some forms auto-submit
         }
       } else {
-        await humanType(page, 'input[type="tel"], input[autocomplete="one-time-code"]', code);
+        // Google — multiple possible code input selectors
+        const googleCodeSelectors = [
+          'input[type="tel"]',
+          'input[autocomplete="one-time-code"]',
+          'input[name="pin"]',
+          'input[name="totpPin"]',
+          '#totpPin',
+          '#knowledge-preregistered-email-response',       // recovery email
+          'input[name="knowledgePreregisteredEmailResponse"]',
+          '#phoneNumberId',                                 // recovery phone
+        ];
+        let codeEntered = false;
+        for (const sel of googleCodeSelectors) {
+          try {
+            const count = await page.locator(sel).count();
+            if (count > 0) {
+              await humanType(page, sel, code);
+              codeEntered = true;
+              break;
+            }
+          } catch {
+            // continue to next selector
+          }
+        }
+        if (!codeEntered) {
+          // Fallback: try any visible input
+          logger.warn('⚠️ Не найден стандартный Google input — пробую generic input');
+          try { await humanType(page, 'input[type="text"]:visible, input[type="tel"]:visible', code); } catch {}
+        }
+
         await page.waitForTimeout(500);
+
+        // Google "Next" / "Verify" button — multiple possible selectors
         try {
-          await humanClick(page, cursor, '#idvPreregisteredPhoneNext button, button[jsname="LgbsSe"], button:has-text("Next")', { postClickDelay: 3000 });
+          await humanClick(page, cursor,
+            '#idvPreregisteredPhoneNext button, #next button, button[jsname="LgbsSe"], ' +
+            'button:has-text("Next"), button:has-text("Далее"), button:has-text("Verify"), ' +
+            'button:has-text("Подтвердить"), button:has-text("Continue"), button:has-text("Продолжить")',
+            { postClickDelay: 3000 },
+          );
         } catch {
-          // Auto-submit
+          // Auto-submit or no visible button
         }
       }
 
       await page.waitForTimeout(3000);
 
-      // Check if code was invalid
-      const postCodeText = await page.textContent('body') || '';
-      if (/wrong.*code|invalid.*code|неверный.*код|incorrect/i.test(postCodeText)) {
+      // Check if code was invalid — use scoped selectors (same pattern as password check)
+      let codeInvalid = false;
+      try {
+        if (ctx.platform === 'TIKTOK') {
+          const errorEl = page.locator('[class*="error"], [class*="alert"], [class*="toast"]');
+          const count = await errorEl.count();
+          if (count > 0) {
+            const text = (await errorEl.allTextContents()).join(' ');
+            if (/wrong.*code|invalid.*code|неверный.*код|incorrect.*code/i.test(text)) codeInvalid = true;
+          }
+        } else {
+          // Google error elements
+          const errorEl = page.locator('.o6cuMc, .dEOOab, [jsname="B34EJ"], .Ekjuhf, [class*="error"]');
+          const count = await errorEl.count();
+          if (count > 0) {
+            const text = (await errorEl.allTextContents()).join(' ');
+            if (/wrong.*code|invalid|incorrect|неверн|неправильн|try again|попробуйте ещё/i.test(text)) codeInvalid = true;
+          }
+        }
+      } catch {
+        // Selector failed — skip
+      }
+
+      if (codeInvalid) {
+        const errMsg = 'Введён неверный код подтверждения. Повторите попытку входа.';
         await prisma.socialAccount.update({
           where: { id: data.accountId },
-          data: { status: 'AUTH_NEEDED' },
+          data: { status: 'AUTH_NEEDED', lastError: errMsg },
         });
+        emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
         emitLoginEvent(logger, data.accountId, 'login:failed', {
           code: 'TWO_FA_INVALID',
-          message: 'Введён неверный код подтверждения. Повторите попытку входа.',
+          message: errMsg,
         });
         throw new LoginError('TWO_FA_INVALID', 'Invalid 2FA code');
       }
@@ -452,9 +640,13 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
       const bodyText = await page.textContent('body') || '';
       logger.warn(`⚠️ Не удалось дождаться перенаправления. URL: ${currentUrl}`);
 
-      // ── Check for email/SMS verification (TikTok often asks this) ──
-      const isVerificationPage = /verify|verification|challenge/i.test(currentUrl)
+      // ── Check for email/SMS verification (late detection) ──
+      // Both TikTok and Google can show verification after password entry
+      const isVerificationPage = /verify|verification|challenge|interstitial/i.test(currentUrl)
+        || /accounts\.google\.com\/(signin\/(challenge|v2\/challenge)|CheckCookie)/i.test(currentUrl)
         || /verify.*email|send.*code|verification.*code|подтвер|отправ.*код|check.*email|проверь.*почт|enter.*code|введите.*код/i.test(bodyText);
+
+      const platformLabel = ctx.platform === 'TIKTOK' ? 'TikTok' : 'Google';
 
       if (isVerificationPage) {
         // Re-run 2FA detection — the page might now have a code input
@@ -470,29 +662,58 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
 
           const code = await waitForVerificationCode(data.accountId, 10 * 60 * 1000);
           if (!code) {
-            const errMsg = 'Требуется подтверждение через email/SMS. Время ожидания кода истекло (10 мин).';
+            const errMsg = `${platformLabel} требует подтверждение. Время ожидания кода истекло (10 мин).`;
             await prisma.socialAccount.update({
               where: { id: data.accountId },
               data: { status: 'AUTH_NEEDED', lastError: errMsg },
             });
+            emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
             emitLoginEvent(logger, data.accountId, 'login:failed', {
               code: 'TWO_FA_TIMEOUT',
               message: errMsg,
             });
-            throw new LoginError('TWO_FA_TIMEOUT', 'Email/SMS verification timeout');
+            throw new LoginError('TWO_FA_TIMEOUT', 'Late verification timeout');
           }
 
-          // Enter the code
+          // Enter the code — platform-specific selectors
           logger.info(`📱 Код получен, ввожу...`);
-          const codeSelector = ctx.platform === 'TIKTOK'
-            ? 'input[name="code"], input[autocomplete*="one-time"], input[type="text"], input[type="tel"]'
-            : 'input[type="tel"], input[autocomplete="one-time-code"]';
-          try {
-            await humanType(page, codeSelector, code);
+          if (ctx.platform === 'TIKTOK') {
+            const codeSelector = 'input[name="code"], input[autocomplete*="one-time"], input[type="text"], input[type="tel"]';
+            try {
+              await humanType(page, codeSelector, code);
+              await page.waitForTimeout(500);
+              await humanClick(page, cursor, 'button[type="submit"], button:has-text("Verify"), button:has-text("Подтвердить"), button:has-text("Next"), button:has-text("Далее")', { postClickDelay: 3000 });
+            } catch {
+              // Auto-submit or no submit button
+            }
+          } else {
+            // Google — try multiple selectors
+            const googleSelectors = [
+              'input[type="tel"]', 'input[autocomplete="one-time-code"]',
+              'input[name="pin"]', 'input[name="totpPin"]', '#totpPin',
+              '#knowledge-preregistered-email-response', '#phoneNumberId',
+            ];
+            let entered = false;
+            for (const sel of googleSelectors) {
+              try {
+                if (await page.locator(sel).count() > 0) {
+                  await humanType(page, sel, code);
+                  entered = true;
+                  break;
+                }
+              } catch {}
+            }
+            if (!entered) {
+              try { await humanType(page, 'input[type="text"]:visible, input[type="tel"]:visible', code); } catch {}
+            }
             await page.waitForTimeout(500);
-            await humanClick(page, cursor, 'button[type="submit"], button:has-text("Verify"), button:has-text("Подтвердить"), button:has-text("Next"), button:has-text("Далее")', { postClickDelay: 3000 });
-          } catch {
-            // Auto-submit or no submit button
+            try {
+              await humanClick(page, cursor,
+                '#idvPreregisteredPhoneNext button, #next button, button[jsname="LgbsSe"], ' +
+                'button:has-text("Next"), button:has-text("Далее"), button:has-text("Verify"), button:has-text("Подтвердить")',
+                { postClickDelay: 3000 },
+              );
+            } catch {}
           }
 
           // Wait for successful redirect after code entry
@@ -510,20 +731,22 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
               where: { id: data.accountId },
               data: { status: 'AUTH_NEEDED', lastError: errMsg },
             });
+            emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
             throw new LoginError('TWO_FA_INVALID', errMsg);
           }
         } else {
           // Verification page detected but no code input — inform user
-          const errMsg = 'TikTok запросил подтверждение входа (email/SMS). Зайдите в аккаунт вручную, подтвердите, затем повторите.';
+          const errMsg = `${platformLabel} запросил подтверждение входа. Зайдите в аккаунт вручную, подтвердите, затем повторите.`;
           await prisma.socialAccount.update({
             where: { id: data.accountId },
             data: { status: 'AUTH_NEEDED', lastError: errMsg },
           });
+          emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
           emitLoginEvent(logger, data.accountId, 'login:failed', {
             code: 'TWO_FA_TIMEOUT',
             message: errMsg,
           });
-          throw new LoginError('TWO_FA_TIMEOUT', 'Email verification required but no code input found');
+          throw new LoginError('TWO_FA_TIMEOUT', 'Verification required but no code input found');
         }
       }
       // ── Not verification — check other failure modes ──
@@ -534,6 +757,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
           message: errMsg,
         });
         await prisma.socialAccount.update({ where: { id: data.accountId }, data: { status: 'AUTH_NEEDED', lastError: errMsg } });
+        emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
         throw new LoginError('CAPTCHA_FAILED', 'Captcha not resolved');
       }
       else if (/suspended|заблокирован|disabled/i.test(bodyText)) {
@@ -543,6 +767,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
           message: errMsg,
         });
         await prisma.socialAccount.update({ where: { id: data.accountId }, data: { status: 'BANNED', lastError: errMsg } });
+        emitStatusChange(logger, data.accountId, 'BANNED', errMsg);
         throw new LoginError('ACCOUNT_SUSPENDED', 'Account suspended');
       }
       else {
@@ -552,6 +777,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
           message: errMsg,
         });
         await prisma.socialAccount.update({ where: { id: data.accountId }, data: { status: 'AUTH_NEEDED', lastError: errMsg } });
+        emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
         throw new LoginError('UNKNOWN_ERROR', `Login flow stuck at ${currentUrl}`);
       }
     }
