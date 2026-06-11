@@ -467,11 +467,11 @@ export default function AccountsPage() {
               </button>
             )}
           </div>
-          <p className="text-[11px] text-muted-foreground leading-tight max-w-[240px]">
+          <p className="text-[11px] text-muted-foreground leading-tight max-w-[240px] line-clamp-2 break-words" title={errorDetail}>
             {errorDetail}
           </p>
           {action && (
-            <p className="text-[11px] text-primary/70 leading-tight max-w-[240px]">
+            <p className="text-[11px] text-primary/70 leading-tight max-w-[240px] line-clamp-1 break-words">
               💡 {action}
             </p>
           )}
@@ -601,7 +601,7 @@ export default function AccountsPage() {
                             {acc.platform === "TIKTOK" ? "TikTok" : "YouTube"}
                           </Badge>
                         </TableCell>
-                        <TableCell>{renderStatus(acc)}</TableCell>
+                        <TableCell className="max-w-[280px] overflow-hidden">{renderStatus(acc)}</TableCell>
                         <TableCell>
                           <code className="text-xs bg-accent px-2 py-1 rounded">
                             {acc.pinnedProxy
