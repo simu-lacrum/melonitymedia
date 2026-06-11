@@ -94,22 +94,28 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
       ` — launching anyway; mark for regeneration on safe occasion.`
     );
   }
-  // Build proxy config for Patchright (native auth support, no extension needed)
-  const proxyConfig = opts.proxyUrl
-    ? { server: opts.proxyUrl }
-    : undefined;
-
-  // Log proxy status for debugging
+  // Build proxy config for Patchright — parse URL to separate server from auth
+  // Playwright prefers { server, username, password } over credentials-in-URL
+  let proxyConfig: { server: string; username?: string; password?: string } | undefined;
   if (opts.proxyUrl) {
     try {
       const url = new URL(opts.proxyUrl);
-      console.log(`[Patchright] Using proxy: ${url.hostname}:${url.port} for account ${opts.accountId}`);
+      const serverOnly = `${url.protocol}//${url.hostname}:${url.port}`;
+      proxyConfig = {
+        server: serverOnly,
+        ...(url.username ? { username: decodeURIComponent(url.username) } : {}),
+        ...(url.password ? { password: decodeURIComponent(url.password) } : {}),
+      };
+      console.log(`[Patchright] Using proxy: ${url.protocol}//${url.hostname}:${url.port} for account ${opts.accountId}`);
     } catch {
-      console.log(`[Patchright] Using proxy (raw): ${opts.proxyUrl.replace(/:[^:@]+@/, ':***@')} for account ${opts.accountId}`);
+      // Fallback: pass as-is if URL parsing fails
+      proxyConfig = { server: opts.proxyUrl };
+      console.log(`[Patchright] Using proxy (raw) for account ${opts.accountId}`);
     }
   } else {
     console.log(`[Patchright] ⚠️ No proxy configured for account ${opts.accountId} — using direct connection`);
   }
+
 
   // Trigger rotation if proxy is configured for per-session mode
   if (opts.proxyUrl) {
