@@ -505,19 +505,19 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
       //   Screen 1: "Подтвердите, что это действительно вы" with email/phone options + "Далее"
       //   Screen 2: Code input field
       // We must handle Screen 1 first before waiting for code.
-      if (ctx.platform === 'TIKTOK') {
-        await _handleTikTokMethodSelection(page, cursor, logger);
-      }
-
-      // Extract email/phone hint from the page for the frontend
+      // maskedContact is extracted from Screen 1 BEFORE clicking (it disappears after).
       let maskedContact = '';
-      try {
-        const bodyText = await page.textContent('body') || '';
-        // Match patterns like x***r@email.com or +7***123
-        const emailMatch = bodyText.match(/[a-zA-Z0-9]\*{2,}[a-zA-Z0-9]@\S+/);
-        const phoneMatch = bodyText.match(/\+?\d\*{2,}\d+/);
-        maskedContact = emailMatch?.[0] || phoneMatch?.[0] || '';
-      } catch { /* ignore */ }
+      if (ctx.platform === 'TIKTOK') {
+        maskedContact = await _handleTikTokMethodSelection(page, cursor, logger);
+      } else {
+        // YouTube/Google: extract from current page
+        try {
+          const bodyText = await page.textContent('body') || '';
+          const emailMatch = bodyText.match(/[a-zA-Z0-9]\*{2,}[a-zA-Z0-9]@\S+/);
+          const phoneMatch = bodyText.match(/\+?\d\*{2,}\d+/);
+          maskedContact = emailMatch?.[0] || phoneMatch?.[0] || '';
+        } catch { /* ignore */ }
+      }
 
       // Emit 2FA required to frontend
       emitLoginEvent(logger, data.accountId, 'login:2fa_required', {
@@ -907,104 +907,260 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
  * Screen 1: "Подтвердите, что это действительно вы" — email/phone options + "Далее" button
  * Screen 2: Code input field
  *
- * This function handles Screen 1: selects the email/phone option and clicks "Далее"
- * to trigger sending the verification code.
+ * This function:
+ * 1. Dumps the DOM for diagnostics
+ * 2. Extracts the masked email/phone from the page text
+ * 3. Clicks the email/phone option row
+ * 4. Clicks "Далее" to trigger code delivery
+ *
+ * @returns The masked contact string (e.g. "x***r@mail.com")
  */
 async function _handleTikTokMethodSelection(
   page: any,
   cursor: any,
   logger: SocketLogger,
-): Promise<void> {
+): Promise<string> {
+  let maskedContact = '';
+
   try {
-    // Check if we're on the method selection screen (no code input yet)
-    const codeInputCount = await page.locator('input[name="code"], input[autocomplete*="one-time"]').count();
+    // ── Phase 0: Check if we're already on the code input screen ──
+    // Try a wider set of input selectors (TikTok changes these)
+    const codeInputCount = await page.locator(
+      'input[name="code"], input[autocomplete*="one-time"], input[type="tel"][maxlength], input[type="number"][maxlength]'
+    ).count();
     if (codeInputCount > 0) {
-      // Already on the code input screen — skip
-      logger.info('Экран ввода кода уже отображается');
-      return;
+      logger.info('Экран ввода кода уже отображается — пропускаю выбор метода');
+      return '';
     }
 
-    // Look for the method selection page
-    // TikTok shows clickable rows/cards with email/phone options
-    const methodSelectors = [
-      // Email option — match by content or icon
-      '[class*="verify-select"] >> text=/email|почт|mail/i',
-      'div:has(svg) >> text=/email|почт|mail/i',
-      ':text-matches("\\\\*{2,}@", "i")',  // masked email like x***r@mail.com
-      'label:has-text("email"), label:has-text("почт")',
-      // Generic selectable rows
-      '[role="radio"]:has-text("email"), [role="radio"]:has-text("почт")',
-      '[role="option"]:has-text("email"), [role="option"]:has-text("почт")',
-    ];
+    // ── Phase 1: DOM snapshot for diagnostics ──
+    // Log the page content so we can debug selector failures
+    try {
+      const pageUrl = page.url();
+      logger.info(`📍 URL верификации: ${pageUrl}`);
 
+      // Get all visible text on the page (not HTML, just text)
+      const bodyText = await page.textContent('body') || '';
+      // Log first 500 chars for debugging (avoid flooding logs)
+      const snippet = bodyText.replace(/\s+/g, ' ').trim().slice(0, 500);
+      logger.info(`📄 Текст страницы: ${snippet}`);
+
+      // Get a compact representation of interactive elements
+      const interactiveHTML = await page.evaluate(() => {
+        const els: string[] = [];
+        // All buttons
+        document.querySelectorAll('button').forEach((btn, i) => {
+          const txt = (btn as HTMLElement).innerText?.trim().slice(0, 80) || '';
+          const cls = btn.className?.slice(0, 40) || '';
+          const type = btn.getAttribute('type') || '';
+          els.push(`BTN[${i}] text="${txt}" class="${cls}" type="${type}"`);
+        });
+        // All inputs
+        document.querySelectorAll('input').forEach((inp, i) => {
+          const name = inp.getAttribute('name') || '';
+          const type = inp.getAttribute('type') || '';
+          const ph = inp.getAttribute('placeholder') || '';
+          const ac = inp.getAttribute('autocomplete') || '';
+          els.push(`INPUT[${i}] name="${name}" type="${type}" placeholder="${ph}" autocomplete="${ac}"`);
+        });
+        // All links
+        document.querySelectorAll('a').forEach((a, i) => {
+          const txt = (a as HTMLElement).innerText?.trim().slice(0, 60) || '';
+          const href = a.getAttribute('href')?.slice(0, 60) || '';
+          els.push(`A[${i}] text="${txt}" href="${href}"`);
+        });
+        // All divs/spans with click handlers or role attributes
+        document.querySelectorAll('[role="radio"], [role="option"], [role="button"], [data-e2e]').forEach((el, i) => {
+          const tag = el.tagName;
+          const role = el.getAttribute('role') || '';
+          const de = el.getAttribute('data-e2e') || '';
+          const txt = (el as HTMLElement).innerText?.trim().slice(0, 60) || '';
+          els.push(`ROLE[${i}] <${tag}> role="${role}" data-e2e="${de}" text="${txt}"`);
+        });
+        return els.join('\n');
+      });
+      logger.info(`🔍 Интерактивные элементы:\n${interactiveHTML}`);
+    } catch (e) {
+      logger.warn(`⚠️ Не удалось снять DOM-дамп: ${e instanceof Error ? e.message : e}`);
+    }
+
+    // ── Phase 2: Extract masked contact from page ──
+    try {
+      const bodyText = await page.textContent('body') || '';
+      // Pattern: letter(s) + asterisks + letter(s) + @ + domain
+      // e.g. x***r@reevalmail.com, te***@gmail.com
+      const emailMatch = bodyText.match(/[a-zA-Z0-9][a-zA-Z0-9*]*\*{2,}[a-zA-Z0-9*]*[a-zA-Z0-9]?@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+      // Pattern: +7***123, or ***1234
+      const phoneMatch = bodyText.match(/\+?\d[\d*]{3,}\d{2,}/);
+      maskedContact = emailMatch?.[0] || phoneMatch?.[0] || '';
+      if (maskedContact) {
+        logger.info(`📧 Найден контакт: ${maskedContact}`);
+      }
+    } catch { /* ignore */ }
+
+    // ── Phase 3: Click the email/phone option row ──
+    // TikTok uses dynamic class names, so we CANNOT rely on CSS classes.
+    // Strategy: find any clickable element that contains the "@" pattern (masked email)
+    // or phone pattern, then click it.
     let methodSelected = false;
-    for (const sel of methodSelectors) {
+
+    // Strategy A: Click the element containing the masked email text
+    if (maskedContact && maskedContact.includes('@')) {
       try {
-        const el = page.locator(sel).first();
-        if (await el.count() > 0) {
-          await el.click();
+        // Find any element whose text contains the masked email
+        const emailEl = page.locator(`text=${maskedContact}`).first();
+        if (await emailEl.count() > 0) {
+          await emailEl.click();
           methodSelected = true;
-          logger.info('Выбран метод подтверждения через email ✓');
-          break;
+          logger.info('✅ Клик по строке с email');
         }
-      } catch { continue; }
+      } catch { /* continue */ }
+    }
+
+    // Strategy B: Find element with text matching *@*.* pattern
+    if (!methodSelected) {
+      try {
+        // Use evaluate to find and click the element containing masked email
+        const clicked = await page.evaluate(() => {
+          // Find all elements with text that looks like a masked email
+          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+          let node: Text | null;
+          while ((node = walker.nextNode() as Text | null)) {
+            const text = node.textContent || '';
+            if (/[a-zA-Z0-9]\*{2,}.*@/.test(text)) {
+              // Found the text node — click its parent element
+              let el: HTMLElement | null = node.parentElement;
+              // Walk up to find a reasonably-sized clickable container
+              for (let i = 0; i < 5 && el; i++) {
+                const rect = el.getBoundingClientRect();
+                if (rect.height > 30 && rect.height < 200) {
+                  el.click();
+                  return `clicked: ${el.tagName}.${el.className?.slice(0, 30)} h=${rect.height}`;
+                }
+                el = el.parentElement;
+              }
+            }
+          }
+          return null;
+        });
+        if (clicked) {
+          methodSelected = true;
+          logger.info(`✅ Клик по элементу с email (evaluate): ${clicked}`);
+        }
+      } catch (e) {
+        logger.warn(`Evaluate click failed: ${e instanceof Error ? e.message : e}`);
+      }
+    }
+
+    // Strategy C: Use role-based selectors
+    if (!methodSelected) {
+      const roleSelectors = [
+        '[role="radio"]',
+        '[role="option"]',
+        '[role="button"][data-e2e]',
+      ];
+      for (const sel of roleSelectors) {
+        try {
+          const els = page.locator(sel);
+          const count = await els.count();
+          if (count > 0) {
+            // Click the first one (usually email option)
+            await els.first().click();
+            methodSelected = true;
+            logger.info(`✅ Клик по ${sel} (count=${count})`);
+            break;
+          }
+        } catch { continue; }
+      }
     }
 
     if (!methodSelected) {
-      // Try clicking ANY selectable row that looks like a verification option
-      // TikTok often uses div containers with radio-like circles
-      try {
-        const options = page.locator('[class*="option"], [class*="method"], [class*="select"], [class*="verify"] >> div:has(span)');
-        const count = await options.count();
-        if (count > 0) {
-          // Click the first option (usually email)
-          await options.first().click();
-          methodSelected = true;
-          logger.info('Выбрана первая опция подтверждения ✓');
-        }
-      } catch { /* no options found */ }
+      logger.warn('⚠️ Не удалось найти строку выбора метода — попробую нажать Далее напрямую');
     }
 
-    // Wait a moment after selecting
+    // Wait after selecting method
     await page.waitForTimeout(1000);
 
-    // Click "Далее" / "Next" / "Send code" / "Continue" button
-    const nextSelectors = [
-      'button:has-text("Далее")',
-      'button:has-text("Next")',
-      'button:has-text("Send code")',
-      'button:has-text("Отправить код")',
-      'button:has-text("Continue")',
-      'button:has-text("Продолжить")',
-      'button[type="submit"]',
-      // TikTok pink/red primary button at the bottom
-      'button[class*="primary"], button[class*="submit"]',
-    ];
-
+    // ── Phase 4: Click "Далее" / "Next" button ──
+    // Use page.evaluate to find the button by text content (most robust)
     let nextClicked = false;
-    for (const sel of nextSelectors) {
-      try {
-        const btn = page.locator(sel).first();
-        if (await btn.count() > 0 && await btn.isEnabled()) {
-          await humanClick(page, cursor, sel, { postClickDelay: 2000 });
-          nextClicked = true;
-          logger.info('Нажата кнопка "Далее" — код отправляется... ✓');
-          break;
+
+    try {
+      const btnResult = await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button'));
+        const targets = ['далее', 'next', 'send code', 'отправить код', 'continue', 'продолжить', 'submit', 'отправить'];
+        for (const btn of buttons) {
+          const text = (btn as HTMLElement).innerText?.trim().toLowerCase() || '';
+          if (targets.some(t => text.includes(t))) {
+            // Check if button is visible and enabled
+            const rect = btn.getBoundingClientRect();
+            if (rect.height > 0 && !btn.disabled) {
+              (btn as HTMLElement).click();
+              return `clicked: "${text}" tag=${btn.tagName}`;
+            }
+          }
         }
-      } catch { continue; }
+        return null;
+      });
+      if (btnResult) {
+        nextClicked = true;
+        logger.info(`✅ Кнопка: ${btnResult}`);
+      }
+    } catch (e) {
+      logger.warn(`Evaluate button click failed: ${e instanceof Error ? e.message : e}`);
+    }
+
+    // Fallback: Playwright text selectors
+    if (!nextClicked) {
+      const textBtns = ['Далее', 'Next', 'Send code', 'Отправить код', 'Continue', 'Продолжить'];
+      for (const text of textBtns) {
+        try {
+          const btn = page.locator(`button:has-text("${text}")`).first();
+          if (await btn.count() > 0 && await btn.isEnabled()) {
+            await btn.click();
+            nextClicked = true;
+            logger.info(`✅ Кнопка (fallback): "${text}"`);
+            break;
+          }
+        } catch { continue; }
+      }
+    }
+
+    // Last resort: click any submit button
+    if (!nextClicked) {
+      try {
+        const submit = page.locator('button[type="submit"]').first();
+        if (await submit.count() > 0) {
+          await submit.click();
+          nextClicked = true;
+          logger.info('✅ Кнопка: submit (last resort)');
+        }
+      } catch { /* nothing */ }
     }
 
     if (!nextClicked) {
-      logger.warn('⚠️ Кнопка "Далее" не найдена — возможно код отправляется автоматически');
+      logger.warn('⚠️ Кнопка "Далее" НЕ найдена — код может не отправиться!');
+    } else {
+      // Wait for code entry screen to load
+      logger.info('⏳ Ожидаю экран ввода кода...');
+      await page.waitForTimeout(3000);
+
+      // Log the new page state
+      try {
+        const newUrl = page.url();
+        const newText = ((await page.textContent('body')) || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+        logger.info(`📍 Новый URL: ${newUrl}`);
+        logger.info(`📄 Текст: ${newText}`);
+      } catch { /* ignore */ }
     }
 
-    // Wait for the code input to appear
-    await page.waitForTimeout(3000);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.warn(`⚠️ Ошибка при выборе метода подтверждения: ${msg}`);
     // Don't throw — continue to code waiting
   }
+
+  return maskedContact;
 }
 
 // ── Wait for code with resend support ───────────────────────
@@ -1056,6 +1212,7 @@ async function _waitForCodeWithResend(
 
 /**
  * Click the "Resend code" button in the browser.
+ * Uses page.evaluate to find elements by text content (robust against dynamic classes).
  */
 async function _clickResendButton(
   page: any,
@@ -1063,48 +1220,50 @@ async function _clickResendButton(
   platform: 'TIKTOK' | 'YOUTUBE',
   logger: SocketLogger,
 ): Promise<void> {
-  if (platform === 'TIKTOK') {
-    const resendSelectors = [
-      'button:has-text("Resend")',
-      'button:has-text("Отправить повторно")',
-      'button:has-text("Повторно")',
-      'a:has-text("Resend")',
-      'a:has-text("Отправить повторно")',
-      ':text-matches("resend|повторно|отправить.?снова|не получили", "i")',
-      'button:has-text("Send again")',
-    ];
+  // First try: page.evaluate to find and click by text content
+  try {
+    const resendTargets = platform === 'TIKTOK'
+      ? ['resend', 'отправить повторно', 'повторно', 'send again', 'не получили', 'отправить снова', 'получить код']
+      : ['resend', 'try another way', 'другой способ', 'повтор', 'отправить снова'];
 
-    for (const sel of resendSelectors) {
-      try {
-        const el = page.locator(sel).first();
-        if (await el.count() > 0) {
-          await humanClick(page, cursor, sel, { postClickDelay: 2000 });
-          logger.info('Код отправлен повторно ✓');
-          return;
+    const result = await page.evaluate((targets: string[]) => {
+      // Check buttons and links
+      const elements = Array.from(document.querySelectorAll('button, a, span[role="button"], div[role="button"]'));
+      for (const el of elements) {
+        const text = (el as HTMLElement).innerText?.trim().toLowerCase() || '';
+        if (targets.some(t => text.includes(t))) {
+          const rect = (el as HTMLElement).getBoundingClientRect();
+          if (rect.height > 0) {
+            (el as HTMLElement).click();
+            return `clicked: "${text}" <${el.tagName}>`;
+          }
         }
-      } catch { continue; }
-    }
-  } else {
-    // Google/YouTube
-    const resendSelectors = [
-      'button:has-text("Resend")',
-      'button:has-text("Try another way")',
-      'button:has-text("Другой способ")',
-      'a:has-text("Resend")',
-      'a:has-text("resend it")',
-      ':text-matches("resend|try.?again|повтор|другой.?способ", "i")',
-    ];
+      }
+      return null;
+    }, resendTargets);
 
-    for (const sel of resendSelectors) {
-      try {
-        const el = page.locator(sel).first();
-        if (await el.count() > 0) {
-          await humanClick(page, cursor, sel, { postClickDelay: 2000 });
-          logger.info('Код отправлен повторно ✓');
-          return;
-        }
-      } catch { continue; }
+    if (result) {
+      logger.info(`🔄 ${result}`);
+      await page.waitForTimeout(2000);
+      return;
     }
+  } catch { /* continue to fallback */ }
+
+  // Fallback: Playwright text selectors
+  const resendTexts = platform === 'TIKTOK'
+    ? ['Resend', 'Отправить повторно', 'Повторно', 'Send again']
+    : ['Resend', 'Try another way', 'Другой способ'];
+
+  for (const text of resendTexts) {
+    try {
+      const el = page.locator(`button:has-text("${text}"), a:has-text("${text}")`).first();
+      if (await el.count() > 0) {
+        await el.click();
+        logger.info(`🔄 Клик по "${text}" (fallback)`);
+        await page.waitForTimeout(2000);
+        return;
+      }
+    } catch { continue; }
   }
 
   logger.warn('⚠️ Кнопка повторной отправки не найдена на странице');
