@@ -814,7 +814,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
       await page.waitForURL(
         ctx.platform === 'TIKTOK'
           ? /tiktok\.com\/(foryou|@|en|ru|.*\/feed)/
-          : /youtube\.com\/(?:feed|watch|@|channel|c)|myaccount\.google\.com/,
+          : /youtube\.com\/(?:$|feed|watch|@|channel|c|shorts)|myaccount\.google\.com/,
         { timeout: 30_000 },
       );
     } catch {
@@ -904,7 +904,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
             await page.waitForURL(
               ctx.platform === 'TIKTOK'
                 ? /tiktok\.com\/(foryou|@|en|ru|.*\/feed)/
-                : /youtube\.com\/(?:feed|watch|@|channel|c)|myaccount\.google\.com/,
+                : /youtube\.com\/(?:$|feed|watch|@|channel|c|shorts)|myaccount\.google\.com/,
               { timeout: 15_000 },
             );
             // Success! Fall through to cookie extraction below.
