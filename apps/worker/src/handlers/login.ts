@@ -429,19 +429,75 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
 
       // ── Step 1: Enter email ──────────────────────────────
       logger.info(`⌨️ Ввожу email...`);
-      await humanType(page, 'input[type="email"]', login);
-      await humanClick(page, cursor, '#identifierNext button, button[jsname="LgbsSe"]', { postClickDelay: 2000 });
+      await humanType(page, 'input[type="email"], input[autocomplete="username"]', login);
+      // Resilient Next button: id-based > role-based > text-based
+      await humanClick(page, cursor,
+        '#identifierNext button, #identifierNext div[role="button"], ' +
+        'button:has-text("Next"), button:has-text("Далее"), ' +
+        'div[role="button"]:has-text("Next"), div[role="button"]:has-text("Далее")',
+        { postClickDelay: 2000 },
+      );
       await page.waitForTimeout(2000 + Math.random() * 2000);
 
-      // Check if email exists — use Google's specific error elements
+      // ── Check: "This browser or app may not be secure" ──
+      try {
+        const postEmailBody = await page.textContent('body') || '';
+        if (/browser.*not.*secure|app.*not.*secure|браузер.*не.*безопасен|приложение.*не.*безопасн|less secure.*app|менее безопасн/i.test(postEmailBody)) {
+          const screenshotPath = `/tmp/google-browser-blocked-${data.accountId}-${Date.now()}.png`;
+          try { await page.screenshot({ path: screenshotPath, fullPage: true }); } catch {}
+          const errMsg = 'Google заблокировал вход: "Этот браузер небезопасен". Попробуйте войти вручную, затем повторите.';
+          await prisma.socialAccount.update({
+            where: { id: data.accountId },
+            data: { status: 'AUTH_NEEDED', lastError: errMsg },
+          });
+          emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
+          emitLoginEvent(logger, data.accountId, 'login:failed', {
+            code: 'RATE_LIMITED',
+            message: errMsg,
+          });
+          throw new LoginError('RATE_LIMITED', 'Google blocked this browser as unsafe');
+        }
+      } catch (e) {
+        if (e instanceof LoginError) throw e;
+      }
+
+      // ── Check: Google reCAPTCHA / CAPTCHA ──
+      try {
+        const hasCaptcha = await page.locator(
+          'iframe[src*="recaptcha"], iframe[src*="captcha"], #captcha, [class*="captcha"], ' +
+          'iframe[title*="reCAPTCHA"], iframe[src*="google.com/recaptcha"]'
+        ).count();
+        if (hasCaptcha > 0) {
+          const screenshotPath = `/tmp/google-captcha-${data.accountId}-${Date.now()}.png`;
+          try { await page.screenshot({ path: screenshotPath, fullPage: true }); } catch {}
+          logger.warn('🧩 Google показал reCAPTCHA — автоматическое решение невозможно');
+          const errMsg = 'Google показал CAPTCHA. Автоматическое решение Google reCAPTCHA невозможно. Попробуйте войти вручную или сменить прокси/IP.';
+          await prisma.socialAccount.update({
+            where: { id: data.accountId },
+            data: { status: 'AUTH_NEEDED', lastError: errMsg },
+          });
+          emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
+          emitLoginEvent(logger, data.accountId, 'login:failed', {
+            code: 'CAPTCHA_FAILED',
+            message: errMsg,
+          });
+          throw new LoginError('CAPTCHA_FAILED', 'Google reCAPTCHA cannot be auto-solved');
+        }
+      } catch (e) {
+        if (e instanceof LoginError) throw e;
+      }
+
+      // Check if email exists — resilient selectors (role/aria + legacy CSS)
       let emailNotFound = false;
       try {
-        // Google shows "Couldn't find your Google Account" in specific elements
-        const errorEl = page.locator('.o6cuMc, .dEOOab, [jsname="B34EJ"], #headingSubtext, .Ekjuhf');
+        const errorEl = page.locator(
+          '[role="alert"], [aria-live="assertive"], [aria-live="polite"], ' +
+          '.o6cuMc, .dEOOab, .Ekjuhf, [jsname="B34EJ"], #headingSubtext, #headingText'
+        );
         const errorCount = await errorEl.count();
         if (errorCount > 0) {
           const errorText = (await errorEl.allTextContents()).join(' ');
-          if (/couldn.?t find|не удалось найти|no account|нет аккаунта/i.test(errorText)) {
+          if (/couldn.?t find|не удалось найти|no account|нет аккаунта|couldn.?t identify/i.test(errorText)) {
             emailNotFound = true;
           }
         }
@@ -450,6 +506,8 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
       }
 
       if (emailNotFound) {
+        const screenshotPath = `/tmp/google-email-notfound-${data.accountId}-${Date.now()}.png`;
+        try { await page.screenshot({ path: screenshotPath, fullPage: true }); } catch {}
         const errMsg = 'Аккаунт Google не найден. Проверьте email.';
         await prisma.socialAccount.update({
           where: { id: data.accountId },
@@ -465,23 +523,60 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
 
       // ── Step 2: Enter password ───────────────────────────
       logger.info(`⌨️ Ввожу пароль...`);
-      // Google sometimes shows a separate password page, wait for it
+      // Google shows password on a separate page, wait for it (longer timeout for slow proxies)
       try {
-        await page.waitForSelector('input[type="password"]', { timeout: 10000 });
+        await page.waitForSelector('input[type="password"], input[autocomplete="current-password"]', { timeout: 15000 });
       } catch {
         // Password field didn't appear — might be challenge page already
         logger.warn('⚠️ Поле пароля не появилось — возможно Google показал challenge');
       }
 
-      const pwdField = await page.locator('input[type="password"]').count();
+      const pwdField = await page.locator('input[type="password"], input[autocomplete="current-password"]').count();
       if (pwdField > 0) {
-        await humanType(page, 'input[type="password"]', password);
-        await humanClick(page, cursor, '#passwordNext button, button[jsname="LgbsSe"]', { postClickDelay: 3000 });
+        await humanType(page, 'input[type="password"], input[autocomplete="current-password"]', password);
+        // Resilient Next button for password step
+        await humanClick(page, cursor,
+          '#passwordNext button, #passwordNext div[role="button"], ' +
+          'button:has-text("Next"), button:has-text("Далее"), ' +
+          'div[role="button"]:has-text("Next"), div[role="button"]:has-text("Далее")',
+          { postClickDelay: 3000 },
+        );
         await job.updateProgress(50);
         await page.waitForTimeout(3000);
       } else {
         // No password field — early 2FA/challenge already active
         await job.updateProgress(50);
+      }
+
+      // ── Google rate-limit / unusual activity detection ──
+      try {
+        const googleBody = await page.textContent('body') || '';
+        const isGoogleRateLimited = /too many.*attempt|unusual.*activity|suspicious.*activity|couldn.?t.*verify.*it.?s.*you|не удалось.*подтвердить|слишком.*попыток|подозрительн.*активност|необычн.*активност|try again.*later|попробуйте.*позже|temporarily.*locked|временно.*заблокирован|account.*locked|аккаунт.*заблокирован/i.test(googleBody);
+
+        if (isGoogleRateLimited) {
+          // Verify we're NOT on a legitimate 2FA page
+          const is2FA = await detect2FAType(page, ctx.platform);
+          if (!is2FA.has2FA) {
+            const matched = googleBody.match(/too many.*attempt|unusual.*activity|suspicious.*activity|слишком.*попыток|подозрительн.*активност|необычн.*активност|temporarily.*locked|временно.*заблокирован/i);
+            logger.info(`[GOOGLE_RATE_LIMIT] Matched: "${matched?.[0]}" | URL: ${page.url()}`);
+            const screenshotPath = `/tmp/google-ratelimit-${data.accountId}-${Date.now()}.png`;
+            try { await page.screenshot({ path: screenshotPath, fullPage: true }); } catch {}
+            // Google rate-limit is 48-72 hours — MUCH longer than TikTok
+            const errMsg = 'Google обнаружил подозрительную активность. Подождите 48-72 часа перед следующей попыткой.';
+            await prisma.socialAccount.update({
+              where: { id: data.accountId },
+              data: { status: 'AUTH_NEEDED', lastError: errMsg },
+            });
+            emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
+            emitLoginEvent(logger, data.accountId, 'login:failed', {
+              code: 'RATE_LIMITED',
+              message: errMsg,
+            });
+            throw new LoginError('RATE_LIMITED', 'Google unusual activity / too many attempts');
+          }
+        }
+      } catch (e) {
+        if (e instanceof LoginError) throw e;
       }
 
       // ── Step 3: FIRST check for 2FA/challenge BEFORE password errors ──
@@ -492,8 +587,11 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
         // Only check for password errors if NOT on a challenge page
         let hasPasswordError = false;
         try {
-          // Google shows wrong password in specific error elements
-          const errorEl = page.locator('.o6cuMc, .dEOOab, [jsname="B34EJ"], .Ekjuhf, [class*="error-msg"]');
+          // Resilient Google error selectors: role/aria + legacy CSS classes
+          const errorEl = page.locator(
+            '[role="alert"], [aria-live="assertive"], [aria-live="polite"], ' +
+            '.o6cuMc, .dEOOab, .Ekjuhf, [jsname="B34EJ"], [class*="error-msg"]'
+          );
           const errorCount = await errorEl.count();
           if (errorCount > 0) {
             const errorText = (await errorEl.allTextContents()).join(' ');
@@ -506,6 +604,8 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
         }
 
         if (hasPasswordError) {
+          const screenshotPath = `/tmp/google-wrongpwd-${data.accountId}-${Date.now()}.png`;
+          try { await page.screenshot({ path: screenshotPath, fullPage: true }); } catch {}
           const errMsg = 'Неверный пароль Google. Проверьте учётные данные.';
           await prisma.socialAccount.update({
             where: { id: data.accountId },
@@ -519,13 +619,18 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
           throw new LoginError('INVALID_CREDENTIALS', 'Wrong Google password');
         }
 
-        // Check for account disabled/suspended
+        // Check for account disabled/suspended — resilient selectors
         try {
-          const suspendEl = page.locator('.o6cuMc, .dEOOab, [jsname="B34EJ"], #headingText, #headingSubtext');
+          const suspendEl = page.locator(
+            '[role="alert"], [aria-live="assertive"], ' +
+            '.o6cuMc, .dEOOab, [jsname="B34EJ"], #headingText, #headingSubtext'
+          );
           const suspendCount = await suspendEl.count();
           if (suspendCount > 0) {
             const suspendText = (await suspendEl.allTextContents()).join(' ');
-            if (/disabled|отключен|suspended|заблокирован|has been disabled|был отключён/i.test(suspendText)) {
+            if (/disabled|отключен|suspended|заблокирован|has been disabled|был отключён|account.*removed|аккаунт.*удалён/i.test(suspendText)) {
+              const screenshotPath = `/tmp/google-banned-${data.accountId}-${Date.now()}.png`;
+              try { await page.screenshot({ path: screenshotPath, fullPage: true }); } catch {}
               const errMsg = 'Аккаунт Google отключён или заблокирован.';
               await prisma.socialAccount.update({
                 where: { id: data.accountId },
@@ -674,8 +779,8 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
             if (/wrong.*code|invalid.*code|неверный.*код|incorrect.*code/i.test(text)) codeInvalid = true;
           }
         } else {
-          // Google error elements
-          const errorEl = page.locator('.o6cuMc, .dEOOab, [jsname="B34EJ"], .Ekjuhf, [class*="error"]');
+          // Google error elements — resilient: role/aria + legacy CSS
+          const errorEl = page.locator('[role="alert"], [aria-live="assertive"], [aria-live="polite"], .o6cuMc, .dEOOab, .Ekjuhf, [jsname="B34EJ"], [class*="error"]');
           const count = await errorEl.count();
           if (count > 0) {
             const text = (await errorEl.allTextContents()).join(' ');
@@ -883,11 +988,32 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
         const match = currentUrl.match(/@([^/?]+)/);
         if (match) extractedUsername = match[1];
       } else {
-        // YouTube — try to get channel name
-        await page.goto('https://www.youtube.com/account', { waitUntil: 'networkidle', timeout: 15000 });
-        const nameEl = await page.locator('#account-name, .channel-header-profile-image-container + .ytd-account-settings').first();
-        if (await nameEl.count() > 0) {
-          extractedUsername = (await nameEl.textContent())?.trim() || null;
+        // YouTube — extract channel handle (most reliable method)
+        // youtube.com/channel_switcher or clicking avatar redirects to /@handle
+        try {
+          await page.goto('https://www.youtube.com/@me', { waitUntil: 'networkidle', timeout: 15000 });
+          const ytUrl = page.url();
+          // YouTube redirects /@me to /@ActualHandle
+          const handleMatch = ytUrl.match(/@([^/?]+)/);
+          if (handleMatch && handleMatch[1] !== 'me') {
+            extractedUsername = handleMatch[1];
+          }
+        } catch { /* fallback below */ }
+
+        // Fallback: try account page for display name
+        if (!extractedUsername) {
+          try {
+            await page.goto('https://www.youtube.com/account', { waitUntil: 'networkidle', timeout: 15000 });
+            // Use multiple resilient selectors for channel name
+            const nameEl = page.locator(
+              '#account-name, [id*="account-name"], ' +
+              'yt-formatted-string.ytd-account-item-section-renderer, ' +
+              'ytd-account-item-section-renderer yt-formatted-string'
+            ).first();
+            if (await nameEl.count() > 0) {
+              extractedUsername = (await nameEl.textContent())?.trim() || null;
+            }
+          } catch { /* non-critical */ }
         }
       }
     } catch {
