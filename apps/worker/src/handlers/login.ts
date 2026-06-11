@@ -54,6 +54,7 @@ type LoginErrorCode =
   | 'TWO_FA_INVALID'
   | 'COOKIES_EXPIRED'
   | 'NETWORK_ERROR'
+  | 'RATE_LIMITED'
   | 'UNKNOWN_ERROR';
 
 class LoginError extends Error {
@@ -83,10 +84,22 @@ type TwoFAType = 'email' | 'sms' | 'authenticator' | 'unknown';
 
 async function detect2FAType(page: any, platform: 'TIKTOK' | 'YOUTUBE'): Promise<{ has2FA: boolean; type: TwoFAType; hint: string }> {
   if (platform === 'TIKTOK') {
+    const currentUrl = page.url();
+    const bodyText = await page.textContent('body') || '';
+
+    // ── Pre-check: Rate-limit / login failure detection ──
+    // If TikTok says "Maximum number of attempts", it's NOT 2FA — it's a rate limit.
+    if (/maximum.*attempts|too many.*attempts|try again later|слишком.*попыток|повторите.*позже/i.test(bodyText)) {
+      // Still on the login form = rate-limited, not 2FA
+      const hasLoginForm = await page.locator('input[name="username"], input[placeholder*="Email"], input[placeholder*="email"]').count();
+      if (hasLoginForm > 0) {
+        return { has2FA: false, type: 'unknown', hint: '' };
+      }
+    }
+
     // Check 1: code input field present (classic 2FA)
     const codeInput = await page.locator('input[name="code"], input[autocomplete*="one-time"]').count();
     if (codeInput > 0) {
-      const bodyText = await page.textContent('body') || '';
       if (/email|почт/i.test(bodyText)) return { has2FA: true, type: 'email', hint: 'TikTok запросил код из email' };
       if (/sms|смс|phone|телефон/i.test(bodyText)) return { has2FA: true, type: 'sms', hint: 'TikTok запросил код из SMS' };
       if (/authenticator|2fa|двухфакторн/i.test(bodyText)) return { has2FA: true, type: 'authenticator', hint: 'TikTok запросил код из приложения-аутентификатора' };
@@ -94,12 +107,20 @@ async function detect2FAType(page: any, platform: 'TIKTOK' | 'YOUTUBE'): Promise
     }
 
     // Check 2: TikTok email/SMS verification page without code input
-    // TikTok sometimes shows a "verify via email" page with a button, not a code input.
-    // URL patterns: /login/verify, /verify, or body text mentions verification.
-    const currentUrl = page.url();
-    const bodyText = await page.textContent('body') || '';
-    const isVerifyUrl = /verify|verification|challenge/i.test(currentUrl);
-    const isVerifyText = /verify.*email|send.*code|verification.*code|подтвер|отправ.*код|check.*email|проверь.*почт/i.test(bodyText);
+    // URL patterns: /login/verify, /verify — NOT /login/phone-or-email/ (that's login form!)
+    const isVerifyUrl = /verify|verification|challenge/i.test(currentUrl)
+      && !/login\/phone-or-email/i.test(currentUrl); // Exclude login form URL
+
+    // Text-based detection — require SPECIFIC verification phrases, not just "email" word
+    const isVerifyText = /verify\s+your\s+(identity|email)|send\s+(a\s+)?code|verification\s+code|подтвердите.*личность|отправить.*код|подтверждение.*входа|проверь.*почт|check\s+your\s+email/i.test(bodyText);
+
+    // Also check: if we're still on login form page, it's NOT 2FA
+    const hasLoginForm = await page.locator('input[name="username"], input[placeholder*="Email"], input[placeholder*="email"]').count();
+    const hasPasswordField = await page.locator('input[type="password"]').count();
+    if (hasLoginForm > 0 && hasPasswordField > 0) {
+      // Still on the login form — NOT a verification page
+      return { has2FA: false, type: 'unknown', hint: '' };
+    }
 
     if (isVerifyUrl || isVerifyText) {
       if (/email|почт|mail/i.test(bodyText)) return { has2FA: true, type: 'email', hint: 'TikTok просит подтвердить вход через email' };
@@ -307,7 +328,32 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
       await job.updateProgress(50);
       await page.waitForTimeout(2000);
 
-      // ── FIRST: check for 2FA/verification BEFORE password errors ──
+      // ── FIRST: check for rate-limit BEFORE anything else ──
+      // "Maximum number of attempts" = TikTok rate limit, NOT 2FA
+      try {
+        const rateLimitText = await page.textContent('body') || '';
+        if (/maximum.*attempts|too many.*attempts|try again later|слишком.*попыток|повторите.*позже/i.test(rateLimitText)) {
+          // Only treat as rate-limit if we're still on login form
+          const onLoginForm = await page.locator('input[name="username"], input[type="password"]').count();
+          if (onLoginForm > 0) {
+            const errMsg = 'Слишком много попыток входа. TikTok заблокировал вход — попробуйте позже (через 15-30 минут).';
+            await prisma.socialAccount.update({
+              where: { id: data.accountId },
+              data: { status: 'AUTH_NEEDED', lastError: errMsg },
+            });
+            emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
+            emitLoginEvent(logger, data.accountId, 'login:failed', {
+              code: 'RATE_LIMITED',
+              message: errMsg,
+            });
+            throw new LoginError('RATE_LIMITED', 'Maximum number of attempts reached');
+          }
+        }
+      } catch (e) {
+        if (e instanceof LoginError) throw e;
+      }
+
+      // ── Check for 2FA/verification BEFORE password errors ──
       // TikTok's verification page body text can contain words like "неверный"
       // in unrelated UI elements, causing false "wrong password" detection.
       const earlyFA = await detect2FAType(page, ctx.platform);
@@ -990,11 +1036,14 @@ async function _handleTikTokMethodSelection(
       // Pattern: letter(s) + asterisks + letter(s) + @ + domain
       // e.g. x***r@reevalmail.com, te***@gmail.com
       const emailMatch = bodyText.match(/[a-zA-Z0-9][a-zA-Z0-9*]*\*{2,}[a-zA-Z0-9*]*[a-zA-Z0-9]?@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-      // Pattern: +7***123, or ***1234
-      const phoneMatch = bodyText.match(/\+?\d[\d*]{3,}\d{2,}/);
+      // Phone MUST start with + AND contain asterisks (to avoid matching random page IDs)
+      // e.g. +7***1234, +1 (***) ***-1234
+      const phoneMatch = bodyText.match(/\+\d[\d\s()*-]*\*{2,}[\d\s()*-]*\d{2,}/);
       maskedContact = emailMatch?.[0] || phoneMatch?.[0] || '';
       if (maskedContact) {
         logger.info(`📧 Найден контакт: ${maskedContact}`);
+      } else {
+        logger.warn('⚠️ Замаскированный email/телефон не найден на странице');
       }
     } catch { /* ignore */ }
 
