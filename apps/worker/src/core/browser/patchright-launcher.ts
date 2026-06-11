@@ -99,6 +99,18 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
     ? { server: opts.proxyUrl }
     : undefined;
 
+  // Log proxy status for debugging
+  if (opts.proxyUrl) {
+    try {
+      const url = new URL(opts.proxyUrl);
+      console.log(`[Patchright] Using proxy: ${url.hostname}:${url.port} for account ${opts.accountId}`);
+    } catch {
+      console.log(`[Patchright] Using proxy (raw): ${opts.proxyUrl.replace(/:[^:@]+@/, ':***@')} for account ${opts.accountId}`);
+    }
+  } else {
+    console.log(`[Patchright] ⚠️ No proxy configured for account ${opts.accountId} — using direct connection`);
+  }
+
   // Trigger rotation if proxy is configured for per-session mode
   if (opts.proxyUrl) {
     try {
