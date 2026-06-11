@@ -29,7 +29,7 @@ import { humanType } from '../core/humanity/typing-emulator.js';
 import { handleTikTokCaptcha } from '../core/captcha/tiktok-captcha-handler.js';
 import { persistCookies, type BrowserCookie } from '../core/auth/cookie-store.js';
 import { validateCookies } from '../core/auth/session-validator.js';
-import { waitForVerificationCode } from '../lib/redis-pubsub.js';
+import { waitForVerificationCode, waitForVerificationResult, type VerificationResult } from '../lib/redis-pubsub.js';
 import { SocketLogger } from '../lib/socket-logger.js';
 import { prisma } from '../lib/prisma.js';
 import { loadAccountContext } from '../lib/account-context.js';
@@ -500,19 +500,42 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
     if (twoFA.has2FA) {
       logger.warn(`🔒 ${twoFA.hint}`);
 
+      // ── Step 1: TikTok method selection screen ──────────
+      // TikTok shows TWO screens:
+      //   Screen 1: "Подтвердите, что это действительно вы" with email/phone options + "Далее"
+      //   Screen 2: Code input field
+      // We must handle Screen 1 first before waiting for code.
+      if (ctx.platform === 'TIKTOK') {
+        await _handleTikTokMethodSelection(page, cursor, logger);
+      }
+
+      // Extract email/phone hint from the page for the frontend
+      let maskedContact = '';
+      try {
+        const bodyText = await page.textContent('body') || '';
+        // Match patterns like x***r@email.com or +7***123
+        const emailMatch = bodyText.match(/[a-zA-Z0-9]\*{2,}[a-zA-Z0-9]@\S+/);
+        const phoneMatch = bodyText.match(/\+?\d\*{2,}\d+/);
+        maskedContact = emailMatch?.[0] || phoneMatch?.[0] || '';
+      } catch { /* ignore */ }
+
       // Emit 2FA required to frontend
       emitLoginEvent(logger, data.accountId, 'login:2fa_required', {
         type: twoFA.type,
         hint: twoFA.hint,
         platform: ctx.platform,
+        maskedContact, // so frontend can show which email/phone
         timeoutSeconds: 600, // 10 minutes
       });
 
-      // Wait for code from user via Redis pub/sub
+      // ── Step 2: Wait for code with resend support ───────
+      // Loop: wait for user input. If resend → click resend in browser, re-wait.
       logger.info(`⏳ Ожидаю код подтверждения (10 мин)...`);
-      const code = await waitForVerificationCode(data.accountId, 10 * 60 * 1000);
+      const codeResult = await _waitForCodeWithResend(
+        page, cursor, data.accountId, ctx.platform, logger, 10 * 60 * 1000,
+      );
 
-      if (!code) {
+      if (!codeResult) {
         const errMsg = 'Время ожидания кода истекло (10 мин). Повторите попытку входа.';
         await prisma.socialAccount.update({
           where: { id: data.accountId },
@@ -530,10 +553,11 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
 
       // Enter the code — platform-specific selectors
       if (ctx.platform === 'TIKTOK') {
-        await humanType(page, 'input[name="code"], input[autocomplete*="one-time"]', code);
+        const tiktokCodeSelectors = 'input[name="code"], input[autocomplete*="one-time"], input[type="text"], input[type="tel"], input[type="number"]';
+        await humanType(page, tiktokCodeSelectors, codeResult);
         await page.waitForTimeout(500);
         try {
-          await humanClick(page, cursor, 'button[type="submit"], button:has-text("Verify"), button:has-text("Подтвердить")', { postClickDelay: 3000 });
+          await humanClick(page, cursor, 'button[type="submit"], button:has-text("Verify"), button:has-text("Подтвердить"), button:has-text("Submit"), button:has-text("Отправить")', { postClickDelay: 3000 });
         } catch {
           // Some forms auto-submit
         }
@@ -554,7 +578,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
           try {
             const count = await page.locator(sel).count();
             if (count > 0) {
-              await humanType(page, sel, code);
+              await humanType(page, sel, codeResult);
               codeEntered = true;
               break;
             }
@@ -565,7 +589,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
         if (!codeEntered) {
           // Fallback: try any visible input
           logger.warn('⚠️ Не найден стандартный Google input — пробую generic input');
-          try { await humanType(page, 'input[type="text"]:visible, input[type="tel"]:visible', code); } catch {}
+          try { await humanType(page, 'input[type="text"]:visible, input[type="tel"]:visible', codeResult); } catch {}
         }
 
         await page.waitForTimeout(500);
@@ -875,6 +899,215 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
     await closeBrowser(browser);
     logger.disconnect();
   }
+}
+
+// ── TikTok method selection handler ─────────────────────────
+/**
+ * Handle TikTok's two-screen verification flow.
+ * Screen 1: "Подтвердите, что это действительно вы" — email/phone options + "Далее" button
+ * Screen 2: Code input field
+ *
+ * This function handles Screen 1: selects the email/phone option and clicks "Далее"
+ * to trigger sending the verification code.
+ */
+async function _handleTikTokMethodSelection(
+  page: any,
+  cursor: any,
+  logger: SocketLogger,
+): Promise<void> {
+  try {
+    // Check if we're on the method selection screen (no code input yet)
+    const codeInputCount = await page.locator('input[name="code"], input[autocomplete*="one-time"]').count();
+    if (codeInputCount > 0) {
+      // Already on the code input screen — skip
+      logger.info('Экран ввода кода уже отображается');
+      return;
+    }
+
+    // Look for the method selection page
+    // TikTok shows clickable rows/cards with email/phone options
+    const methodSelectors = [
+      // Email option — match by content or icon
+      '[class*="verify-select"] >> text=/email|почт|mail/i',
+      'div:has(svg) >> text=/email|почт|mail/i',
+      ':text-matches("\\\\*{2,}@", "i")',  // masked email like x***r@mail.com
+      'label:has-text("email"), label:has-text("почт")',
+      // Generic selectable rows
+      '[role="radio"]:has-text("email"), [role="radio"]:has-text("почт")',
+      '[role="option"]:has-text("email"), [role="option"]:has-text("почт")',
+    ];
+
+    let methodSelected = false;
+    for (const sel of methodSelectors) {
+      try {
+        const el = page.locator(sel).first();
+        if (await el.count() > 0) {
+          await el.click();
+          methodSelected = true;
+          logger.info('Выбран метод подтверждения через email ✓');
+          break;
+        }
+      } catch { continue; }
+    }
+
+    if (!methodSelected) {
+      // Try clicking ANY selectable row that looks like a verification option
+      // TikTok often uses div containers with radio-like circles
+      try {
+        const options = page.locator('[class*="option"], [class*="method"], [class*="select"], [class*="verify"] >> div:has(span)');
+        const count = await options.count();
+        if (count > 0) {
+          // Click the first option (usually email)
+          await options.first().click();
+          methodSelected = true;
+          logger.info('Выбрана первая опция подтверждения ✓');
+        }
+      } catch { /* no options found */ }
+    }
+
+    // Wait a moment after selecting
+    await page.waitForTimeout(1000);
+
+    // Click "Далее" / "Next" / "Send code" / "Continue" button
+    const nextSelectors = [
+      'button:has-text("Далее")',
+      'button:has-text("Next")',
+      'button:has-text("Send code")',
+      'button:has-text("Отправить код")',
+      'button:has-text("Continue")',
+      'button:has-text("Продолжить")',
+      'button[type="submit"]',
+      // TikTok pink/red primary button at the bottom
+      'button[class*="primary"], button[class*="submit"]',
+    ];
+
+    let nextClicked = false;
+    for (const sel of nextSelectors) {
+      try {
+        const btn = page.locator(sel).first();
+        if (await btn.count() > 0 && await btn.isEnabled()) {
+          await humanClick(page, cursor, sel, { postClickDelay: 2000 });
+          nextClicked = true;
+          logger.info('Нажата кнопка "Далее" — код отправляется... ✓');
+          break;
+        }
+      } catch { continue; }
+    }
+
+    if (!nextClicked) {
+      logger.warn('⚠️ Кнопка "Далее" не найдена — возможно код отправляется автоматически');
+    }
+
+    // Wait for the code input to appear
+    await page.waitForTimeout(3000);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(`⚠️ Ошибка при выборе метода подтверждения: ${msg}`);
+    // Don't throw — continue to code waiting
+  }
+}
+
+// ── Wait for code with resend support ───────────────────────
+/**
+ * Wait for verification code from user, supporting resend requests.
+ * If user clicks "Resend" in frontend, worker clicks resend in browser
+ * and continues waiting for a new code.
+ *
+ * @returns The verification code string, or null if timeout
+ */
+async function _waitForCodeWithResend(
+  page: any,
+  cursor: any,
+  accountId: string,
+  platform: 'TIKTOK' | 'YOUTUBE',
+  logger: SocketLogger,
+  totalTimeoutMs: number,
+): Promise<string | null> {
+  const deadline = Date.now() + totalTimeoutMs;
+
+  while (true) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return null;
+
+    const result = await waitForVerificationResult(accountId, remaining);
+
+    if (result.type === 'timeout') {
+      return null;
+    }
+
+    if (result.type === 'code') {
+      return result.code;
+    }
+
+    // result.type === 'resend'
+    logger.info('🔄 Пользователь запросил повторную отправку кода...');
+
+    try {
+      await _clickResendButton(page, cursor, platform, logger);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      logger.warn(`⚠️ Не удалось нажать кнопку повторной отправки: ${msg}`);
+    }
+
+    // Continue loop — wait for next code
+    logger.info('⏳ Ожидаю новый код...');
+  }
+}
+
+/**
+ * Click the "Resend code" button in the browser.
+ */
+async function _clickResendButton(
+  page: any,
+  cursor: any,
+  platform: 'TIKTOK' | 'YOUTUBE',
+  logger: SocketLogger,
+): Promise<void> {
+  if (platform === 'TIKTOK') {
+    const resendSelectors = [
+      'button:has-text("Resend")',
+      'button:has-text("Отправить повторно")',
+      'button:has-text("Повторно")',
+      'a:has-text("Resend")',
+      'a:has-text("Отправить повторно")',
+      ':text-matches("resend|повторно|отправить.?снова|не получили", "i")',
+      'button:has-text("Send again")',
+    ];
+
+    for (const sel of resendSelectors) {
+      try {
+        const el = page.locator(sel).first();
+        if (await el.count() > 0) {
+          await humanClick(page, cursor, sel, { postClickDelay: 2000 });
+          logger.info('Код отправлен повторно ✓');
+          return;
+        }
+      } catch { continue; }
+    }
+  } else {
+    // Google/YouTube
+    const resendSelectors = [
+      'button:has-text("Resend")',
+      'button:has-text("Try another way")',
+      'button:has-text("Другой способ")',
+      'a:has-text("Resend")',
+      'a:has-text("resend it")',
+      ':text-matches("resend|try.?again|повтор|другой.?способ", "i")',
+    ];
+
+    for (const sel of resendSelectors) {
+      try {
+        const el = page.locator(sel).first();
+        if (await el.count() > 0) {
+          await humanClick(page, cursor, sel, { postClickDelay: 2000 });
+          logger.info('Код отправлен повторно ✓');
+          return;
+        }
+      } catch { continue; }
+    }
+  }
+
+  logger.warn('⚠️ Кнопка повторной отправки не найдена на странице');
 }
 
 // ── Socket.io event helpers ─────────────────────────────────

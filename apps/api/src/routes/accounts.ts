@@ -22,7 +22,7 @@ import { prisma } from '../lib/prisma.js';
 import { authMiddleware } from '../middleware/auth.js';
 import crypto from 'crypto';
 import { generateFingerprint, generateMobileFingerprint } from '../lib/fingerprint.js';
-import { publishVerificationCode } from '../lib/redis-pubsub.js';
+import { publishVerificationCode, publishResendCommand } from '../lib/redis-pubsub.js';
 import { dispatchAccountJob } from '../lib/job-dispatch.js';
 
 const router = Router();
@@ -447,6 +447,28 @@ router.post('/:id/verify-code', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[Accounts] Verify code error:', err);
     res.status(500).json({ error: 'Ошибка при отправке кода' });
+  }
+});
+
+// ── POST /:id/resend-code — request code resend from worker ──
+router.post('/:id/resend-code', async (req: Request, res: Response) => {
+  try {
+    // Verify account belongs to user
+    const account = await prisma.socialAccount.findFirst({
+      where: { id: String(req.params.id), userId: req.user!.id },
+    });
+    if (!account) {
+      res.status(404).json({ error: 'Аккаунт не найден' });
+      return;
+    }
+
+    // Send RESEND command to worker via Redis
+    await publishResendCommand(String(req.params.id));
+
+    res.json({ success: true, message: 'Запрос на повторную отправку кода отправлен' });
+  } catch (err) {
+    console.error('[Accounts] Resend code error:', err);
+    res.status(500).json({ error: 'Ошибка при запросе повторной отправки' });
   }
 });
 

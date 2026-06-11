@@ -74,6 +74,7 @@ export default function AccountsPage() {
     hint: string
     type: string      // email | sms | authenticator | unknown
     platform: string
+    maskedContact: string  // e.g. x***r@mail.com or +7***123
     deadline: number  // unix timestamp (ms) when timeout expires
   }
   const [twoFAQueue, setTwoFAQueue] = React.useState<TwoFARequest[]>([])
@@ -161,7 +162,7 @@ export default function AccountsPage() {
       fetchAccounts()
     })
 
-    socket.on("login:2fa_required", (data: { accountId: string; type: string; hint: string; timeoutSeconds: number; platform?: string }) => {
+    socket.on("login:2fa_required", (data: { accountId: string; type: string; hint: string; timeoutSeconds: number; platform?: string; maskedContact?: string }) => {
       // Find the account to get username for display (use ref for latest data)
       const matchAccount = accountsRef.current.find(a => a.id === data.accountId)
       const displayName = matchAccount?.username || `ID: ${data.accountId.slice(0, 8)}`
@@ -172,6 +173,7 @@ export default function AccountsPage() {
         hint: data.hint,
         type: data.type,
         platform: data.platform || "TIKTOK",
+        maskedContact: data.maskedContact || "",
         deadline: Date.now() + (data.timeoutSeconds || 600) * 1000,
       }
 
@@ -388,6 +390,20 @@ export default function AccountsPage() {
       toast.error(err instanceof ApiError ? err.message : "Ошибка отправки кода")
     } finally {
       setTwoFALoading(false)
+    }
+  }
+
+  const [resendLoading, setResendLoading] = React.useState(false)
+  const handleResendCode = async () => {
+    if (!currentTwoFA) return
+    setResendLoading(true)
+    try {
+      await api.post(`/api/accounts/${currentTwoFA.accountId}/resend-code`)
+      toast.success(`${currentTwoFA.username}: запрос на повторную отправку кода отправлен`)
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Ошибка повторной отправки")
+    } finally {
+      setResendLoading(false)
     }
   }
 
@@ -825,6 +841,15 @@ export default function AccountsPage() {
                 </div>
               )}
 
+              {/* Masked contact info */}
+              {currentTwoFA.maskedContact && (
+                <div className="flex items-center gap-2 text-sm bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3 rounded-lg">
+                  <span className="text-blue-600 dark:text-blue-400 font-medium">
+                    {currentTwoFA.type === "email" ? "📧" : "📱"} Код отправлен на: {currentTwoFA.maskedContact}
+                  </span>
+                </div>
+              )}
+
               {/* Timer */}
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Clock className="size-4" />
@@ -847,6 +872,17 @@ export default function AccountsPage() {
                   disabled={twoFALoading}
                 />
               </div>
+
+              {/* Resend button */}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground hover:text-foreground self-center"
+                onClick={handleResendCode}
+                disabled={resendLoading || twoFALoading}
+              >
+                {resendLoading ? <><Loader2 className="size-3 mr-1.5 animate-spin" />Отправка...</> : "🔄 Отправить код повторно"}
+              </Button>
 
               <div className="flex items-start gap-2 text-xs text-muted-foreground bg-accent/50 p-3 rounded-lg">
                 <AlertCircle className="size-4 mt-0.5 shrink-0" />
