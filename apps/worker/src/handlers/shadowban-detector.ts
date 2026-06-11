@@ -17,6 +17,7 @@
 
 import { Job } from 'bullmq';
 import { prisma } from '../lib/prisma.js';
+import { addJob } from '../lib/bullmq.js';
 import { SocketLogger } from '../lib/socket-logger.js';
 import { emitWorkerError } from '../lib/error-classifier.js';
 
@@ -55,6 +56,40 @@ export interface ShadowbanResult {
 export async function shadowbanDetectorHandler(
   job: Job<ShadowbanCheckJobData>,
 ): Promise<ShadowbanResult> {
+  // ── Cron dispatch: fan out to individual account jobs ──
+  // The repeatable cron fires with { _cron: true } — no accountId.
+  // We need to find all eligible accounts and enqueue individual checks.
+  if ((job.data as any)._cron && !job.data.accountId) {
+    const accounts = await prisma.socialAccount.findMany({
+      where: {
+        status: 'ALIVE',
+        warmupCompletedAt: { not: null },
+      },
+      select: { id: true, userId: true },
+    });
+
+    console.log(`[Shadowban] Cron dispatch: found ${accounts.length} eligible accounts`);
+
+    let dispatched = 0;
+    for (const acc of accounts) {
+      await addJob(
+        'shadowban-check',
+        { userId: acc.userId, accountId: acc.id },
+        { delay: dispatched * 3_000, jobId: `shadowban-${acc.id}` },
+      );
+      dispatched++;
+    }
+
+    console.log(`[Shadowban] Dispatched ${dispatched} individual checks`);
+
+    return {
+      accountId: 'cron-dispatch',
+      flagged: false,
+      reason: `Dispatched ${dispatched} checks`,
+      checkedAt: new Date(),
+    };
+  }
+
   const { accountId, userId } = job.data;
   const logger = new SocketLogger(userId);
 
