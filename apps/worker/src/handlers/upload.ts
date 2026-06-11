@@ -248,10 +248,11 @@ async function _uploadToTikTok(
   await page.goto('https://www.tiktok.com/upload', { waitUntil: 'networkidle' });
   await page.waitForTimeout(_randomDelay(3000, 5000));
 
-  // Check auth status
-  const bodyText = await page.textContent('body');
-  if (bodyText?.includes('Log in') || bodyText?.includes('Sign up')) {
-    throw new Error('Не удалось войти в TikTok — cookies невалидны');
+  // Check auth status — BUG-10 fix: check URL instead of body text
+  // Body text scanning hits false positives ("Log in" in sidebar/footer)
+  const currentUrl = page.url();
+  if (/\/login|accounts\.tiktok\.com/i.test(currentUrl)) {
+    throw new Error('Не удалось войти в TikTok — cookies невалидны (перенаправлен на login)');
   }
 
   logger.info('Авторизация TikTok успешна');
@@ -349,14 +350,33 @@ async function _uploadToTikTok(
     throw new Error(`CAPTCHA solve failed: ${msg}`);
   }
 
-  // BUG-L5 fix: Verify TikTok actually confirmed the upload
-  // Wait a bit more for the success toast/redirect to appear
+  // BUG-7 fix: Use scoped selectors to verify upload, not body text
+  // Body text scanning catches "error" in JavaScript, footer links, etc.
   await page.waitForTimeout(_randomDelay(3000, 5000));
-  const confirmBodyText = await page.textContent('body') ?? '';
-  const hasError = /failed|error|couldn't|не удалось|ошибка/i.test(confirmBodyText);
-  if (hasError) {
-    // M-9 FIX: Throw on detected error instead of silently marking as uploaded
-    throw new Error('TikTok upload failed — error text detected on confirmation page');
+
+  // Check for TikTok-specific error banners/toasts
+  const errorSelectors = [
+    '[class*="error"]:visible',
+    '[class*="toast"][class*="error"]:visible',
+    '[data-e2e="upload-error"]',
+  ];
+
+  let uploadError = false;
+  for (const sel of errorSelectors) {
+    try {
+      const count = await page.locator(sel).count();
+      if (count > 0) {
+        const errorText = await page.locator(sel).first().textContent();
+        if (errorText && /failed|error|не удалось|ошибка/i.test(errorText)) {
+          uploadError = true;
+          break;
+        }
+      }
+    } catch { /* selector not found — OK */ }
+  }
+
+  if (uploadError) {
+    throw new Error('TikTok upload failed — error element detected on page');
   }
 
   logger.info('TikTok подтвердил загрузку ✓');
@@ -385,10 +405,10 @@ async function _uploadToYouTube(
   await page.goto('https://studio.youtube.com/', { waitUntil: 'networkidle' });
   await page.waitForTimeout(_randomDelay(3000, 5000));
 
-  // Auth check
-  const bodyText = await page.textContent('body');
-  if (bodyText?.includes('Sign in') || bodyText?.includes('Войти')) {
-    throw new Error('Не удалось войти в YouTube Studio — cookies невалидны');
+  // Auth check — BUG-10 fix: URL-based instead of body text
+  const currentUrl = page.url();
+  if (/accounts\.google\.com\/ServiceLogin|accounts\.google\.com\/signin/i.test(currentUrl)) {
+    throw new Error('Не удалось войти в YouTube Studio — cookies невалидны (перенаправлен на login)');
   }
   logger.info('Авторизация YouTube успешна');
   await job.updateProgress(45);
@@ -409,7 +429,26 @@ async function _uploadToYouTube(
   await fileInput.setInputFiles(videoPath);
   logger.info('Файл загружен в Studio...');
 
-  await page.waitForTimeout(_randomDelay(6000, 12000));  // Studio needs time to ingest
+  // BUG-8 fix: Wait for YouTube Studio to finish processing the video
+  // Studio shows a progress bar during upload/processing. Clicking Publish
+  // before completion will be blocked by Studio or fail silently.
+  logger.info('Ожидаю обработку видео YouTube Studio...');
+  try {
+    // Wait for either "Upload complete" text, or the progress to finish
+    // YouTube Studio shows "Uploading..." then "Processing..." then ready
+    await page.waitForFunction(
+      () => {
+        const body = document.body?.textContent ?? '';
+        // Studio shows these when upload+processing is done
+        return /Upload complete|Загрузка завершена|Checks complete|Проверки завершены/i.test(body)
+          || document.querySelector('#next-button:not([disabled])');
+      },
+      { timeout: 120_000 },  // 2 minute timeout for large videos
+    );
+    logger.info('Обработка видео завершена ✓');
+  } catch {
+    logger.warn('Таймаут ожидания обработки видео (120s) — продолжаю...');
+  }
   await job.updateProgress(60);
 
   // Wait for the title input to be ready (Studio dialog opens automatically after file upload)

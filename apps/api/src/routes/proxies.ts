@@ -188,16 +188,21 @@ router.patch('/:id', async (req: Request, res: Response) => {
       updateData.status = input.isActive ? 'ACTIVE' : 'DEAD';
     }
 
-    // Handle full edit (host/port/username/password)
-    if (input.host && input.port) {
-      updateData.host = input.host;
-      updateData.port = input.port;
-      updateData.username = input.username ?? existing.username;
-      updateData.password = input.password ?? existing.password;
-      updateData.address = composeAddress(
-        input.host, input.port,
-        input.username, input.password,
-      );
+    // Handle host/port/username/password changes — recalculate address
+    // even on partial updates (BUG-9 fix: previously required both host AND port)
+    const hasConnectionChange = input.host !== undefined || input.port !== undefined
+      || input.username !== undefined || input.password !== undefined;
+    if (hasConnectionChange) {
+      const finalHost = input.host ?? existing.host;
+      const finalPort = input.port ?? existing.port;
+      const finalUser = input.username !== undefined ? input.username : (existing.username ?? undefined);
+      const finalPass = input.password !== undefined ? input.password : (existing.password ?? undefined);
+
+      if (input.host !== undefined) updateData.host = input.host;
+      if (input.port !== undefined) updateData.port = input.port;
+      if (input.username !== undefined) updateData.username = input.username || null;
+      if (input.password !== undefined) updateData.password = input.password || null;
+      updateData.address = composeAddress(finalHost, finalPort, finalUser || undefined, finalPass || undefined);
     }
     if (input.name !== undefined) updateData.label = input.name;
     if (input.rotationLink !== undefined) {
@@ -305,17 +310,19 @@ router.post('/:id/test', async (req: Request, res: Response) => {
       testResult = { reachable: false, latencyMs: 0, externalIp: '' };
     }
 
-    // Update DB with test results
-    if (testResult.reachable) {
-      await prisma.proxy.update({
-        where: { id: proxy.id },
-        data: {
-          status: 'ACTIVE',
-          lastIP: testResult.externalIp || null,
-          lastIPAt: new Date(),
-        },
-      });
-    }
+    // Update DB with test results (BUG-6 fix: also set DEAD on failure)
+    await prisma.proxy.update({
+      where: { id: proxy.id },
+      data: testResult.reachable
+        ? {
+            status: 'ACTIVE',
+            lastIP: testResult.externalIp || null,
+            lastIPAt: new Date(),
+          }
+        : {
+            status: 'DEAD',
+          },
+    });
 
     res.json({
       success: testResult.reachable,
