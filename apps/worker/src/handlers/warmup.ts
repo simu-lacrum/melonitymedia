@@ -172,12 +172,12 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
         await page.goto('https://www.tiktok.com/foryou', { waitUntil: 'domcontentloaded' });
       }
     } else {
-      // YouTube — Shorts feed or search
+      // YouTube — Shorts feed or search via search bar
       if (mergedHashtags.length > 0) {
         const startTag = mergedHashtags[Math.floor(Math.random() * mergedHashtags.length)];
-        await page.goto(`https://www.youtube.com/results?search_query=%23${encodeURIComponent(startTag)}&sp=EgIQAQ%253D%253D`, {
-          waitUntil: 'domcontentloaded',
-        });
+        await page.goto('https://www.youtube.com', { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(_randomDelay(2000, 3000));
+        await _navigateToYoutubeSearch(page, cursor, startTag, logger);
       } else {
         await page.goto('https://www.youtube.com/shorts', { waitUntil: 'domcontentloaded' });
       }
@@ -257,9 +257,9 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
 }
 
 
-// ── Hashtag Search Navigation ───────────────────────────────
-// Navigate to TikTok search and look up a hashtag. This trains the
-// algorithm to show niche content on FYP and makes browsing look human.
+// ── TikTok: Human-like Hashtag Search ───────────────────────
+// Opens TikTok, clicks search bar, types hashtag manually, clicks search.
+// This is how real users find niche content — NOT via direct URL.
 
 async function _navigateToHashtagSearch(
   page: Page,
@@ -267,29 +267,52 @@ async function _navigateToHashtagSearch(
   hashtag: string,
   logger: SocketLogger,
 ): Promise<void> {
-  logger.info(`🔍 Поиск по хештегу #${hashtag} в TikTok...`);
+  logger.info(`🔍 Поиск #${hashtag} в TikTok (через поисковую строку)...`);
 
-  // Method 1: Direct search URL (most reliable)
+  // Make sure we're on TikTok first
+  const currentUrl = page.url();
+  if (!/tiktok\.com/i.test(currentUrl)) {
+    await page.goto('https://www.tiktok.com/foryou', { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await page.waitForTimeout(_randomDelay(2000, 3000));
+  }
+
+  // Method 1: Click search bar, type hashtag, press Enter
   try {
-    await page.goto(
-      `https://www.tiktok.com/search?q=%23${encodeURIComponent(hashtag)}`,
-      { waitUntil: 'domcontentloaded', timeout: 20000 },
-    );
-    await page.waitForTimeout(_randomDelay(2000, 4000));
+    // Click search icon/bar in header
+    await humanClick(page, cursor, SEL.TIKTOK.SEARCH_INPUT, { postClickDelay: 800 });
+    await page.waitForTimeout(_randomDelay(500, 1000));
+
+    // Clear any existing text and type the hashtag query
+    await page.keyboard.press('Control+A');
+    await page.waitForTimeout(_randomDelay(200, 400));
+    const query = `#${hashtag}`;
+    await humanType(page, SEL.TIKTOK.SEARCH_INPUT, query);
+    await page.waitForTimeout(_randomDelay(800, 1500));
+
+    // Press Enter to search (more human than clicking search button)
+    await humanPressEnter(page);
+    await page.waitForTimeout(_randomDelay(3000, 5000));
 
     // Try to click on a video from search results
     try {
       await humanClick(page, cursor, SEL.TIKTOK.VIDEO_CARD, { postClickDelay: 2000 });
-      logger.info(`  ▶ Открыто видео из результатов поиска #${hashtag}`);
+      logger.info(`  ▶ Открыто видео из поиска #${hashtag}`);
       return;
     } catch {
-      // No video cards found — try tag page
+      // No video cards — maybe we're on a tab, try scrolling
+      await humanScroll(page, _randomDelay(300, 500));
+      await page.waitForTimeout(_randomDelay(1000, 2000));
+      try {
+        await humanClick(page, cursor, SEL.TIKTOK.VIDEO_CARD, { postClickDelay: 2000 });
+        logger.info(`  ▶ Открыто видео из поиска #${hashtag} (после скролла)`);
+        return;
+      } catch { /* fallback below */ }
     }
   } catch {
-    logger.warn(`  ⚠️ Не удалось открыть поиск — пробую страницу хештега`);
+    logger.warn(`  ⚠️ Не удалось ввести запрос в поиск — пробую страницу хештега`);
   }
 
-  // Method 2: Direct tag page
+  // Method 2 (fallback): Direct tag page
   try {
     await page.goto(
       `https://www.tiktok.com/tag/${encodeURIComponent(hashtag)}`,
@@ -302,6 +325,64 @@ async function _navigateToHashtagSearch(
     // Fallback to FYP
     logger.warn(`  ⚠️ Не удалось открыть #${hashtag} — переход на FYP`);
     await page.goto('https://www.tiktok.com/foryou', { waitUntil: 'domcontentloaded' });
+  }
+}
+
+
+// ── YouTube: Human-like Search ──────────────────────────────
+// Opens YouTube, clicks search bar, types query manually, clicks search.
+// Same principle — real users type, not paste URLs.
+
+async function _navigateToYoutubeSearch(
+  page: Page,
+  cursor: Awaited<ReturnType<typeof createPageCursor>>,
+  hashtag: string,
+  logger: SocketLogger,
+): Promise<void> {
+  logger.info(`🔍 Поиск #${hashtag} в YouTube (через поисковую строку)...`);
+
+  // Make sure we're on YouTube first
+  const currentUrl = page.url();
+  if (!/youtube\.com/i.test(currentUrl)) {
+    await page.goto('https://www.youtube.com', { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await page.waitForTimeout(_randomDelay(2000, 3000));
+  }
+
+  try {
+    // Click YouTube search bar
+    const ytSearchSel = 'input#search, input[name="search_query"], ' +
+      'input[aria-label*="Search" i], input[placeholder*="Search" i]';
+    await humanClick(page, cursor, ytSearchSel, { postClickDelay: 800 });
+    await page.waitForTimeout(_randomDelay(500, 1000));
+
+    // Clear and type
+    await page.keyboard.press('Control+A');
+    await page.waitForTimeout(_randomDelay(200, 400));
+    const query = `#${hashtag}`;
+    await humanType(page, ytSearchSel, query);
+    await page.waitForTimeout(_randomDelay(800, 1500));
+
+    // Press Enter to search
+    await humanPressEnter(page);
+    await page.waitForTimeout(_randomDelay(3000, 5000));
+
+    // Try to click on a Shorts video from results
+    try {
+      await humanClick(page, cursor, 'a[href*="/shorts/"]', { postClickDelay: 2000 });
+      logger.info(`  ▶ Открыто Shorts видео из поиска #${hashtag}`);
+    } catch {
+      // Fallback: click any video
+      try {
+        await humanClick(page, cursor, 'a#video-title, ytd-video-renderer a', { postClickDelay: 2000 });
+        logger.info(`  ▶ Открыто видео из поиска #${hashtag}`);
+      } catch {
+        logger.warn(`  ⚠️ Не удалось найти видео по #${hashtag} в YouTube`);
+      }
+    }
+  } catch {
+    // Fallback: go to Shorts feed
+    logger.warn(`  ⚠️ Не удалось использовать поиск YouTube — переход на Shorts`);
+    await page.goto('https://www.youtube.com/shorts', { waitUntil: 'domcontentloaded' });
   }
 }
 
@@ -398,17 +479,7 @@ async function _lightEngagement(
       if (data.platform === 'TIKTOK') {
         await _navigateToHashtagSearch(page, cursor, randomTag, logger);
       } else {
-        try {
-          await page.goto(
-            `https://www.youtube.com/results?search_query=%23${encodeURIComponent(randomTag)}&sp=EgIQAQ%253D%253D`,
-            { waitUntil: 'domcontentloaded' },
-          );
-          await page.waitForTimeout(_randomDelay(2000, 4000));
-          // Click on first shorts video
-          try {
-            await humanClick(page, cursor, 'a[href*="/shorts/"]', { postClickDelay: 2000 });
-          } catch { /* fallback to scroll */ }
-        } catch { /* ignore */ }
+        await _navigateToYoutubeSearch(page, cursor, randomTag, logger);
       }
     }
 
@@ -511,16 +582,7 @@ async function _activeEngagement(
       if (data.platform === 'TIKTOK') {
         await _navigateToHashtagSearch(page, cursor, randomTag, logger);
       } else {
-        try {
-          await page.goto(
-            `https://www.youtube.com/results?search_query=%23${encodeURIComponent(randomTag)}&sp=EgIQAQ%253D%253D`,
-            { waitUntil: 'domcontentloaded' },
-          );
-          await page.waitForTimeout(_randomDelay(2000, 4000));
-          try {
-            await humanClick(page, cursor, 'a[href*="/shorts/"]', { postClickDelay: 2000 });
-          } catch { /* fallback */ }
-        } catch { /* ignore */ }
+        await _navigateToYoutubeSearch(page, cursor, randomTag, logger);
       }
     }
 
