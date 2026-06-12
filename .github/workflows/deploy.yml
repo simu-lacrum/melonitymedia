@@ -37,11 +37,16 @@ jobs:
             grep -q '^REDIS_PASSWORD=' .env || echo "REDIS_PASSWORD=${REDIS_PASS}" >> .env
             echo "  REDIS_URL=$(grep REDIS_URL .env | head -1)"
 
-            echo "══════ Building & restarting containers ══════"
-            docker compose up -d --build --force-recreate --remove-orphans
+            echo "══════ Cleaning orphan containers ══════"
+            # Remove any dead/exited containers that block recreation
+            docker ps -a --filter "name=melonitymedia" --format "{{.ID}} {{.Names}} {{.Status}}" | grep -i "exited\|dead\|created" | awk '{print $1}' | xargs -r docker rm -f 2>/dev/null || true
 
-            echo "══════ Cleaning up old images ══════"
-            docker image prune -f
+            echo "══════ Building & restarting app containers ══════"
+            # Only rebuild app services — not DB/Redis (they persist data)
+            docker compose up -d --build --force-recreate --remove-orphans api web worker
+
+            echo "══════ Ensuring infrastructure is running ══════"
+            docker compose up -d db redis
 
             echo "══════ Waiting 30s for containers to start ══════"
             sleep 30
@@ -56,3 +61,4 @@ jobs:
             docker compose logs worker --tail=50 --no-color 2>&1 || true
 
             echo "══════ Deploy complete ══════"
+            docker image prune -f 2>/dev/null || true
