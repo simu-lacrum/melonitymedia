@@ -1,5 +1,69 @@
 # Changelog
 
+## [0.3.3] - 2026-06-12
+
+### Added (YouTube Platform Support)
+- **YouTube/Google Login Handler**: Полноценная авторизация через Google с resilient-селекторами, rate-limit detection и CAPTCHA-обнаружением. Те же safety-паттерны, что и для TikTok (humanType, ghost-cursor, randomized delays).
+- **YouTube Edit-Profile Session Warmup**: Перед навигацией в YouTube Studio worker сначала заходит на `youtube.com` и скроллит страницу — создаёт natural browsing pattern для обхода антифрода.
+- **YouTube Studio Error Detection**: Автоматическое обнаружение страницы "Произошла ошибка" и retry с перезагрузкой сессии.
+- **YouTube Studio New Channel Navigation**: Для новых каналов без вкладки "Кастомизация" в sidebar — прямой переход по URL `/editing/basic_info`.
+
+### Added (TikTok 2FA & Login)
+- **TikTok 2FA Method Selection**: Поддержка выбора метода верификации (SMS, Email, Authenticator) с UI-диалогом для ввода кода.
+- **TikTok Email Verification Detection**: Распознавание email-верификации как 2FA (ранее ложно считалось ошибкой пароля).
+- **2FA Dialog Improvements**: Диалог показывает имя аккаунта + поддерживает несколько одновременных 2FA-запросов.
+- **Resend Code Support**: Кнопка повторной отправки кода в 2FA-диалоге.
+
+### Added (Fingerprint & Proxy)
+- **Auto Mobile/Desktop Fingerprint**: Fingerprint автоматически выбирает mobile/desktop device class на основе типа прокси (LTE_MOBILE → mobile, STATIC_RESIDENTIAL → desktop).
+- **Proxy Geo in Fingerprint**: При импорте аккаунта geo-данные прокси передаются в генератор fingerprint для правильной locale/timezone.
+- **Proxy Usage Logging**: Подробное логирование использования прокси в patchright-launcher (host, port, username).
+- **Proxy URL Splitting**: Корректное разделение proxy URL на server/username/password для Playwright (ранее передавался как единый URL).
+
+### Added (Worker Improvements)
+- **Warmup v4**: Niche-focused warmup — поиск по хэштегам в search bar вместо прямых URL, resilient-селекторы для YouTube.
+- **Upload Hardening**: Улучшенные селекторы для TikTok/YouTube upload с fallback-стратегиями.
+- **Human-Like Search**: Warmup набирает запросы в строку поиска вместо перехода по прямым URL — имитация реального пользователя.
+- **Local File Avatar Support**: Edit-profile поддерживает локальные пути файлов (`/tmp/avatar.png`, `file:///tmp/avatar.png`) помимо HTTP URL.
+- **Error Classifier**: `emitWorkerError()` — централизованная классификация и логирование ошибок worker'а.
+
+### Added (Infrastructure)
+- **`lastError` Column**: Новое поле `SocialAccount.lastError` для хранения последней ошибки аккаунта (отображается в UI при статусе AUTH_NEEDED).
+- **Health Debug Endpoint**: `GET /api/health/debug` для диагностики worker'а на VPS.
+
+### Fixed (YouTube)
+- **YouTube Login Regex**: Исправлен regex проверки успешного логина — теперь матчит bare `youtube.com/` homepage.
+- **YouTube Studio Welcome Modal**: Автоматическое закрытие welcome tour и cookie consent перед навигацией к настройкам.
+- **YouTube Studio Selectors**: Расширенные селекторы для `contenteditable="plaintext-only"`, `#description-container`, generic `#textbox`.
+- **`networkidle` → `load`**: Все `waitUntil: 'networkidle'` в Google Account pages заменены на `load` (YouTube Studio имеет бесконечные background XHR).
+- **Human-Like Delays**: 500-2000ms задержки между каждым действием в YouTube Studio (click → wait → select → wait → type).
+- **Studio Render Time**: Увеличено время ожидания рендера Studio с 5-8 до 8-12 секунд.
+- **Full-Page Screenshots**: Debug-скриншоты теперь `fullPage: true` для лучшей диагностики.
+
+### Fixed (TikTok)
+- **False 2FA Detection**: Исправлено ложное обнаружение 2FA на rate-limited страницах.
+- **Ghost-Cursor Patchright Shim**: Добавлены shim-методы Puppeteer API (`browser`, `_client`, `target`) для совместимости ghost-cursor с Patchright.
+
+### Fixed (Infrastructure)
+- **Redis Password in REDIS_URL**: Исправлена корневая причина того, что worker не обрабатывал задачи — пароль Redis отсутствовал в URL.
+- **Prisma Generate in Dockerfile**: Добавлен `prisma generate` в worker Dockerfile для генерации Prisma client.
+- **Xvfb Lock Cleanup**: Очистка lock-файла Xvfb при перезапуске контейнера (`/tmp/.X99-lock`).
+- **Shadowban Cron Dispatch**: Исправлен crash при dispatch shadowban cron + переход на analytics-like fan-out.
+- **Deploy Workflow**: Исправлен конфликт имён Docker-контейнеров при деплое:
+  - Удаление dead/exited orphan-контейнеров перед recreate
+  - Rebuild только app-сервисов (api, web, worker), не infrastructure (db, redis)
+  - Гарантия что db/redis запущены без force-recreate
+
+### Fixed (UI)
+- **Error Text Truncation**: Длинные тексты ошибок в таблице аккаунтов теперь обрезаются (не накладываются друг на друга).
+- **AUTH_NEEDED UX**: При статусе AUTH_NEEDED отображается `lastError` с описанием проблемы.
+
+### Changed
+- **`EXPECTED_CHROME_MAJOR`**: Обновлён с `148` → `149` в `.env.example` (Docker Chrome обновился).
+- **Edit-Profile Avatar Condition**: Проверка `avatarTmpPath && data.changes.avatarUrl` вместо только `avatarTmpPath`.
+- **Fingerprint Device Class**: `deviceClass` определяется автоматически по типу прокси при генерации fingerprint.
+- **Deploy Workflow**: `docker compose up -d --build --force-recreate` теперь применяется только к `api web worker`, db/redis запускаются без force-recreate.
+
 ## [0.3.2] - 2026-06-08
 
 ### Fixed (Security Hardening Audit — 33 issues resolved)

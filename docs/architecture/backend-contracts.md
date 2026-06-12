@@ -1,4 +1,4 @@
-# Backend Contracts v3 — API и BullMQ Payloads
+# Backend Contracts v3.3 — API и BullMQ Payloads
 
 ## Общие принципы
 
@@ -97,6 +97,7 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
     warmupDay: number | null;   // 1-(warmupDays+1), null if warmup not started
     warmupDays: number;         // user-configurable (3-21, default 10)
     defaultDescription: string | null; // default description for video uploads
+    lastError: string | null;   // last error message (shown for AUTH_NEEDED status)
     proxy: { id, address, label, type } | null;
     proxyPinnedAt: string | null;
     warmupStartedAt: string | null;
@@ -434,19 +435,32 @@ interface EditProfileJobPayload {
   changes: {
     name?: string;        // new display name / nickname
     bio?: string;         // new bio text
-    avatarUrl?: string;   // URL to download avatar from → upload to TikTok/YouTube
+    avatarUrl?: string;   // URL or local file path to avatar image
   };
 
   // Worker flow (v3.3):
   // 1. Loads account context (cookies, fingerprint, proxy)
   // 2. Launches Patchright with per-account fingerprint
-  // 3. Navigates to profile settings page
-  // 4. If changes.name: clicks name field, clears, types new name (ghost-cursor + typing emulator)
-  // 5. If changes.bio: clicks bio field, clears, types new bio
-  // 6. If changes.avatarUrl: downloads image → temp file → clicks avatar area →
-  //    uploads via file input → confirms crop dialog
-  // 7. Clicks save button
-  // 8. Persists cookies via persistCookies()
+  //
+  // === TikTok ===
+  // 3. Navigates to tiktok.com/setting
+  // 4. Uses ghost-cursor + typing emulator for all interactions
+  //
+  // === YouTube ===
+  // 3. SESSION WARMUP: navigates to youtube.com first, scrolls page (300-500px)
+  // 4. Navigates to studio.youtube.com
+  // 5. Dismisses welcome modal / cookie consent if present
+  // 6. Navigates to channel editing (sidebar or direct URL)
+  // 7. Uses contenteditable selectors (#textbox, plaintext-only)
+  // 8. All waitUntil use 'load' (not 'networkidle' — Studio has infinite XHR)
+  // 9. Human-like delays (500-2000ms) between each action
+  //
+  // === Common ===
+  // 10. If changes.avatarUrl: downloads image → temp file → clicks avatar →
+  //     uploads via file input → confirms crop dialog
+  //     Supports: HTTP URLs, local paths (/tmp/...), file:// URIs
+  // 11. Clicks save button
+  // 12. Persists cookies via persistCookies()
 }
 ```
 
@@ -523,6 +537,42 @@ interface ShadowbanCheckPayload {
 //   Status reverts to ALIVE only via manual user action — never automatically.
 ```
 
+### Queue: `login`
+```typescript
+interface LoginJobPayload {
+  accountId: string;
+  platform: "TIKTOK" | "YOUTUBE";
+
+  // Worker flow (v3.3):
+  // 1. Decrypts login:password from DB using AES-256-GCM
+  // 2. Launches Patchright with per-account fingerprint + proxy
+  //
+  // === TikTok ===
+  // 3. Navigates to tiktok.com/login/phone-or-email/email
+  // 4. Uses humanType() for email and password fields
+  // 5. Detects: success, wrong password, rate-limit, CAPTCHA, 2FA, email verification
+  //
+  // === YouTube/Google ===
+  // 3. Navigates to accounts.google.com
+  // 4. Types email → Next → types password → Next
+  // 5. Detects: success (youtube.com redirect), rate-limit, CAPTCHA, 2FA
+  //
+  // === 2FA Handling ===
+  // - Detects SMS, Email, Authenticator methods
+  // - Sends Socket.io event requesting code from user
+  // - Waits for user to provide code via API callback
+  // - Supports resend code functionality
+  //
+  // === Error Classification ===
+  // - Rate-limit pages → not confused with wrong password or 2FA
+  // - Email verification → treated as 2FA, not login failure
+  // - All errors saved to SocialAccount.lastError for UI display
+  //
+  // 6. On success: exports cookies → persistCookies()
+  // 7. Sets status ALIVE, clears lastError
+}
+```
+
 ---
 
 ## Socket.io Events
@@ -587,6 +637,14 @@ interface ShadowbanCheckPayload {
 // stored fingerprint becomes stale by design. The validator treats this as a
 // SOFT WARNING (log + set fingerprintStale flag) rather than a hard error,
 // so production accounts continue working after Docker image rebuild.
+//
+// Auto Device Class (v3.3):
+// The device class (mobile vs desktop) is determined automatically based on
+// proxy type at import time:
+//   LTE_MOBILE → mobile fingerprint (mobile UA, touch=5, small screen, high DPR)
+//   STATIC_RESIDENTIAL → desktop fingerprint (desktop UA, touch=0, large screen)
+//   No proxy → desktop (default)
+// This ensures consistency between IP type and device fingerprint.
 //
 // Manual regeneration is allowed ONLY for accounts where:
 //   warmupCompletedAt === null (never published any content)
