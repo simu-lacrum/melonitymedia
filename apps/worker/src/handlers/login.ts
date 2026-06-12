@@ -67,6 +67,21 @@ class LoginError extends Error {
   }
 }
 
+// ── Safe Prisma update (handles P2025 "record not found") ──
+// When an account is deleted/recreated between job dispatch and execution,
+// prisma.socialAccount.update() throws P2025. This wrapper catches that gracefully.
+async function safeUpdateAccount(accountId: string, data: Record<string, any>): Promise<void> {
+  try {
+    await prisma.socialAccount.update({ where: { id: accountId }, data });
+  } catch (err: any) {
+    if (err?.code === 'P2025') {
+      console.warn(`[safeUpdateAccount] Account ${accountId} not found in DB (P2025) — skipping update`);
+      return;
+    }
+    throw err; // Re-throw non-P2025 errors
+  }
+}
+
 // ── Crypto helpers ──────────────────────────────────────────
 function decryptField(encrypted: Buffer, iv: Buffer, authTag: Buffer): string {
   const masterKey = process.env.MASTER_KEY;
@@ -225,10 +240,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
       );
 
       if (status === 'alive') {
-        await prisma.socialAccount.update({
-          where: { id: data.accountId },
-          data: { status: 'ALIVE', lastError: null },
-        });
+        await safeUpdateAccount(data.accountId, { status: 'ALIVE', lastError: null });
         await job.updateProgress(100);
         logger.info(`✅ Cookies валидны, аккаунт активирован`);
 
@@ -240,10 +252,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
       }
 
       if (status === 'banned') {
-        await prisma.socialAccount.update({
-          where: { id: data.accountId },
-          data: { status: 'BANNED' },
-        });
+        await safeUpdateAccount(data.accountId, { status: 'BANNED' });
         emitLoginEvent(logger, data.accountId, 'login:failed', {
           code: 'ACCOUNT_BANNED',
           message: 'Аккаунт заблокирован платформой',
@@ -252,10 +261,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
       }
 
       // expired
-      await prisma.socialAccount.update({
-        where: { id: data.accountId },
-        data: { status: 'AUTH_NEEDED' },
-      });
+      await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED' });
       emitLoginEvent(logger, data.accountId, 'login:failed', {
         code: 'COOKIES_EXPIRED',
         message: 'Cookies недействительны или истекли. Попробуйте импортировать свежие cookies или войти через login:password.',
@@ -338,13 +344,10 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
         }
       } catch { /* non-critical */ }
 
-      await prisma.socialAccount.update({
-        where: { id: data.accountId },
-        data: {
+      await safeUpdateAccount(data.accountId, {
           status: 'ALIVE',
           lastError: null,
           ...(extractedUsername ? { username: extractedUsername } : {}),
-        },
       });
       emitStatusChange(logger, data.accountId, 'ALIVE', null);
       await job.updateProgress(100);
@@ -411,10 +414,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
               logger.info(`[RATE_LIMIT_DEBUG] Screenshot saved: ${screenshotPath}`);
             } catch { /* ignore screenshot errors */ }
             const errMsg = 'Слишком много попыток входа. TikTok заблокировал вход — попробуйте позже (через 15-30 минут).';
-            await prisma.socialAccount.update({
-              where: { id: data.accountId },
-              data: { status: 'AUTH_NEEDED', lastError: errMsg },
-            });
+            await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED', lastError: errMsg });
             emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
             emitLoginEvent(logger, data.accountId, 'login:failed', {
               code: 'RATE_LIMITED',
@@ -452,10 +452,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
 
         if (hasPasswordError) {
           const errMsg = 'Неверный пароль. Проверьте учётные данные и попробуйте снова.';
-          await prisma.socialAccount.update({
-            where: { id: data.accountId },
-            data: { status: 'AUTH_NEEDED', lastError: errMsg },
-          });
+          await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED', lastError: errMsg });
           emitLoginEvent(logger, data.accountId, 'login:failed', {
             code: 'INVALID_CREDENTIALS',
             message: errMsg,
@@ -470,10 +467,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
           if (banCount > 0) {
             const banText = (await banEl.allTextContents()).join(' ');
             if (/banned|suspended|заблокирован/i.test(banText)) {
-              await prisma.socialAccount.update({
-                where: { id: data.accountId },
-                data: { status: 'BANNED', lastError: 'Аккаунт заблокирован TikTok.' },
-              });
+              await safeUpdateAccount(data.accountId, { status: 'BANNED', lastError: 'Аккаунт заблокирован TikTok.' });
               emitLoginEvent(logger, data.accountId, 'login:failed', {
                 code: 'ACCOUNT_BANNED',
                 message: 'Аккаунт заблокирован TikTok.',
@@ -538,10 +532,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
           const screenshotPath = `/tmp/google-browser-blocked-${data.accountId}-${Date.now()}.png`;
           try { await page.screenshot({ path: screenshotPath, fullPage: true }); } catch {}
           const errMsg = 'Google заблокировал вход: "Этот браузер небезопасен". Попробуйте войти вручную, затем повторите.';
-          await prisma.socialAccount.update({
-            where: { id: data.accountId },
-            data: { status: 'AUTH_NEEDED', lastError: errMsg },
-          });
+          await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED', lastError: errMsg });
           emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
           emitLoginEvent(logger, data.accountId, 'login:failed', {
             code: 'RATE_LIMITED',
@@ -564,10 +555,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
           try { await page.screenshot({ path: screenshotPath, fullPage: true }); } catch {}
           logger.warn('🧩 Google показал reCAPTCHA — автоматическое решение невозможно');
           const errMsg = 'Google показал CAPTCHA. Автоматическое решение Google reCAPTCHA невозможно. Попробуйте войти вручную или сменить прокси/IP.';
-          await prisma.socialAccount.update({
-            where: { id: data.accountId },
-            data: { status: 'AUTH_NEEDED', lastError: errMsg },
-          });
+          await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED', lastError: errMsg });
           emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
           emitLoginEvent(logger, data.accountId, 'login:failed', {
             code: 'CAPTCHA_FAILED',
@@ -601,10 +589,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
         const screenshotPath = `/tmp/google-email-notfound-${data.accountId}-${Date.now()}.png`;
         try { await page.screenshot({ path: screenshotPath, fullPage: true }); } catch {}
         const errMsg = 'Аккаунт Google не найден. Проверьте email.';
-        await prisma.socialAccount.update({
-          where: { id: data.accountId },
-          data: { status: 'AUTH_NEEDED', lastError: errMsg },
-        });
+        await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED', lastError: errMsg });
         emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
         emitLoginEvent(logger, data.accountId, 'login:failed', {
           code: 'INVALID_CREDENTIALS',
@@ -660,10 +645,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
               try { await page.screenshot({ path: screenshotPath, fullPage: true }); } catch {}
               // Google rate-limit is 48-72 hours — MUCH longer than TikTok
               const errMsg = 'Google обнаружил подозрительную активность. Подождите 48-72 часа перед следующей попыткой.';
-              await prisma.socialAccount.update({
-                where: { id: data.accountId },
-                data: { status: 'AUTH_NEEDED', lastError: errMsg },
-              });
+              await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED', lastError: errMsg });
               emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
               emitLoginEvent(logger, data.accountId, 'login:failed', {
                 code: 'RATE_LIMITED',
@@ -707,10 +689,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
           const screenshotPath = `/tmp/google-wrongpwd-${data.accountId}-${Date.now()}.png`;
           try { await page.screenshot({ path: screenshotPath, fullPage: true }); } catch {}
           const errMsg = 'Неверный пароль Google. Проверьте учётные данные.';
-          await prisma.socialAccount.update({
-            where: { id: data.accountId },
-            data: { status: 'AUTH_NEEDED', lastError: errMsg },
-          });
+          await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED', lastError: errMsg });
           emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
           emitLoginEvent(logger, data.accountId, 'login:failed', {
             code: 'INVALID_CREDENTIALS',
@@ -732,10 +711,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
               const screenshotPath = `/tmp/google-banned-${data.accountId}-${Date.now()}.png`;
               try { await page.screenshot({ path: screenshotPath, fullPage: true }); } catch {}
               const errMsg = 'Аккаунт Google отключён или заблокирован.';
-              await prisma.socialAccount.update({
-                where: { id: data.accountId },
-                data: { status: 'BANNED', lastError: errMsg },
-              });
+              await safeUpdateAccount(data.accountId, { status: 'BANNED', lastError: errMsg });
               emitStatusChange(logger, data.accountId, 'BANNED', errMsg);
               emitLoginEvent(logger, data.accountId, 'login:failed', {
                 code: 'ACCOUNT_BANNED',
@@ -796,10 +772,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
 
       if (!codeResult) {
         const errMsg = 'Время ожидания кода истекло (10 мин). Повторите попытку входа.';
-        await prisma.socialAccount.update({
-          where: { id: data.accountId },
-          data: { status: 'AUTH_NEEDED', lastError: errMsg },
-        });
+        await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED', lastError: errMsg });
         emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
         emitLoginEvent(logger, data.accountId, 'login:failed', {
           code: 'TWO_FA_TIMEOUT',
@@ -893,10 +866,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
 
       if (codeInvalid) {
         const errMsg = 'Введён неверный код подтверждения. Повторите попытку входа.';
-        await prisma.socialAccount.update({
-          where: { id: data.accountId },
-          data: { status: 'AUTH_NEEDED', lastError: errMsg },
-        });
+        await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED', lastError: errMsg });
         emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
         emitLoginEvent(logger, data.accountId, 'login:failed', {
           code: 'TWO_FA_INVALID',
@@ -946,10 +916,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
           const code = await waitForVerificationCode(data.accountId, 10 * 60 * 1000);
           if (!code) {
             const errMsg = `${platformLabel} требует подтверждение. Время ожидания кода истекло (10 мин).`;
-            await prisma.socialAccount.update({
-              where: { id: data.accountId },
-              data: { status: 'AUTH_NEEDED', lastError: errMsg },
-            });
+            await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED', lastError: errMsg });
             emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
             emitLoginEvent(logger, data.accountId, 'login:failed', {
               code: 'TWO_FA_TIMEOUT',
@@ -1010,20 +977,14 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
             // Success! Fall through to cookie extraction below.
           } catch {
             const errMsg = 'Код введён, но вход не завершился. Попробуйте снова.';
-            await prisma.socialAccount.update({
-              where: { id: data.accountId },
-              data: { status: 'AUTH_NEEDED', lastError: errMsg },
-            });
+            await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED', lastError: errMsg });
             emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
             throw new LoginError('TWO_FA_INVALID', errMsg);
           }
         } else {
           // Verification page detected but no code input — inform user
           const errMsg = `${platformLabel} запросил подтверждение входа. Зайдите в аккаунт вручную, подтвердите, затем повторите.`;
-          await prisma.socialAccount.update({
-            where: { id: data.accountId },
-            data: { status: 'AUTH_NEEDED', lastError: errMsg },
-          });
+          await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED', lastError: errMsg });
           emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
           emitLoginEvent(logger, data.accountId, 'login:failed', {
             code: 'TWO_FA_TIMEOUT',
@@ -1039,7 +1000,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
           code: 'CAPTCHA_FAILED',
           message: errMsg,
         });
-        await prisma.socialAccount.update({ where: { id: data.accountId }, data: { status: 'AUTH_NEEDED', lastError: errMsg } });
+        await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED', lastError: errMsg });
         emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
         throw new LoginError('CAPTCHA_FAILED', 'Captcha not resolved');
       }
@@ -1049,7 +1010,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
           code: 'ACCOUNT_SUSPENDED',
           message: errMsg,
         });
-        await prisma.socialAccount.update({ where: { id: data.accountId }, data: { status: 'BANNED', lastError: errMsg } });
+        await safeUpdateAccount(data.accountId, { status: 'BANNED', lastError: errMsg });
         emitStatusChange(logger, data.accountId, 'BANNED', errMsg);
         throw new LoginError('ACCOUNT_SUSPENDED', 'Account suspended');
       }
@@ -1059,7 +1020,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
           code: 'UNKNOWN_ERROR',
           message: errMsg,
         });
-        await prisma.socialAccount.update({ where: { id: data.accountId }, data: { status: 'AUTH_NEEDED', lastError: errMsg } });
+        await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED', lastError: errMsg });
         emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
         throw new LoginError('UNKNOWN_ERROR', `Login flow stuck at ${currentUrl}`);
       }
@@ -1121,13 +1082,10 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
     }
 
     // ── Update account to ALIVE ────────────────────────────
-    await prisma.socialAccount.update({
-      where: { id: data.accountId },
-      data: {
+    await safeUpdateAccount(data.accountId, {
         status: 'ALIVE',
         lastError: null,
         ...(extractedUsername ? { username: extractedUsername } : {}),
-      },
     });
     emitStatusChange(logger, data.accountId, 'ALIVE', null);
 
@@ -1165,10 +1123,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
         userMessage = 'TikTok запросил капчу. Попробуйте позже или используйте другой прокси.';
       }
 
-      await prisma.socialAccount.update({
-        where: { id: data.accountId },
-        data: { status: 'AUTH_NEEDED', lastError: userMessage },
-      }).catch(() => {});
+      await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED', lastError: userMessage }).catch(() => {});
 
       emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', userMessage);
       emitLoginEvent(logger, data.accountId, 'login:failed', { code, message });
