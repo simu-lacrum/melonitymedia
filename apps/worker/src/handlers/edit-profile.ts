@@ -149,12 +149,25 @@ export async function editProfileHandler(job: Job<EditProfileJobData>): Promise<
     // ── Download avatar to temp file first (if provided) ────
     if (data.changes.avatarUrl) {
       try {
-        logger.info(`Скачиваю аватар: ${data.changes.avatarUrl.substring(0, 60)}...`);
-        avatarTmpPath = await downloadAvatar(data.changes.avatarUrl, data.accountId);
-        logger.info('Аватар скачан на сервер ✓');
+        const avatarSrc = data.changes.avatarUrl;
+        // Support local file paths (e.g. /tmp/avatar.png or file:///tmp/avatar.png)
+        const localPath = avatarSrc.startsWith('file:///')
+          ? avatarSrc.replace('file://', '')
+          : avatarSrc.startsWith('/') ? avatarSrc : null;
+
+        if (localPath) {
+          // Local file — verify it exists, no download needed
+          await fsp.access(localPath);
+          avatarTmpPath = localPath;
+          logger.info(`Аватар из локального файла: ${localPath}`);
+        } else {
+          logger.info(`Скачиваю аватар: ${avatarSrc.substring(0, 60)}...`);
+          avatarTmpPath = await downloadAvatar(avatarSrc, data.accountId);
+          logger.info('Аватар скачан на сервер ✓');
+        }
       } catch (dlErr) {
         const msg = dlErr instanceof Error ? dlErr.message : String(dlErr);
-        logger.warn(`Не удалось скачать аватар: ${msg}`);
+        logger.warn(`Не удалось загрузить аватар: ${msg}`);
         // Continue without avatar — don't fail the whole job
         avatarTmpPath = null;
       }
@@ -194,8 +207,8 @@ export async function editProfileHandler(job: Job<EditProfileJobData>): Promise<
     }
     await closeBrowser(browser);
 
-    // Cleanup temp avatar file (always, even on error)
-    if (avatarTmpPath) {
+    // Cleanup temp avatar file (only downloaded ones, not user-provided local files)
+    if (avatarTmpPath && avatarTmpPath.includes(`avatar_${data.accountId}_`)) {
       fsp.unlink(avatarTmpPath).catch(() => {});
     }
 
