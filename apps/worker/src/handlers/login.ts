@@ -624,34 +624,42 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
       }
 
       // ── Google rate-limit / unusual activity detection ──
-      try {
-        const googleBody = await page.textContent('body') || '';
-        const isGoogleRateLimited = /too many.*attempt|unusual.*activity|suspicious.*activity|couldn.?t.*verify.*it.?s.*you|не удалось.*подтвердить|слишком.*попыток|подозрительн.*активност|необычн.*активност|try again.*later|попробуйте.*позже|temporarily.*locked|временно.*заблокирован|account.*locked|аккаунт.*заблокирован/i.test(googleBody);
+      // SKIP if we're already on youtube.com — login succeeded, body text
+      // of YouTube main page causes false-positive regex matches
+      const currentUrlForRateCheck = page.url();
+      const isAlreadyOnYouTube = /youtube\.com\/?(\?|$|#)/.test(currentUrlForRateCheck) && !currentUrlForRateCheck.includes('accounts.google.com');
+      if (!isAlreadyOnYouTube) {
+        try {
+          const googleBody = await page.textContent('body') || '';
+          const isGoogleRateLimited = /too many.*attempt|unusual.*activity|suspicious.*activity|couldn.?t.*verify.*it.?s.*you|не удалось.*подтвердить|слишком.*попыток|подозрительн.*активност|необычн.*активност|try again.*later|попробуйте.*позже|temporarily.*locked|временно.*заблокирован|account.*locked|аккаунт.*заблокирован/i.test(googleBody);
 
-        if (isGoogleRateLimited) {
-          // Verify we're NOT on a legitimate 2FA page
-          const is2FA = await detect2FAType(page, ctx.platform);
-          if (!is2FA.has2FA) {
-            const matched = googleBody.match(/too many.*attempt|unusual.*activity|suspicious.*activity|слишком.*попыток|подозрительн.*активност|необычн.*активност|temporarily.*locked|временно.*заблокирован/i);
-            logger.info(`[GOOGLE_RATE_LIMIT] Matched: "${matched?.[0]}" | URL: ${page.url()}`);
-            const screenshotPath = `/tmp/google-ratelimit-${data.accountId}-${Date.now()}.png`;
-            try { await page.screenshot({ path: screenshotPath, fullPage: true }); } catch {}
-            // Google rate-limit is 48-72 hours — MUCH longer than TikTok
-            const errMsg = 'Google обнаружил подозрительную активность. Подождите 48-72 часа перед следующей попыткой.';
-            await prisma.socialAccount.update({
-              where: { id: data.accountId },
-              data: { status: 'AUTH_NEEDED', lastError: errMsg },
-            });
-            emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
-            emitLoginEvent(logger, data.accountId, 'login:failed', {
-              code: 'RATE_LIMITED',
-              message: errMsg,
-            });
-            throw new LoginError('RATE_LIMITED', 'Google unusual activity / too many attempts');
+          if (isGoogleRateLimited) {
+            // Verify we're NOT on a legitimate 2FA page
+            const is2FA = await detect2FAType(page, ctx.platform);
+            if (!is2FA.has2FA) {
+              const matched = googleBody.match(/too many.*attempt|unusual.*activity|suspicious.*activity|слишком.*попыток|подозрительн.*активност|необычн.*активност|temporarily.*locked|временно.*заблокирован/i);
+              logger.info(`[GOOGLE_RATE_LIMIT] Matched: "${matched?.[0]}" | URL: ${page.url()}`);
+              const screenshotPath = `/tmp/google-ratelimit-${data.accountId}-${Date.now()}.png`;
+              try { await page.screenshot({ path: screenshotPath, fullPage: true }); } catch {}
+              // Google rate-limit is 48-72 hours — MUCH longer than TikTok
+              const errMsg = 'Google обнаружил подозрительную активность. Подождите 48-72 часа перед следующей попыткой.';
+              await prisma.socialAccount.update({
+                where: { id: data.accountId },
+                data: { status: 'AUTH_NEEDED', lastError: errMsg },
+              });
+              emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
+              emitLoginEvent(logger, data.accountId, 'login:failed', {
+                code: 'RATE_LIMITED',
+                message: errMsg,
+              });
+              throw new LoginError('RATE_LIMITED', 'Google unusual activity / too many attempts');
+            }
           }
+        } catch (e) {
+          if (e instanceof LoginError) throw e;
         }
-      } catch (e) {
-        if (e instanceof LoginError) throw e;
+      } else {
+        logger.info(`✅ Уже на YouTube (${currentUrlForRateCheck}) — rate-limit check пропущен`);
       }
 
       // ── Step 3: FIRST check for 2FA/challenge BEFORE password errors ──
