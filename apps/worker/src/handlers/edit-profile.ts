@@ -446,22 +446,38 @@ async function _editYouTubeProfile(
       }
     }
 
-    // Check if Studio shows error page and retry
+    // Check if Studio shows error page and retry with different approaches
     const pageText = await page.textContent('body').catch(() => '');
-    if (pageText?.includes('Произошла ошибка') || pageText?.includes('error') && !pageText?.includes('textarea')) {
-      logger.warn('YouTube Studio показал ошибку — перезагрузка...');
+    if (pageText?.includes('Произошла ошибка') || pageText?.includes('An error occurred') || pageText?.includes('Oops')) {
+      logger.warn('YouTube Studio показал ошибку — пробую альтернативные подходы...');
+
+      // Approach A: Reload with longer wait
       await page.reload({ waitUntil: 'load', timeout: 30_000 });
-      await page.waitForTimeout(_randomDelay(5000, 8000));
+      await page.waitForTimeout(_randomDelay(10000, 15000));  // Extra long wait for SPA
       
-      // Check again after reload
       const pageText2 = await page.textContent('body').catch(() => '');
-      if (pageText2?.includes('Произошла ошибка')) {
-        logger.warn('Ошибка Studio сохраняется — возможно сессия невалидна');
-        // Try going to youtube.com first then back to studio
+      if (pageText2?.includes('Произошла ошибка') || pageText2?.includes('An error occurred')) {
+        // Approach B: Visit youtube.com, sign in explicitly, then navigate to Studio
+        logger.info('Попытка восстановления сессии: youtube.com → myaccount → studio...');
         await page.goto('https://www.youtube.com', { waitUntil: 'load', timeout: 20_000 });
         await page.waitForTimeout(_randomDelay(3000, 5000));
-        await page.goto('https://studio.youtube.com/channel/editing/basic_info', { waitUntil: 'load', timeout: 30_000 });
-        await page.waitForTimeout(_randomDelay(5000, 8000));
+        
+        // Navigate to YouTube account page first (establishes session context)
+        await page.goto('https://www.youtube.com/account', { waitUntil: 'load', timeout: 20_000 });
+        await page.waitForTimeout(_randomDelay(3000, 5000));
+
+        // Now try Studio again
+        await page.goto('https://studio.youtube.com/channel/editing/basic_info', {
+          waitUntil: 'load', timeout: 30_000,
+        });
+        await page.waitForTimeout(_randomDelay(10000, 15000));  // Extra wait for SPA render
+        
+        const pageText3 = await page.textContent('body').catch(() => '');
+        if (pageText3?.includes('Произошла ошибка') || pageText3?.includes('An error occurred')) {
+          logger.warn('YouTube Studio по-прежнему недоступен. Proxy может быть заблокирован Studio.');
+          // Take final error screenshot
+          try { await page.screenshot({ path: '/tmp/yt-studio-error-final.png', fullPage: true }); } catch {}
+        }
       }
     }
 
