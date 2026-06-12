@@ -363,55 +363,76 @@ async function _editYouTubeProfile(
   // ── Step 2: Name + Bio via YouTube Studio ──────────────────
   if (data.changes.name || data.changes.bio) {
     logger.info('Переход в YouTube Studio для редактирования...');
-    await page.goto('https://studio.youtube.com', { waitUntil: 'networkidle', timeout: 30_000 });
-    await page.waitForTimeout(_randomDelay(3000, 5000));
+    // Use 'load' not 'networkidle' — YouTube Studio has endless background XHRs
+    await page.goto('https://studio.youtube.com', { waitUntil: 'load', timeout: 30_000 });
+    await page.waitForTimeout(_randomDelay(5000, 8000));
 
-    // Dismiss YouTube Studio welcome modal (new channels show "Добро пожаловать" / "Welcome")
-    try {
-      const dismissBtn = page.locator('button:has-text("Далее"), button:has-text("Next"), button:has-text("Get started"), button:has-text("Начать"), [aria-label="Close"], button:has-text("Skip"), button:has-text("Пропустить")');
-      let dismissed = 0;
-      while (await dismissBtn.count() > 0 && dismissed < 5) {
-        await dismissBtn.first().click();
-        await page.waitForTimeout(_randomDelay(1500, 2500));
-        dismissed++;
-      }
-      if (dismissed > 0) logger.info(`Закрыто ${dismissed} модальное(ых) окно(а) Studio ✓`);
-    } catch { /* no modal */ }
-
-    // Now navigate to the customization/editing page
-    logger.info('Переход на страницу настройки канала...');
-    // Try direct URL first
-    await page.goto('https://studio.youtube.com/channel/editing', { waitUntil: 'networkidle', timeout: 30_000 });
-    await page.waitForTimeout(_randomDelay(3000, 5000));
-
-    // Dismiss any additional modals that appeared after navigation
-    try {
-      const dismissBtn2 = page.locator('button:has-text("Далее"), button:has-text("Next"), button:has-text("OK"), button:has-text("Got it"), button:has-text("Понятно")');
-      if (await dismissBtn2.count() > 0) {
-        await dismissBtn2.first().click();
-        await page.waitForTimeout(_randomDelay(1000, 2000));
-      }
-    } catch { /* no modal */ }
-
-    // If redirected away from /editing, try sidebar navigation
-    const studioUrl = page.url();
-    logger.info(`YouTube Studio URL: ${studioUrl}`);
-    if (!studioUrl.includes('/editing')) {
-      logger.info('Redirect detected — пробую навигацию через sidebar...');
+    // Dismiss ALL overlays/modals (welcome tour, cookie consent, etc.)
+    for (let i = 0; i < 5; i++) {
       try {
-        // Click "Настройка" / "Customization" in sidebar
-        const customizeLink = page.locator(
-          'a[href*="/channel/editing"], ' +
-          'tp-yt-paper-item:has-text("Настройка"), tp-yt-paper-item:has-text("Customization"), ' +
-          'ytd-guide-entry-renderer:has-text("Настройка"), ytd-guide-entry-renderer:has-text("Customization")'
+        const modal = page.locator(
+          'button:has-text("Далее"), button:has-text("Next"), button:has-text("Начать"), ' +
+          'button:has-text("Get started"), button:has-text("Skip"), button:has-text("Пропустить"), ' +
+          'button:has-text("OK"), button:has-text("Понятно"), button:has-text("Got it"), ' +
+          '#dismiss-button, [aria-label="Dismiss"], [aria-label="Закрыть"]'
         );
-        if (await customizeLink.count() > 0) {
-          await customizeLink.first().click();
-          await page.waitForTimeout(_randomDelay(3000, 5000));
-          logger.info(`После sidebar навигации URL: ${page.url()}`);
-        }
-      } catch { /* sidebar nav failed */ }
+        if (await modal.count() > 0) {
+          await modal.first().click();
+          await page.waitForTimeout(_randomDelay(1500, 2500));
+          logger.info(`Закрыт модальный элемент (${i + 1})`);
+        } else break;
+      } catch { break; }
     }
+
+    // Also dismiss the top security banner if it exists
+    try {
+      const hideBanner = page.locator('button:has-text("Скрыть"), button:has-text("Hide")');
+      if (await hideBanner.count() > 0) {
+        await hideBanner.first().click();
+        await page.waitForTimeout(1000);
+      }
+    } catch { /* banner optional */ }
+
+    // Navigate to customization page — try multiple approaches
+    let onEditingPage = false;
+
+    // Approach 1: Click the edit/pencil icon in top-right corner
+    if (!onEditingPage) {
+      try {
+        const editIcon = page.locator(
+          'a[href*="/channel/editing"], ' +
+          'button[aria-label*="Edit" i], button[aria-label*="Изменить" i], ' +
+          'a[aria-label*="Edit channel" i], a[aria-label*="Настроить" i]'
+        );
+        if (await editIcon.count() > 0) {
+          await editIcon.first().click();
+          await page.waitForTimeout(_randomDelay(3000, 5000));
+          if (page.url().includes('/editing')) {
+            onEditingPage = true;
+            logger.info('Editing page via icon click');
+          }
+        }
+      } catch { /* icon not found */ }
+    }
+
+    // Approach 2: Direct URL with 'load' wait
+    if (!onEditingPage) {
+      logger.info('Пробую прямой URL /channel/editing/basic_info...');
+      try {
+        await page.goto('https://studio.youtube.com/channel/editing/basic_info', {
+          waitUntil: 'load', timeout: 30_000,
+        });
+        await page.waitForTimeout(_randomDelay(5000, 8000));
+        if (page.url().includes('/editing')) {
+          onEditingPage = true;
+          logger.info('Editing page via direct URL');
+        }
+      } catch (navErr) {
+        logger.warn(`URL навигация: ${navErr instanceof Error ? navErr.message : navErr}`);
+      }
+    }
+
+    logger.info(`YouTube Studio final URL: ${page.url()}`);
 
     // Take debug screenshot after all navigation
     try {
