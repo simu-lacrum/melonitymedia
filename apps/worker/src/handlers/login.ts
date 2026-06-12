@@ -89,7 +89,15 @@ async function detect2FAType(page: any, platform: 'TIKTOK' | 'YOUTUBE'): Promise
 
     // ── Pre-check: Rate-limit / login failure detection ──
     // If TikTok says "Maximum number of attempts", it's NOT 2FA — it's a rate limit.
-    if (/maximum.*attempts|too many.*attempts|try again later|слишком.*попыток|повторите.*позже/i.test(bodyText)) {
+    // IMPORTANT: Do NOT use bodyText for this check — TikTok embeds massive JSON
+    // (AppContext) in the page body which contains strings like "try again later"
+    // causing false positives. Instead, check only VISIBLE error elements.
+    const visibleRateLimitText = await page.locator(
+      '[class*="error" i], [class*="alert" i], [class*="message" i], ' +
+      '[data-e2e*="error"], [data-e2e*="rate"], ' +
+      'p:visible, span:visible, div[role="alert"]'
+    ).allTextContents().then((texts: string[]) => texts.join(' ')).catch(() => '');
+    if (/maximum.*attempts|too many.*attempts|слишком.*попыток|повторите.*позже/i.test(visibleRateLimitText)) {
       // Still on the login form = rate-limited, not 2FA
       const hasLoginForm = await page.locator('input[name="username"], input[placeholder*="Email"], input[placeholder*="email"]').count();
       if (hasLoginForm > 0) {
@@ -379,14 +387,23 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
 
       // ── FIRST: check for rate-limit BEFORE anything else ──
       // "Maximum number of attempts" = TikTok rate limit, NOT 2FA
+      // IMPORTANT: Do NOT use page.textContent('body') — TikTok embeds massive JSON
+      // (AppContext, ABTest configs) in the page which contains "try again later" etc.
+      // This causes SEVERE false positives. Instead, check only VISIBLE error elements.
       try {
-        const rateLimitText = await page.textContent('body') || '';
-        if (/maximum.*attempts|too many.*attempts|try again later|слишком.*попыток|повторите.*позже/i.test(rateLimitText)) {
+        const rateLimitElements = await page.locator(
+          '[class*="error" i]:visible, [class*="alert" i]:visible, ' +
+          '[class*="message" i]:visible, [data-e2e*="error"]:visible, ' +
+          'p:visible, h1:visible, h2:visible, h3:visible, span:visible, div[role="alert"]:visible'
+        ).allTextContents().catch(() => [] as string[]);
+        const rateLimitText = (rateLimitElements as string[]).join(' ');
+        // More specific regex — removed "try again later" (too generic, triggers on page boilerplate)
+        if (/maximum.*attempts|too many.*attempts|слишком.*попыток|повторите.*позже/i.test(rateLimitText)) {
           // Only treat as rate-limit if we're still on login form
           const onLoginForm = await page.locator('input[name="username"], input[type="password"]').count();
           if (onLoginForm > 0) {
             // Debug: log matched text and capture screenshot
-            const matched = rateLimitText.match(/maximum.*attempts|too many.*attempts|try again later|слишком.*попыток|повторите.*позже/i);
+            const matched = rateLimitText.match(/maximum.*attempts|too many.*attempts|слишком.*попыток|повторите.*позже/i);
             logger.info(`[RATE_LIMIT_DEBUG] Matched text: "${matched?.[0]}" | URL: ${page.url()} | onLoginForm: ${onLoginForm}`);
             try {
               const screenshotPath = `/tmp/rate-limit-${data.accountId}-${Date.now()}.png`;
