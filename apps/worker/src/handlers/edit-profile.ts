@@ -294,12 +294,26 @@ async function _editYouTubeProfile(
   avatarTmpPath: string | null,
   logger: SocketLogger,
 ): Promise<void> {
+  // ── Step 0: Warm up session — visit youtube.com first ──────
+  // This establishes a natural browsing pattern before hitting Studio
+  try {
+    logger.info('Прогрев сессии: заходим на youtube.com...');
+    await page.goto('https://www.youtube.com', { waitUntil: 'load', timeout: 30_000 });
+    await page.waitForTimeout(_randomDelay(5000, 10000));
+    // Scroll a bit to look human
+    await page.evaluate(() => window.scrollBy(0, 300));
+    await page.waitForTimeout(_randomDelay(2000, 4000));
+    logger.info(`YouTube main page loaded, URL: ${page.url()}`);
+  } catch (warmupErr) {
+    logger.warn(`YouTube warmup failed: ${warmupErr instanceof Error ? warmupErr.message : warmupErr}`);
+  }
+
   // ── Step 1: Avatar via Google Account (not YouTube Studio) ──
   // YouTube Studio does NOT allow avatar changes — it redirects to Google Account
-  if (avatarTmpPath) {
+  if (avatarTmpPath && data.changes.avatarUrl) {
     try {
       logger.info('Загружаю аватар YouTube через Google Account...');
-      await page.goto('https://myaccount.google.com/personal-info', { waitUntil: 'networkidle' });
+      await page.goto('https://myaccount.google.com/personal-info', { waitUntil: 'load', timeout: 30_000 });
       await page.waitForTimeout(_randomDelay(3000, 5000));
 
       // Click on the profile photo area
@@ -324,7 +338,7 @@ async function _editYouTubeProfile(
 
       if (!clicked) {
         logger.warn('Не нашёл кнопку фото в Google Account, пробую прямой URL...');
-        await page.goto('https://myaccount.google.com/profile/photo/edit', { waitUntil: 'networkidle' });
+        await page.goto('https://myaccount.google.com/profile/photo/edit', { waitUntil: 'load', timeout: 30_000 });
         await page.waitForTimeout(_randomDelay(2000, 3000));
       }
 
@@ -365,7 +379,7 @@ async function _editYouTubeProfile(
     logger.info('Переход в YouTube Studio для редактирования...');
     // Use 'load' not 'networkidle' — YouTube Studio has endless background XHRs
     await page.goto('https://studio.youtube.com', { waitUntil: 'load', timeout: 30_000 });
-    await page.waitForTimeout(_randomDelay(5000, 8000));
+    await page.waitForTimeout(_randomDelay(8000, 12000)); // Longer delay — let Studio fully render
 
     // Dismiss ALL overlays/modals (welcome tour, cookie consent, etc.)
     for (let i = 0; i < 5; i++) {
@@ -488,29 +502,39 @@ async function _editYouTubeProfile(
       try {
         logger.info(`Обновляю имя YouTube: ${data.changes.name}`);
         // YouTube Studio uses contenteditable textboxes, not standard inputs
-        // Extended selectors: Studio 2025 uses #textbox inside ytcp-social-suggestions-textbox
+        // Extended selectors: Studio 2025+ uses #textbox inside various containers
+        // IMPORTANT: The name field is always the FIRST #textbox on the basic_info page
         const nameSelector = '#textbox[aria-label*="name" i], #textbox[aria-label*="название" i], #textbox[aria-label*="имя" i], ' +
           'ytcp-social-suggestions-textbox #textbox, ' +
           '#name-container #textbox, ' +
-          'div[id="textbox"][contenteditable="true"]';
-        await page.waitForSelector(nameSelector, { timeout: 15_000 });
+          'div[id="textbox"][contenteditable="true"], ' +
+          'div[id="textbox"][contenteditable="plaintext-only"], ' +
+          '#textbox';
+        await page.waitForSelector(nameSelector, { timeout: 20_000 });
+        await page.waitForTimeout(_randomDelay(1000, 2000));
         const nameInput = page.locator(nameSelector).first();
         await nameInput.click();
+        await page.waitForTimeout(_randomDelay(500, 1000));
         await page.keyboard.press('Control+A');
+        await page.waitForTimeout(_randomDelay(300, 600));
         await page.keyboard.press('Delete');
+        await page.waitForTimeout(_randomDelay(500, 1000));
         await humanType(page, nameSelector, data.changes.name);
+        await page.waitForTimeout(_randomDelay(1000, 2000));
         logger.info('Имя YouTube обновлено ✓');
       } catch (nameErr) {
         logger.warn('Не удалось обновить имя YouTube — селектор не найден');
         // Take screenshot for debugging
         try {
-          await page.screenshot({ path: '/tmp/yt-name-fail.png', fullPage: false });
+          await page.screenshot({ path: '/tmp/yt-name-fail.png', fullPage: true });
           logger.info('Name fail screenshot: /tmp/yt-name-fail.png');
         } catch { /* screenshot optional */ }
-        // Fallback: list all visible elements for debugging
+        // Dump page HTML for debugging
         try {
-          const html = await page.locator('#textbox, [contenteditable="true"]').count();
-          logger.info(`Found ${html} contenteditable elements on page`);
+          const editables = await page.locator('#textbox, [contenteditable="true"], [contenteditable="plaintext-only"]').count();
+          logger.info(`Found ${editables} contenteditable elements on page`);
+          const pageTitle = await page.title();
+          logger.info(`Page title: ${pageTitle}`);
         } catch { /* debug optional */ }
       }
     }
@@ -519,20 +543,26 @@ async function _editYouTubeProfile(
     if (data.changes.bio) {
       try {
         logger.info(`Обновляю описание YouTube...`);
-        // Same contenteditable textbox pattern as upload.ts
-        // YouTube Studio has multiple #textbox elements — description is usually the 2nd one
-        const descSelector = '#textbox[aria-label*="description" i], #textbox[aria-label*="описание" i], div[aria-label*="Tell viewers"]';
-        await page.waitForSelector(descSelector, { timeout: 15_000 });
+        // Same contenteditable textbox pattern — description is the 2nd #textbox
+        const descSelector = '#textbox[aria-label*="description" i], #textbox[aria-label*="описание" i], ' +
+          'div[aria-label*="Tell viewers"], ' +
+          '#description-container #textbox';
+        await page.waitForSelector(descSelector, { timeout: 20_000 });
+        await page.waitForTimeout(_randomDelay(1000, 2000));
         const descInput = page.locator(descSelector).first();
         await descInput.click();
+        await page.waitForTimeout(_randomDelay(500, 1000));
         await page.keyboard.press('Control+A');
+        await page.waitForTimeout(_randomDelay(300, 600));
         await page.keyboard.press('Delete');
+        await page.waitForTimeout(_randomDelay(500, 1000));
         await humanType(page, descSelector, data.changes.bio);
+        await page.waitForTimeout(_randomDelay(1000, 2000));
         logger.info(`Описание YouTube обновлено: ${data.changes.bio.substring(0, 50)}...`);
       } catch {
         logger.warn('Не удалось обновить описание YouTube — селектор не найден');
         try {
-          await page.screenshot({ path: '/tmp/yt-desc-fail.png', fullPage: false });
+          await page.screenshot({ path: '/tmp/yt-desc-fail.png', fullPage: true });
           logger.info('Desc fail screenshot: /tmp/yt-desc-fail.png');
         } catch { /* screenshot optional */ }
       }
