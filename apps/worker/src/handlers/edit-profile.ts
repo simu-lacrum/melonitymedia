@@ -432,7 +432,32 @@ async function _editYouTubeProfile(
       }
     }
 
+    // Check if Studio shows error page and retry
+    const pageText = await page.textContent('body').catch(() => '');
+    if (pageText?.includes('Произошла ошибка') || pageText?.includes('error') && !pageText?.includes('textarea')) {
+      logger.warn('YouTube Studio показал ошибку — перезагрузка...');
+      await page.reload({ waitUntil: 'load', timeout: 30_000 });
+      await page.waitForTimeout(_randomDelay(5000, 8000));
+      
+      // Check again after reload
+      const pageText2 = await page.textContent('body').catch(() => '');
+      if (pageText2?.includes('Произошла ошибка')) {
+        logger.warn('Ошибка Studio сохраняется — возможно сессия невалидна');
+        // Try going to youtube.com first then back to studio
+        await page.goto('https://www.youtube.com', { waitUntil: 'load', timeout: 20_000 });
+        await page.waitForTimeout(_randomDelay(3000, 5000));
+        await page.goto('https://studio.youtube.com/channel/editing/basic_info', { waitUntil: 'load', timeout: 30_000 });
+        await page.waitForTimeout(_randomDelay(5000, 8000));
+      }
+    }
+
     logger.info(`YouTube Studio final URL: ${page.url()}`);
+
+    // Dump page info for debugging
+    const bodyText = await page.textContent('body').catch(() => 'EMPTY');
+    logger.info(`Page body text length: ${bodyText?.length || 0}`);
+    const allInputs = await page.locator('input, textarea, [contenteditable="true"], [contenteditable=""]').count().catch(() => 0);
+    logger.info(`Found ${allInputs} input/textarea/contenteditable elements on page`);
 
     // Take debug screenshot after all navigation
     try {
