@@ -297,7 +297,9 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
       : 'https://accounts.google.com/signin/v2/identifier?service=youtube';
 
     logger.info(`🌐 Открываю страницу входа...`);
-    await page.goto(loginUrl, { waitUntil: 'networkidle' });
+    // Google login never reaches networkidle (constant XHR), use 'load' for YouTube
+    const waitStrategy = ctx.platform === 'YOUTUBE' ? 'load' as const : 'networkidle' as const;
+    await page.goto(loginUrl, { waitUntil: waitStrategy });
     await page.waitForTimeout(2000 + Math.random() * 2000);
     await job.updateProgress(25);
 
@@ -429,7 +431,33 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
 
       // ── Step 1: Enter email ──────────────────────────────
       logger.info(`⌨️ Ввожу email...`);
-      await humanType(page, 'input[type="email"], input[autocomplete="username"]', login);
+      // Google uses #identifierId as main email input (type="email")
+      // Wait explicitly for the input to appear (Google JS renders it async)
+      const emailSelector = '#identifierId, input[type="email"], input[autocomplete="username"], input[name="identifier"]';
+      try {
+        await page.waitForSelector(emailSelector, { state: 'visible', timeout: 15000 });
+      } catch {
+        // Diagnostic screenshot if email input not found
+        const diagPath = `/tmp/google-no-email-${data.accountId}-${Date.now()}.png`;
+        try { await page.screenshot({ path: diagPath, fullPage: true }); } catch {}
+        logger.info(`[LOGIN_DEBUG] Email input not found. URL: ${page.url()} | Screenshot: ${diagPath}`);
+        // Maybe account chooser? Try clicking "Use another account"
+        try {
+          const useAnother = page.locator('div[data-identifier], li[data-identifier]').first();
+          if (await useAnother.count() > 0) {
+            logger.info(`[LOGIN_DEBUG] Account chooser detected, clicking "Use another account"...`);
+            const addAccount = page.locator('[data-identifier="ADD_SESSION"], div:has-text("Use another account"), div:has-text("Другой аккаунт")');
+            if (await addAccount.count() > 0) {
+              await addAccount.first().click();
+              await page.waitForTimeout(2000);
+              await page.waitForSelector(emailSelector, { state: 'visible', timeout: 10000 });
+            }
+          }
+        } catch {
+          throw new LoginError('NETWORK_ERROR', 'Google login page did not show email input');
+        }
+      }
+      await humanType(page, emailSelector, login);
       // Resilient Next button: id-based > role-based > text-based
       await humanClick(page, cursor,
         '#identifierNext button, #identifierNext div[role="button"], ' +
