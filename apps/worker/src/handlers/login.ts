@@ -303,6 +303,53 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
     await page.waitForTimeout(2000 + Math.random() * 2000);
     await job.updateProgress(25);
 
+    // ── Check: Already logged in (Google redirected to youtube.com) ──
+    // If cookies are valid, Google auto-redirects sign-in → youtube.com
+    const postNavUrl = page.url();
+    if (ctx.platform === 'YOUTUBE' && !postNavUrl.includes('accounts.google.com')) {
+      logger.info(`✅ Уже залогинен! Google перенаправил на: ${postNavUrl}`);
+      logger.info(`📦 Сохраняю cookies и обновляю статус...`);
+
+      // Save fresh cookies from the active session
+      const cookies = await stealth.context.cookies();
+      const browserCookies: BrowserCookie[] = cookies.map(c => ({
+        name: c.name, value: c.value, domain: c.domain, path: c.path,
+        expires: c.expires, httpOnly: c.httpOnly, secure: c.secure,
+        sameSite: c.sameSite === 'Strict' ? 'Strict' : c.sameSite === 'None' ? 'None' : 'Lax',
+      }));
+      await persistCookies(data.accountId, browserCookies, data.cookiesDir ?? '/data/cookies');
+
+      // Try extracting username
+      let extractedUsername: string | null = null;
+      try {
+        await page.goto('https://www.youtube.com/@me', { waitUntil: 'load', timeout: 15000 });
+        const ytUrl = page.url();
+        const handleMatch = ytUrl.match(/@([^/?]+)/);
+        if (handleMatch && handleMatch[1] !== 'me') {
+          extractedUsername = handleMatch[1];
+        }
+      } catch { /* non-critical */ }
+
+      await prisma.socialAccount.update({
+        where: { id: data.accountId },
+        data: {
+          status: 'ALIVE',
+          lastError: null,
+          ...(extractedUsername ? { username: extractedUsername } : {}),
+        },
+      });
+      emitStatusChange(logger, data.accountId, 'ALIVE', null);
+      await job.updateProgress(100);
+      logger.info(`✅ Сессия подтверждена, cookies обновлены${extractedUsername ? `, username: ${extractedUsername}` : ''}`);
+      emitLoginEvent(logger, data.accountId, 'login:success', {
+        message: 'Сессия активна, cookies обновлены',
+        username: extractedUsername,
+      });
+
+      await closeBrowser(browser);
+      return;
+    }
+
     // ── Enter credentials ──────────────────────────────────
     if (ctx.platform === 'TIKTOK') {
       logger.info(`⌨️ Ввожу учётные данные...`);
