@@ -427,6 +427,17 @@ async function _uploadToYouTube(
     throw new Error('Не удалось войти в YouTube Studio — cookies невалидны (перенаправлен на login)');
   }
   logger.info('Авторизация YouTube успешна');
+
+  // BUG-11 fix: Dismiss "Welcome to YouTube Studio" popup that appears on first visit
+  try {
+    const welcomeBtn = page.locator('button:has-text("Continue"), button:has-text("Продолжить")').first();
+    if (await welcomeBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await welcomeBtn.click();
+      logger.info('Dismissed Welcome to YouTube Studio popup');
+      await page.waitForTimeout(_randomDelay(1500, 2500));
+    }
+  } catch { /* no welcome popup — normal */ }
+
   await job.updateProgress(45);
 
   // Click CREATE button → Upload video (resilient selectors)
@@ -493,21 +504,36 @@ async function _uploadToYouTube(
     await page.keyboard.press('Delete');
     await humanType(page, '#textbox[aria-label*="title" i], #textbox[contenteditable="true"]', titleWithShorts);
     logger.info(`Заголовок (с #Shorts): "${titleWithShorts.slice(0, 60)}..."`);
+
+    // BUG-12 fix: Dismiss hashtag suggestions dropdown that appears after typing #Shorts.
+    // Without this, the dropdown intercepts clicks on the description field below.
+    await page.waitForTimeout(800);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(500);
   } catch {
     logger.warn('Не удалось заполнить заголовок');
   }
 
-  // Fill description
+  // Fill description + hashtags
   try {
     const descSelectors = '#textbox[aria-label*="description" i], div[aria-label*="Tell viewers"]';
     const descInput = page.locator(descSelectors).first();
     if (await descInput.count() > 0) {
+      // BUG-13 fix: Use force:true to bypass any remaining suggestion overlays
+      await descInput.click({ force: true });
+      await page.waitForTimeout(500);
       const hashtagStr = data.hashtags?.length
         ? '\n\n' + data.hashtags.map(h => `#${h}`).join(' ')
         : '';
-      await humanType(page, descSelectors, `${data.description}${hashtagStr}`, { clearBefore: true });
+      const fullDesc = `${data.description}${hashtagStr}`;
+      if (fullDesc.trim()) {
+        await humanType(page, descSelectors, fullDesc, { clearBefore: true });
+        logger.info(`Описание: "${data.description.slice(0, 40)}..." + ${data.hashtags?.length || 0} хештегов`);
+      }
     }
-  } catch { /* description optional */ }
+  } catch (descErr) {
+    logger.warn(`Description skipped: ${(descErr as Error).message?.slice(0, 60)}`);
+  }
 
   await page.waitForTimeout(_randomDelay(2000, 4000));
   await job.updateProgress(75);
