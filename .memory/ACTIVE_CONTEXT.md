@@ -128,9 +128,9 @@ const bodyText = await page.textContent('body');
 |--------|--------|
 | **Логин URL** | `https://accounts.google.com/ServiceLogin` |
 | **Verification** | Google часто запрашивает верификацию при входе с нового IP/устройства |
-| **YouTube Studio** | `studio.youtube.com` блокирует доступ для VPS IP — показывает "Oops, something went wrong" + "Retry" кнопка (невидима). Body length ~20k но SPA не рендерится. `#textbox` элементов = 0. |
+| **YouTube Studio** | ✅ Работает через proxy. Ранее казалось заблокированным — false positive: "oops" текст присутствует в скрытых DOM nodes, но SPA рендерится нормально. Upload dialog доступен через кнопку Create. |
 | **Edit Profile (Bio)** | ❌ Через Studio невозможно на VPS IP. Альтернатива: YouTube Data API v3 или другой прокси |
-| **Edit Profile (Avatar)** | ✅ Через Google Account iframe (см. ниже) |
+| **Edit Profile (Avatar)** | ⚠️ Через Google Account iframe flow загружается, но YouTube кеширует аватар агрессивно (до 24-48ч). На момент проверки аватар не обновился. |
 | **YouTube DE locale** | Proxy из Германии → YouTube показывает немецкую локаль |
 
 **✅ ПРОВЕРЕННЫЙ FLOW: Смена аватара YouTube**
@@ -155,9 +155,34 @@ myaccount.google.com/personal-info
 - После Upload: экран "Crop and rotate" с кнопкой "Next" и "Rotate"
 - После Next: кнопка "Save" (не "Done" — "Done" есть но невидима!)
 - Проверить visibility через `btn.isVisible()` перед кликом
-- Аватар обновляется на Google Account мгновенно, на YouTube — кэш ~1-2 часа
+- Аватар обновляется на Google Account мгновенно, на YouTube — кэш **до 24-48 часов**
 
 **Handler**: `apps/worker/src/handlers/edit-profile.ts` — `_editYouTubeProfile()`, Step 1
+
+### ✅ ПРОВЕРЕННЫЙ FLOW: Залив видео на YouTube (Shorts)
+
+Полностью протестировано 2026-06-14. Видео "Morning vibes ☀️ #Shorts" опубликовано:
+`https://youtube.com/shorts/5Ux1HsJ5q5g`
+
+**Flow (11 шагов):**
+1. Warmup на youtube.com (проверить login indicator)
+2. Открыть studio.youtube.com
+3. **Dismiss "Welcome to YouTube Studio" popup** (кнопка "Continue")
+4. Click "Create" → "Upload videos" (dropdown menu)
+5. `input[type="file"]` → `setInputFiles(videoPath)` (30 МБ = ~15с через прокси)
+6. Ожидать `Upload complete` / `Checks complete` (waitForFunction, timeout 120s)
+7. Заполнить title (+ автодобавление `#Shorts` если нет)
+8. **⚠️ КРИТИЧНО: `Escape` после title** — dismiss hashtag suggestions dropdown
+9. Заполнить description + hashtags (`descInput.click({ force: true })`)
+10. "Not made for kids" → Next x3 → Public visibility
+11. Click `#done-button` → "Video published" confirmation
+
+**Баги и фиксы (BUG-11, BUG-12, BUG-13):**
+- `Welcome popup` → `page.locator('button:has-text("Continue")').click()`
+- `Hashtag suggestions dropdown` → `page.keyboard.press('Escape')` после title
+- `Description field blocked` → `descInput.click({ force: true })` обход overlay
+
+**Handler**: `apps/worker/src/handlers/upload.ts` — `_uploadToYouTube()`
 
 ### Прокси система
 
@@ -238,12 +263,12 @@ async function safeUpdateAccount(accountId: string, data: Record<string, any>): 
 
 | Аккаунт | Платформа | Статус | Примечание |
 |---------|-----------|--------|------------|
-| rizwansami225@gmail.com | YouTube | ✅ ALIVE | Login OK, cookies saved, **аватар обновлён** (M logo) |
+| rizwansami225@gmail.com | YouTube | ✅ ALIVE | Login OK, cookies saved. Видео "Morning vibes" опубликовано. Аватар: загружен через Google Account, ожидает кэш YouTube |
 | verasava453@gmail.com | YouTube | ✅ ALIVE | — |
 | smshanto377@gmail.com | YouTube | ⚠️ AUTH_NEEDED | — |
 | user4784160770083 | TikTok | ⚠️ AUTH_NEEDED | Rate-limited, ждать 48ч |
 | user1534590705213 | TikTok | ⚠️ AUTH_NEEDED | — |
 | user63986528882138 | TikTok | ⚠️ AUTH_NEEDED | — |
 
-> Последнее обновление: 2026-06-14T08:57+03:00
+> Последнее обновление: 2026-06-14T12:30+03:00
 
