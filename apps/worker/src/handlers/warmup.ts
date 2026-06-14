@@ -89,12 +89,34 @@ const SEL = {
       'a[href*="/tag/"]',
   },
   YOUTUBE: {
-    LIKE: 'button[aria-label*="like" i], button[aria-label*="Нравится" i], ' +
-      '#like-button button, ytd-toggle-button-renderer button',
-    COMMENT_BTN: '#comments-button button, button[aria-label*="Comment" i]',
+    // ── Like ─────────────────────────────────────────────────
+    // Shorts wraps like in ytd-reel-video-renderer > #like-button
+    // Regular YT uses ytd-toggle-button-renderer > button
+    // Desktop Shorts (2024+): like-button-view-model > button
+    LIKE: '#like-button button, ' +
+      'like-button-view-model button, ' +
+      'ytd-reel-video-renderer #like-button button, ' +
+      'ytd-toggle-button-renderer #button, ' +
+      'button[aria-label*="like" i], ' +
+      'button[aria-label*="Нравится" i], ' +
+      'ytd-like-button-renderer button',
+    // ── Comment ──────────────────────────────────────────────
+    // Shorts: comment button is below like, inside #comments-button
+    COMMENT_BTN: '#comments-button button, ' +
+      'ytd-reel-video-renderer #comments-button button, ' +
+      'button[aria-label*="Comment" i], ' +
+      'button[aria-label*="Комментар" i]',
     COMMENT_INPUT: '#contenteditable-root, #placeholder-area, ' +
-      '[contenteditable="true"][aria-label*="comment" i]',
-    SUBSCRIBE: '#subscribe-button button, button[aria-label*="Subscribe" i], ' +
+      '#comment-input #contenteditable-root, ' +
+      '[contenteditable="true"][aria-label*="comment" i], ' +
+      '[contenteditable="true"][aria-label*="Комментар" i], ' +
+      'ytd-comments-entry-point-header-renderer #contenteditable-root',
+    // ── Subscribe ────────────────────────────────────────────
+    SUBSCRIBE: '#subscribe-button button, ' +
+      'ytd-reel-video-renderer #subscribe-button button, ' +
+      'ytd-subscribe-button-renderer button, ' +
+      'button[aria-label*="Subscribe" i], ' +
+      'button[aria-label*="Подписаться" i], ' +
       'button:has-text("Subscribe"), button:has-text("Подписаться")',
     SHORTS_CONTAINER: 'ytd-reel-video-renderer, ytd-shorts',
   },
@@ -411,6 +433,8 @@ async function _passiveWatching(
       const tag = data.hashtags[Math.floor(Math.random() * data.hashtags.length)];
       if (data.platform === 'TIKTOK') {
         await _navigateToHashtagSearch(page, cursor, tag, logger);
+      } else {
+        await _navigateToYoutubeSearch(page, cursor, tag, logger);
       }
     }
 
@@ -427,14 +451,27 @@ async function _passiveWatching(
     if (likes < maxLikes && Math.random() < 0.1) {
       try {
         const likeSel = data.platform === 'TIKTOK' ? SEL.TIKTOK.LIKE : SEL.YOUTUBE.LIKE;
-        await humanClick(page, cursor, likeSel, { postClickDelay: 500 });
-        likes++;
-        logger.info(`  ❤️ Лайк видео ${i + 1} (${likes}/${maxLikes})`);
+        if (data.platform === 'YOUTUBE') {
+          const clicked = await _resilientClick(page, cursor, likeSel, logger, 'like');
+          if (clicked) {
+            likes++;
+            logger.info(`  ❤️ Лайк видео ${i + 1} (${likes}/${maxLikes})`);
+          }
+        } else {
+          await humanClick(page, cursor, likeSel, { postClickDelay: 500 });
+          likes++;
+          logger.info(`  ❤️ Лайк видео ${i + 1} (${likes}/${maxLikes})`);
+        }
       } catch { /* element not found */ }
     }
 
     // Scroll to next video
-    await humanScroll(page, _randomDelay(300, 600));
+    // Navigate to next video (ArrowDown for YouTube Shorts, scroll for TikTok)
+    if (data.platform === 'YOUTUBE') {
+      await page.keyboard.press('ArrowDown');
+    } else {
+      await humanScroll(page, _randomDelay(300, 600));
+    }
     await page.waitForTimeout(_randomDelay(1500, 3000));
 
     await job.updateProgress(Math.round((i / watchCount) * 100));
@@ -491,9 +528,17 @@ async function _lightEngagement(
     if (Math.random() < likeProb) {
       try {
         const likeSel = data.platform === 'TIKTOK' ? SEL.TIKTOK.LIKE : SEL.YOUTUBE.LIKE;
-        await humanClick(page, cursor, likeSel, { postClickDelay: 500 });
-        liked++;
-        logger.info(`  ❤️ Лайк видео ${i + 1}`);
+        if (data.platform === 'YOUTUBE') {
+          const clicked = await _resilientClick(page, cursor, likeSel, logger, 'like');
+          if (clicked) {
+            liked++;
+            logger.info(`  ❤️ Лайк видео ${i + 1}`);
+          }
+        } else {
+          await humanClick(page, cursor, likeSel, { postClickDelay: 500 });
+          liked++;
+          logger.info(`  ❤️ Лайк видео ${i + 1}`);
+        }
       } catch { /* element not found */ }
     }
 
@@ -509,18 +554,25 @@ async function _lightEngagement(
           commented = true;
           logger.info(`  💬 Комментарий: "${comment}"`);
         } else {
-          await humanClick(page, cursor, SEL.YOUTUBE.COMMENT_BTN, { postClickDelay: 1500 });
-          await page.waitForTimeout(_randomDelay(1500, 3000));
-          await humanType(page, SEL.YOUTUBE.COMMENT_INPUT, comment);
-          // YouTube: click "Comment" button to submit
-          try {
-            await humanClick(page, cursor,
-              '#submit-button button, button[aria-label*="Comment" i], button:has-text("Comment")',
-              { postClickDelay: 2000 },
-            );
-          } catch { /* auto-submit or not found */ }
-          commented = true;
-          logger.info(`  💬 Комментарий (YouTube): "${comment}"`);
+          // YouTube Shorts: resilient click to open comment panel
+          const commentOpened = await _resilientClick(page, cursor, SEL.YOUTUBE.COMMENT_BTN, logger, 'comment-btn');
+          if (commentOpened) {
+            await page.waitForTimeout(_randomDelay(2000, 4000));
+            try {
+              await page.waitForSelector(SEL.YOUTUBE.COMMENT_INPUT, { state: 'visible', timeout: 5000 });
+              await humanType(page, SEL.YOUTUBE.COMMENT_INPUT, comment);
+              try {
+                await _resilientClick(page, cursor,
+                  '#submit-button button, button[aria-label*="Comment" i], button[aria-label*="Комментар" i]',
+                  logger, 'comment-submit');
+              } catch { await humanPressEnter(page); }
+              commented = true;
+              logger.info(`  💬 Комментарий (YouTube): "${comment}"`);
+            } catch {
+              logger.info(`  ⚠️ Comment input не найден`);
+              await page.keyboard.press('Escape');
+            }
+          }
         }
       } catch { /* skip */ }
     }
@@ -538,8 +590,12 @@ async function _lightEngagement(
       await humanIdleMove(page, cursor);
     }
 
-    // Scroll to next
-    await humanScroll(page, _randomDelay(300, 600));
+    // Scroll to next (ArrowDown for YouTube Shorts, scroll for TikTok)
+    if (data.platform === 'YOUTUBE') {
+      await page.keyboard.press('ArrowDown');
+    } else {
+      await humanScroll(page, _randomDelay(300, 600));
+    }
     await page.waitForTimeout(_randomDelay(1500, 3000));
 
     await job.updateProgress(Math.round((i / watchCount) * 100));
@@ -573,7 +629,9 @@ async function _activeEngagement(
   let follows = 0;
   const maxFollows = _randomDelay(1, 3); // Max 1-3 follows per session
 
-  logger.info(`Day ${data.warmupDay}: Активная активность (${watchCount} видео, like ~${Math.round(likeProb * 100)}%, max follows: ${maxFollows})`);
+  const isYT = data.platform === 'YOUTUBE';
+
+  logger.info(`Day ${data.warmupDay}: Активная активность (${watchCount} видео, like ~${Math.round(likeProb * 100)}%, max follows: ${maxFollows})`);;
 
   for (let i = 0; i < watchCount; i++) {
     // Navigate to niche hashtag content more frequently (40%)
@@ -594,10 +652,21 @@ async function _activeEngagement(
     if (Math.random() < likeProb) {
       try {
         const likeSel = data.platform === 'TIKTOK' ? SEL.TIKTOK.LIKE : SEL.YOUTUBE.LIKE;
-        await humanClick(page, cursor, likeSel, { postClickDelay: 500 });
-        liked++;
-        logger.info(`  ❤️ Лайк видео ${i + 1} (всего: ${liked})`);
-      } catch { /* skip */ }
+        if (isYT) {
+          // YouTube Shorts: try locator-based click with short timeout + fallback
+          const clicked = await _resilientClick(page, cursor, likeSel, logger, 'like');
+          if (clicked) {
+            liked++;
+            logger.info(`  ❤️ Лайк видео ${i + 1} (всего: ${liked})`);
+          }
+        } else {
+          await humanClick(page, cursor, likeSel, { postClickDelay: 500 });
+          liked++;
+          logger.info(`  ❤️ Лайк видео ${i + 1} (всего: ${liked})`);
+        }
+      } catch (e: any) {
+        logger.info(`  ⚠️ Like skip (${e?.message?.slice(0, 60) || 'unknown'})`);
+      }
     }
 
     // Comments (up to maxComments per session, 25% chance per video)
@@ -612,19 +681,31 @@ async function _activeEngagement(
           comments++;
           logger.info(`  💬 Комментарий: "${comment}"`);
         } else {
-          await humanClick(page, cursor, SEL.YOUTUBE.COMMENT_BTN, { postClickDelay: 1500 });
-          await page.waitForTimeout(_randomDelay(1500, 3000));
-          await humanType(page, SEL.YOUTUBE.COMMENT_INPUT, comment);
-          try {
-            await humanClick(page, cursor,
-              '#submit-button button, button[aria-label*="Comment" i]',
-              { postClickDelay: 2000 },
-            );
-          } catch { /* auto-submit */ }
-          comments++;
-          logger.info(`  💬 Комментарий (YouTube): "${comment}"`);
+          // YouTube Shorts: open comment panel
+          const commentOpened = await _resilientClick(page, cursor, SEL.YOUTUBE.COMMENT_BTN, logger, 'comment-btn');
+          if (commentOpened) {
+            await page.waitForTimeout(_randomDelay(2000, 4000));
+            // Wait for comment input to appear
+            try {
+              await page.waitForSelector(SEL.YOUTUBE.COMMENT_INPUT, { state: 'visible', timeout: 5000 });
+              await humanType(page, SEL.YOUTUBE.COMMENT_INPUT, comment);
+              // Submit
+              try {
+                await _resilientClick(page, cursor,
+                  '#submit-button button, button[aria-label*="Comment" i], button[aria-label*="Комментар" i]',
+                  logger, 'comment-submit');
+              } catch { /* auto-submit via Enter */ await humanPressEnter(page); }
+              comments++;
+              logger.info(`  💬 Комментарий (YouTube): "${comment}"`);
+            } catch {
+              logger.info(`  ⚠️ Comment input не найден, закрываю панель`);
+              await page.keyboard.press('Escape');
+            }
+          }
         }
-      } catch { /* skip */ }
+      } catch (e: any) {
+        logger.info(`  ⚠️ Comment skip (${e?.message?.slice(0, 60) || 'unknown'})`);
+      }
     }
 
     // Save (bookmark) occasionally — 12%
@@ -643,11 +724,15 @@ async function _activeEngagement(
           follows++;
           logger.info(`  ➕ Подписка на автора (${follows}/${maxFollows})`);
         } else {
-          await humanClick(page, cursor, SEL.YOUTUBE.SUBSCRIBE, { postClickDelay: 1000 });
-          follows++;
-          logger.info(`  ➕ Подписка на канал (${follows}/${maxFollows})`);
+          const subClicked = await _resilientClick(page, cursor, SEL.YOUTUBE.SUBSCRIBE, logger, 'subscribe');
+          if (subClicked) {
+            follows++;
+            logger.info(`  ➕ Подписка на канал (${follows}/${maxFollows})`);
+          }
         }
-      } catch { /* skip */ }
+      } catch (e: any) {
+        logger.info(`  ⚠️ Follow skip (${e?.message?.slice(0, 60) || 'unknown'})`);
+      }
     }
 
     // Random idle move
@@ -655,13 +740,92 @@ async function _activeEngagement(
       await humanIdleMove(page, cursor);
     }
 
-    await humanScroll(page, _randomDelay(300, 600));
-    await page.waitForTimeout(_randomDelay(1500, 3000));
+    // Navigate to next video: ArrowDown for YouTube Shorts, scroll for TikTok
+    if (isYT) {
+      await page.keyboard.press('ArrowDown');
+      await page.waitForTimeout(_randomDelay(1500, 3000));
+    } else {
+      await humanScroll(page, _randomDelay(300, 600));
+      await page.waitForTimeout(_randomDelay(1500, 3000));
+    }
     await job.updateProgress(Math.round((i / watchCount) * 100));
     logger.info(`  📺 Видео ${i + 1}/${watchCount} (${Math.round(watchTime / 1000)}с)`);
   }
 
   logger.info(`  Итого: ${liked} лайков, ${comments} комментариев, ${follows} подписок`);
+}
+
+// ── Resilient Click (YouTube Shorts fallback) ───────────────
+
+/**
+ * Try humanClick first (human-like Bezier cursor), fall back to
+ * Playwright locator.click() if the selector times out.
+ *
+ * YouTube Shorts uses custom web-components (like-button-view-model,
+ * ytd-reel-video-renderer) where standard waitForSelector may fail
+ * within the ghost-cursor 10s timeout. The locator API handles these
+ * elements more reliably.
+ *
+ * @returns true if click succeeded, false if all attempts failed
+ */
+async function _resilientClick(
+  page: Page,
+  cursor: Awaited<ReturnType<typeof createPageCursor>>,
+  selector: string,
+  logger: SocketLogger,
+  action: string,
+): Promise<boolean> {
+  // Split compound selectors and try each individually
+  const selectors = selector.split(',').map(s => s.trim()).filter(Boolean);
+
+  // Strategy 1: Try humanClick with reduced timeout (3s instead of 10s)
+  for (const sel of selectors) {
+    try {
+      await page.waitForSelector(sel, { state: 'visible', timeout: 3000 });
+      await cursor.click(sel, {
+        paddingPercentage: 10,
+        waitForClick: _randomDelay(50, 200),
+      });
+      await page.waitForTimeout(_randomDelay(300, 700));
+      return true;
+    } catch {
+      // This selector didn't work, try next
+    }
+  }
+
+  // Strategy 2: Playwright locator with force:true (bypasses visibility checks)
+  for (const sel of selectors) {
+    try {
+      const locator = page.locator(sel).first();
+      if (await locator.count() > 0) {
+        await locator.click({ force: true, timeout: 3000 });
+        await page.waitForTimeout(_randomDelay(300, 700));
+        return true;
+      }
+    } catch {
+      // Next selector
+    }
+  }
+
+  // Strategy 3: Try JavaScript click as last resort
+  for (const sel of selectors) {
+    try {
+      const clicked = await page.evaluate((s) => {
+        const el = document.querySelector(s) as HTMLElement | null;
+        if (el) { el.click(); return true; }
+        return false;
+      }, sel);
+      if (clicked) {
+        await page.waitForTimeout(_randomDelay(300, 700));
+        return true;
+      }
+    } catch {
+      // Next selector
+    }
+  }
+
+  logger.info(`  ⚠️ ${action}: ни один селектор не сработал`);
+  return false;
 }
 
 // ── Utility ─────────────────────────────────────────────────
