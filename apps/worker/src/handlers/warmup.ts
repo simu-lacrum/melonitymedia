@@ -90,31 +90,40 @@ const SEL = {
   },
   YOUTUBE: {
     // ── Like ─────────────────────────────────────────────────
-    // Shorts wraps like in ytd-reel-video-renderer > #like-button
-    // Regular YT uses ytd-toggle-button-renderer > button
-    // Desktop Shorts (2024+): like-button-view-model > button
+    // Must work on BOTH Shorts and regular watch pages:
+    // Shorts: ytd-reel-video-renderer > #like-button, like-button-view-model
+    // Regular: segmented-like-dislike-button-view-model, ytd-menu-renderer
     LIKE: '#like-button button, ' +
       'like-button-view-model button, ' +
       'ytd-reel-video-renderer #like-button button, ' +
       'ytd-toggle-button-renderer #button, ' +
+      'segmented-like-dislike-button-view-model button:first-child, ' +
+      'ytd-segmented-like-dislike-button-renderer #like-button button, ' +
+      '#top-level-buttons-computed ytd-toggle-button-renderer:first-child button, ' +
       'button[aria-label*="like" i], ' +
       'button[aria-label*="Нравится" i], ' +
       'ytd-like-button-renderer button',
     // ── Comment ──────────────────────────────────────────────
-    // Shorts: comment button is below like, inside #comments-button
+    // Shorts: #comments-button in reel renderer
+    // Regular: comment section scroll target or count link
     COMMENT_BTN: '#comments-button button, ' +
       'ytd-reel-video-renderer #comments-button button, ' +
+      'ytd-comments-header-renderer #title, ' +
+      '#comment-teaser button, ' +
       'button[aria-label*="Comment" i], ' +
       'button[aria-label*="Комментар" i]',
     COMMENT_INPUT: '#contenteditable-root, #placeholder-area, ' +
       '#comment-input #contenteditable-root, ' +
+      '#simplebox-placeholder, ' +
       '[contenteditable="true"][aria-label*="comment" i], ' +
       '[contenteditable="true"][aria-label*="Комментар" i], ' +
+      '[contenteditable="true"][aria-label*="Add" i], ' +
       'ytd-comments-entry-point-header-renderer #contenteditable-root',
     // ── Subscribe ────────────────────────────────────────────
     SUBSCRIBE: '#subscribe-button button, ' +
       'ytd-reel-video-renderer #subscribe-button button, ' +
       'ytd-subscribe-button-renderer button, ' +
+      'ytd-watch-metadata #subscribe-button button, ' +
       'button[aria-label*="Subscribe" i], ' +
       'button[aria-label*="Подписаться" i], ' +
       'button:has-text("Subscribe"), button:has-text("Подписаться")',
@@ -465,10 +474,14 @@ async function _passiveWatching(
       } catch { /* element not found */ }
     }
 
-    // Scroll to next video
-    // Navigate to next video (ArrowDown for YouTube Shorts, scroll for TikTok)
+    // Navigate to next video (ArrowDown for YouTube Shorts, goBack for regular)
     if (data.platform === 'YOUTUBE') {
-      await page.keyboard.press('ArrowDown');
+      const url = page.url();
+      if (url.includes('/shorts/')) {
+        await page.keyboard.press('ArrowDown');
+      } else {
+        await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
+      }
     } else {
       await humanScroll(page, _randomDelay(300, 600));
     }
@@ -590,9 +603,14 @@ async function _lightEngagement(
       await humanIdleMove(page, cursor);
     }
 
-    // Scroll to next (ArrowDown for YouTube Shorts, scroll for TikTok)
+    // Scroll to next (ArrowDown for YouTube Shorts, goBack for regular, scroll for TikTok)
     if (data.platform === 'YOUTUBE') {
-      await page.keyboard.press('ArrowDown');
+      const url = page.url();
+      if (url.includes('/shorts/')) {
+        await page.keyboard.press('ArrowDown');
+      } else {
+        await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
+      }
     } else {
       await humanScroll(page, _randomDelay(300, 600));
     }
@@ -740,9 +758,16 @@ async function _activeEngagement(
       await humanIdleMove(page, cursor);
     }
 
-    // Navigate to next video: ArrowDown for YouTube Shorts, scroll for TikTok
+    // Navigate to next video: depends on video type
     if (isYT) {
-      await page.keyboard.press('ArrowDown');
+      const url = page.url();
+      if (url.includes('/shorts/')) {
+        // YouTube Shorts: ArrowDown scrolls to next Short
+        await page.keyboard.press('ArrowDown');
+      } else {
+        // Regular YouTube video: go back to search results to pick next
+        await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
+      }
       await page.waitForTimeout(_randomDelay(1500, 3000));
     } else {
       await humanScroll(page, _randomDelay(300, 600));
