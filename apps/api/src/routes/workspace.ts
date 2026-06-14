@@ -221,9 +221,32 @@ router.post('/launch', async (req: Request, res: Response) => {
     };
 
     // Dispatch one job per account with staggered delay (M-4)
+    // For UPLOAD: group accounts by platform so we can assign platformIndex
+    // (index 0 = first for that platform = no uniquification needed)
+    let platformIndexMap: Map<string, number> | null = null;
+    if (type === 'UPLOAD') {
+      // Resolve platform for each target account
+      const accounts = await prisma.socialAccount.findMany({
+        where: { id: { in: targetAccountIds } },
+        select: { id: true, platform: true },
+      });
+      const platformCounters = new Map<string, number>();
+      platformIndexMap = new Map<string, number>();
+      for (const acc of accounts) {
+        const idx = platformCounters.get(acc.platform) ?? 0;
+        platformIndexMap.set(acc.id, idx);
+        platformCounters.set(acc.platform, idx + 1);
+      }
+    }
+
     const results = await Promise.all(
       targetAccountIds.map(async (accountId, index) => {
         const extra = await buildExtra();
+        // Inject platformIndex and totalAccountsInJob for UPLOAD jobs
+        if (type === 'UPLOAD' && platformIndexMap) {
+          (extra as Record<string, unknown>).platformIndex = platformIndexMap.get(accountId) ?? index;
+          (extra as Record<string, unknown>).totalAccountsInJob = targetAccountIds.length;
+        }
         // Calculate per-account delay: each subsequent account gets additional delay
         const perAccountDelay = delayMin + Math.floor(Math.random() * (delayMax - delayMin + 1));
         const totalDelay = index * perAccountDelay;

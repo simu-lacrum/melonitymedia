@@ -39,6 +39,10 @@ interface UploadJobData {
   accountId: string;       // EVERYTHING else is resolved from this in the worker
   forceSkipWarmup?: boolean;
   cookiesDir?: string;
+  /** Index of this account WITHIN its platform group (0 = first for this platform) */
+  platformIndex?: number;
+  /** Total number of accounts across all platforms in this job (for cleanup) */
+  totalAccountsInJob?: number;
 }
 
 // ── Main ────────────────────────────────────────────────────
@@ -65,13 +69,18 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
       throw new Error(`Account ${data.accountId} has status '${accountStatus.status}' — upload aborted.`);
     }
 
-    // M-4 FIX: Idempotency guard — check if this video was already uploaded
-    const videoRecord = await prisma.video.findUnique({
-      where: { id: data.videoId },
-      select: { isUploaded: true, status: true },
+    // M-4 FIX: Idempotency guard — check if THIS ACCOUNT already uploaded THIS VIDEO
+    // NOTE: We do NOT check video.isUploaded globally because the same video
+    // is intentionally uploaded to multiple accounts in a single job batch.
+    const alreadyUploaded = await prisma.video.findFirst({
+      where: {
+        id: data.videoId,
+        accountId: data.accountId,
+        isUploaded: true,
+      },
     });
-    if (videoRecord?.isUploaded || videoRecord?.status === 'UPLOADED') {
-      logger.warn(`Video ${data.videoId} already uploaded — skipping duplicate.`);
+    if (alreadyUploaded) {
+      logger.warn(`Video ${data.videoId} already uploaded to account ${data.accountId} — skipping duplicate.`);
       return;
     }
 
@@ -153,12 +162,24 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
     await job.updateProgress(10);
 
     // ── Uniquify video for this account ─────────────────────
-    logger.info('Уникализация видео (FFmpeg pipeline)...');
-    const { outputPath } = await uniquifyVideo({
-      accountId: data.accountId,
-      inputPath: data.videoPath,
-    });
-    uniquifiedPath = outputPath;
+    // Logic: first account per platform gets the ORIGINAL (no FFmpeg overhead).
+    // Subsequent accounts get a uniquified copy. Cross-platform is safe
+    // (same video on YT + TT is fine — different detection systems).
+    const isFirstForPlatform = (data.platformIndex ?? 0) === 0;
+    let videoToUpload: string;
+
+    if (isFirstForPlatform) {
+      logger.info('Первый аккаунт на платформе — загрузка без уникализации');
+      videoToUpload = data.videoPath;
+    } else {
+      logger.info('Уникализация видео (FFmpeg pipeline)...');
+      const { outputPath } = await uniquifyVideo({
+        accountId: data.accountId,
+        inputPath: data.videoPath,
+      });
+      uniquifiedPath = outputPath;
+      videoToUpload = outputPath;
+    }
     await job.updateProgress(25);
 
     // ── Launch stealth browser ──────────────────────────────
@@ -176,14 +197,14 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
     const cursor = await createPageCursor(page);
 
     if (platform === 'TIKTOK') {
-      await _uploadToTikTok(page, cursor, data, uniquifiedPath, logger, job, proxyUrl, fingerprint);
+      await _uploadToTikTok(page, cursor, data, videoToUpload, logger, job, proxyUrl, fingerprint);
     } else if (platform === 'YOUTUBE') {
-      await _uploadToYouTube(page, cursor, data, uniquifiedPath, logger, job);
+      await _uploadToYouTube(page, cursor, data, videoToUpload, logger, job);
     } else {
       throw new Error(`Неизвестная платформа: ${platform}`);
     }
 
-    // ── Mark video as uploaded ──────────────────────────────
+    // ── Mark this upload as done for this account ───────────
     await prisma.video.update({
       where: { id: data.videoId },
       data: {
@@ -196,6 +217,37 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
 
     logger.info(`✅ Видео "${data.title}" успешно загружено на ${platform}`);
     await job.updateProgress(100);
+
+    // ── Cleanup: delete original video if ALL accounts in the job are done ──
+    // shouldDelete=true (default) means auto-cleanup after all uploads finish.
+    if (data.totalAccountsInJob) {
+      try {
+        const video = await prisma.video.findUnique({
+          where: { id: data.videoId },
+          select: { shouldDelete: true, filepath: true },
+        });
+        if (video?.shouldDelete && video.filepath) {
+          // Count how many accounts have already uploaded this video
+          const uploadedCount = await prisma.video.count({
+            where: { id: data.videoId, isUploaded: true },
+          });
+          // All accounts done → safe to delete the original file
+          if (uploadedCount >= data.totalAccountsInJob) {
+            if (fs.existsSync(video.filepath)) {
+              fs.unlinkSync(video.filepath);
+              logger.info(`🗑️ Оригинал удалён: ${video.filepath}`);
+            }
+            // Clear filepath in DB so we don't try to delete again
+            await prisma.video.update({
+              where: { id: data.videoId },
+              data: { filepath: '' },
+            });
+          }
+        }
+      } catch (cleanupErr) {
+        logger.warn(`Cleanup skipped: ${(cleanupErr as Error).message?.slice(0, 60)}`);
+      }
+    }
 
   } catch (err: unknown) {
     await prisma.video.update({ where: { id: data.videoId }, data: { status: 'FAILED' } }).catch(() => {});
