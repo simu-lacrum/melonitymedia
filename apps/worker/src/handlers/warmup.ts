@@ -397,17 +397,34 @@ async function _navigateToYoutubeSearch(
     await humanPressEnter(page);
     await page.waitForTimeout(_randomDelay(3000, 5000));
 
-    // Try to click on a Shorts video from results
-    try {
-      await humanClick(page, cursor, 'a[href*="/shorts/"]', { postClickDelay: 2000 });
-      logger.info(`  ▶ Открыто Shorts видео из поиска #${hashtag}`);
-    } catch {
-      // Fallback: click any video
+    // Randomly pick Shorts or regular video (50/50) — real users watch both
+    const preferShorts = Math.random() < 0.5;
+
+    if (preferShorts) {
+      // Try Shorts first, fallback to regular
+      try {
+        await humanClick(page, cursor, 'a[href*="/shorts/"]', { postClickDelay: 2000 });
+        logger.info(`  ▶ Открыто Shorts видео из поиска #${hashtag}`);
+      } catch {
+        try {
+          await humanClick(page, cursor, 'a#video-title, ytd-video-renderer a', { postClickDelay: 2000 });
+          logger.info(`  ▶ Открыто видео из поиска #${hashtag}`);
+        } catch {
+          logger.warn(`  ⚠️ Не удалось найти видео по #${hashtag} в YouTube`);
+        }
+      }
+    } else {
+      // Try regular video first, fallback to Shorts
       try {
         await humanClick(page, cursor, 'a#video-title, ytd-video-renderer a', { postClickDelay: 2000 });
         logger.info(`  ▶ Открыто видео из поиска #${hashtag}`);
       } catch {
-        logger.warn(`  ⚠️ Не удалось найти видео по #${hashtag} в YouTube`);
+        try {
+          await humanClick(page, cursor, 'a[href*="/shorts/"]', { postClickDelay: 2000 });
+          logger.info(`  ▶ Открыто Shorts видео из поиска #${hashtag}`);
+        } catch {
+          logger.warn(`  ⚠️ Не удалось найти видео по #${hashtag} в YouTube`);
+        }
       }
     }
   } catch {
