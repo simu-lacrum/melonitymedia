@@ -8,7 +8,8 @@
     "dev": "npm run dev --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "memory:sync": "node scripts/update-memory-graph.js"
   },
   "engines": {
     "node": ">=20.0.0"

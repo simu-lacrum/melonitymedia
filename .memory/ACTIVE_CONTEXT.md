@@ -128,9 +128,36 @@ const bodyText = await page.textContent('body');
 |--------|--------|
 | **Логин URL** | `https://accounts.google.com/ServiceLogin` |
 | **Verification** | Google часто запрашивает верификацию при входе с нового IP/устройства |
-| **YouTube Studio** | `studio.youtube.com` блокирует доступ для VPS IP — показывает "Произошла ошибка" и 403 |
-| **Edit Profile** | Через Studio нестабильно. `#textbox` элементы (contenteditable) НЕ рендерятся при блокировке |
+| **YouTube Studio** | `studio.youtube.com` блокирует доступ для VPS IP — показывает "Oops, something went wrong" + "Retry" кнопка (невидима). Body length ~20k но SPA не рендерится. `#textbox` элементов = 0. |
+| **Edit Profile (Bio)** | ❌ Через Studio невозможно на VPS IP. Альтернатива: YouTube Data API v3 или другой прокси |
+| **Edit Profile (Avatar)** | ✅ Через Google Account iframe (см. ниже) |
 | **YouTube DE locale** | Proxy из Германии → YouTube показывает немецкую локаль |
+
+**✅ ПРОВЕРЕННЫЙ FLOW: Смена аватара YouTube**
+
+Аватар YouTube = аватар Google Account. Менять через:
+
+```
+myaccount.google.com/personal-info
+  → Click "Profile picture" text
+    → iframe src="...profile-picture..." opens
+      → Click "Upload from device" (inside iframe)
+        → Catch page.waitForEvent('filechooser')
+          → fileChooser.setFiles(path)
+            → Crop screen → Click "Next"
+              → Save screen → Click "Save"
+```
+
+**Ключевые моменты:**
+- Google НЕ имеет `<input type="file">` на основной странице
+- Всё через `page.frameLocator('iframe[src*="profile-picture"]')`
+- `fileChooser` ловить через `page.waitForEvent('filechooser')` ПЕРЕД кликом
+- После Upload: экран "Crop and rotate" с кнопкой "Next" и "Rotate"
+- После Next: кнопка "Save" (не "Done" — "Done" есть но невидима!)
+- Проверить visibility через `btn.isVisible()` перед кликом
+- Аватар обновляется на Google Account мгновенно, на YouTube — кэш ~1-2 часа
+
+**Handler**: `apps/worker/src/handlers/edit-profile.ts` — `_editYouTubeProfile()`, Step 1
 
 ### Прокси система
 
@@ -142,6 +169,8 @@ const bodyText = await page.textContent('body');
 | **Ротация** | LTE rotation через GET-запрос на rotation URL → ждать 12с |
 
 **⚠️ IP флаги**: YouTube Studio и TikTok могут зафлагировать конкретный IP прокси. Если rate-limit не проходит после 48ч — менять прокси.
+
+**⚠️ Proxy exhaustion**: При многократных browser sessions через один прокси за короткое время, YouTube/Google начинает таймаутить даже основные страницы. Не запускать более 3-4 скриптов подряд без пауз.
 
 ### Cookie-based Auth (AES-256-GCM)
 
@@ -200,6 +229,8 @@ async function safeUpdateAccount(accountId: string, data: Record<string, any>): 
 2. **НЕ использовать `page.textContent('body')`** для детекции ошибок на TikTok — ловит JSON AppContext
 3. **НЕ запускать `docker exec` без `-u worker -w /app`** — модули не найдутся
 4. **НЕ пушить без проверки** — `docker compose build` занимает ~8 мин, ошибка = потеря 16+ мин
+5. **НЕ использовать `waitUntil: 'load'` для Studio** — таймаутит. `domcontentloaded` тоже не помогает при блокировке IP
+6. **НЕ запускать 5+ browser sessions подряд** — proxy exhaustion, YouTube таймаутит всё
 
 ---
 
@@ -207,11 +238,12 @@ async function safeUpdateAccount(accountId: string, data: Record<string, any>): 
 
 | Аккаунт | Платформа | Статус | Примечание |
 |---------|-----------|--------|------------|
-| rizwansami225@gmail.com | YouTube | ✅ ALIVE | Login OK, cookies saved, feed verified |
+| rizwansami225@gmail.com | YouTube | ✅ ALIVE | Login OK, cookies saved, **аватар обновлён** (M logo) |
 | verasava453@gmail.com | YouTube | ✅ ALIVE | — |
 | smshanto377@gmail.com | YouTube | ⚠️ AUTH_NEEDED | — |
 | user4784160770083 | TikTok | ⚠️ AUTH_NEEDED | Rate-limited, ждать 48ч |
 | user1534590705213 | TikTok | ⚠️ AUTH_NEEDED | — |
 | user63986528882138 | TikTok | ⚠️ AUTH_NEEDED | — |
 
-> Последнее обновление: 2026-06-14
+> Последнее обновление: 2026-06-14T08:57+03:00
+

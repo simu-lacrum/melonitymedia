@@ -308,65 +308,92 @@ async function _editYouTubeProfile(
     logger.warn(`YouTube warmup failed: ${warmupErr instanceof Error ? warmupErr.message : warmupErr}`);
   }
 
-  // ── Step 1: Avatar via Google Account (not YouTube Studio) ──
-  // YouTube Studio does NOT allow avatar changes — it redirects to Google Account
+  // ── Step 1: Avatar via Google Account iframe ────────────────
+  // Google personal-info opens a profile picture editor inside an iframe.
+  // Flow: Click "Profile picture" text → iframe dialog opens →
+  //   click "Upload from device" → catch fileChooser → set file →
+  //   Crop screen → click "Next" → click "Save"
+  //
+  // IMPORTANT: The old approach tried to find <input type="file"> on the
+  // main page — it doesn't exist. Google embeds the editor in an iframe
+  // with src containing "profile-picture".
   if (avatarTmpPath && data.changes.avatarUrl) {
     try {
       logger.info('Загружаю аватар YouTube через Google Account...');
       await page.goto('https://myaccount.google.com/personal-info', { waitUntil: 'load', timeout: 30_000 });
       await page.waitForTimeout(_randomDelay(3000, 5000));
 
-      // Click on the profile photo area
-      // Google shows a camera icon or "Add profile photo" or existing photo
-      const photoSelectors = [
-        'a[href*="photo"], a[href*="profilephoto"]',  // Link to photo editor
-        '[data-photo-action], [aria-label*="photo" i], [aria-label*="фото" i]',  // Photo action button
-        '.yDSiEe',  // Google profile photo container class
-      ];
-
-      let clicked = false;
-      for (const sel of photoSelectors) {
-        try {
-          const count = await page.locator(sel).count();
-          if (count > 0) {
-            await humanClick(page, cursor, sel, { postClickDelay: 2000 });
-            clicked = true;
-            break;
-          }
-        } catch { continue; }
-      }
-
-      if (!clicked) {
-        logger.warn('Не нашёл кнопку фото в Google Account, пробую прямой URL...');
-        await page.goto('https://myaccount.google.com/profile/photo/edit', { waitUntil: 'load', timeout: 30_000 });
-        await page.waitForTimeout(_randomDelay(2000, 3000));
-      }
-
-      // Look for file input on the photo editor page
-      const fileInput = await page.locator('input[type="file"][accept*="image"]').first();
-      if (await fileInput.count() > 0) {
-        await fileInput.setInputFiles(avatarTmpPath);
+      // Click "Profile picture" text to open the iframe dialog
+      const profilePicRow = page.locator('text=Profile picture').first();
+      if (await profilePicRow.count() > 0) {
+        await profilePicRow.click();
         await page.waitForTimeout(_randomDelay(3000, 5000));
-
-        // Confirm crop / save
-        const saveSelectors = [
-          'button:has-text("Save"), button:has-text("Сохранить")',
-          'button:has-text("Save as profile photo")',
-          'button:has-text("Done"), button:has-text("Готово")',
-          '[data-mdc-dialog-action="ok"]',
-        ];
-        for (const sel of saveSelectors) {
-          try {
-            const count = await page.locator(sel).count();
-            if (count > 0) {
-              await humanClick(page, cursor, sel, { postClickDelay: 2000 });
-              break;
-            }
-          } catch { continue; }
-        }
-        logger.info('Аватар YouTube загружен через Google Account ✓');
       } else {
-        logger.warn('Не удалось найти input для загрузки аватара в Google Account');
+        logger.warn('Profile picture row not found on personal-info page');
+      }
+
+      // Access the iframe that Google opens for profile picture editing
+      const iframeSel = 'iframe[src*="profile-picture"]';
+      const iframeCount = await page.locator(iframeSel).count();
+
+      if (iframeCount > 0) {
+        const frame = page.frameLocator(iframeSel);
+        await page.waitForTimeout(3000); // Wait for iframe content to load
+
+        // Click "Upload from device" inside the iframe
+        const uploadBtn = frame.locator('text=Upload from device');
+        if (await uploadBtn.count().catch(() => 0) > 0) {
+          // Set up file chooser listener BEFORE clicking the button
+          const fileChooserPromise = page.waitForEvent('filechooser', { timeout: 15_000 });
+          await uploadBtn.first().click();
+          logger.info('Clicked "Upload from device"');
+
+          const fileChooser = await fileChooserPromise;
+          await fileChooser.setFiles(avatarTmpPath);
+          logger.info('Файл аватара загружен, ожидаю crop screen...');
+          await page.waitForTimeout(_randomDelay(5000, 8000));
+
+          // Crop screen: click "Next" button
+          const nextBtn = frame.locator('button:has-text("Next")').first();
+          if (await nextBtn.count().catch(() => 0) > 0) {
+            await nextBtn.click();
+            logger.info('Clicked "Next" on crop screen');
+            await page.waitForTimeout(_randomDelay(5000, 8000));
+          }
+
+          // Save/confirm: try multiple button texts (Google changes these)
+          const saveTexts = [
+            'Save as profile photo', 'Save profile photo', 'Save',
+            'Done', 'Confirm', 'Apply',
+            'Сохранить как фото профиля', 'Сохранить', 'Готово',
+          ];
+          for (const text of saveTexts) {
+            const btn = frame.locator(`button:has-text("${text}"), [role="button"]:has-text("${text}")`).first();
+            const cnt = await btn.count().catch(() => 0);
+            if (cnt > 0) {
+              const visible = await btn.isVisible().catch(() => false);
+              if (visible) {
+                await btn.click();
+                logger.info(`Clicked "${text}" — сохраняю аватар`);
+                await page.waitForTimeout(_randomDelay(5000, 8000));
+                break;
+              }
+            }
+          }
+          logger.info('Аватар YouTube загружен через Google Account ✓');
+        } else {
+          // Fallback: try file input inside iframe
+          const iframeFileInput = frame.locator('input[type="file"]');
+          if (await iframeFileInput.count().catch(() => 0) > 0) {
+            await iframeFileInput.first().setInputFiles(avatarTmpPath);
+            await page.waitForTimeout(_randomDelay(5000, 8000));
+            logger.info('Аватар загружен через iframe file input ✓');
+          } else {
+            logger.warn('Не удалось найти кнопку загрузки в iframe');
+          }
+        }
+      } else {
+        logger.warn('Iframe профильного фото не найден');
       }
     } catch (avatarErr) {
       const msg = avatarErr instanceof Error ? avatarErr.message : String(avatarErr);
