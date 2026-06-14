@@ -185,6 +185,17 @@ export default function WorkspacePage() {
       toast.error("Выберите хотя бы один аккаунт")
       return
     }
+    // Upload-specific validations
+    if (mode === "UPLOAD") {
+      if (!upload.videoId) {
+        toast.error("Загрузите и выберите видео для залива")
+        return
+      }
+      if (!upload.title.trim()) {
+        toast.error("Укажите заголовок видео")
+        return
+      }
+    }
     setLaunchStatus("launching")
     setStatusMsg("")
     try {
