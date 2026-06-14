@@ -29,7 +29,10 @@
 | Cache/Queue Broker | Redis | 7 |
 | Task Queue | BullMQ | 5.x |
 | Realtime | Socket.io | 4.x |
-| Browser Automation | undetected-chromedriver-js + selenium-webdriver | latest |
+| Browser Automation | Patchright (patched Playwright) | latest |
+| Captcha Solver | CapSolver API | latest |
+| Human Emulation | ghost-cursor (biomouse) | latest |
+| TLS Fingerprinting | curl-impersonate | latest |
 | HTML Parser | cheerio (Node.js bs4) | latest |
 | Runtime | Node.js | ≥ 20 |
 | Language | TypeScript | 5.7+ |
@@ -62,13 +65,13 @@ MelonityMedia/
 │   │       ├── routes/       # REST endpoints
 │   │       ├── middleware/   # auth, admin, firewall
 │   │       └── lib/          # prisma, redis, bullmq, socket
-│   └── worker/               # UndetectedChrome automation (selenium-webdriver)
+│   └── worker/               # Patchright automation (patched Playwright)
 │       ├── docker/           # Dockerfile + entrypoint.sh
 │       └── src/
-│           ├── core/         # BrowserAutomation class
-│           ├── handlers/     # Job handlers (upload, warmup, etc.)
-│           ├── plugins/      # Future: FFmpeg uniqualization pipeline
-│           └── lib/          # socket-logger, helpers
+│           ├── core/         # Browser, Auth, Captcha, Proxy, Video, TLS, Humanity
+│           ├── handlers/     # Job handlers (login, upload, warmup, edit-profile, etc.)
+│           ├── plugins/      # FFmpeg uniqualization pipeline
+│           └── lib/          # socket-logger, prisma, redis-pubsub, helpers
 └── uploads/                  # temp video storage (auto-cleaned)
 ```
 
@@ -121,11 +124,13 @@ apps/worker/src/plugins/
 ### 4.6 BullMQ Queues
 | Queue | Purpose | Concurrency |
 |-------|---------|-------------|
+| `login` | Account login + cookie extraction | 1 |
 | `upload` | Video upload to platforms | user.maxThreads |
 | `warmup` | Account warming (scroll, like, comment) | user.maxThreads |
 | `cookies` | Cookie farming on donor sites | user.maxThreads |
 | `edit-profile` | Change avatar/banner/bio | 1 |
-| `analytics-cron` | Nightly stats collection | 1 |
+| `analytics-cron` | Stats collection (6h interval) | 1 |
+| `shadowban-check` | Shadowban detection (12h interval) | 1 |
 | `cleanup` | Delete uploaded videos from disk | 1 |
 
 ### 4.7 Socket.io

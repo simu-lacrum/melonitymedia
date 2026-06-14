@@ -1,0 +1,2266 @@
+{
+  "nodes": [
+    "apps/api/src/index.ts",
+    "apps/api/src/lib/bullmq.ts",
+    "apps/api/src/lib/cron-scheduler.ts",
+    "apps/api/src/lib/fingerprint.ts",
+    "apps/api/src/lib/job-dispatch.ts",
+    "apps/api/src/lib/prisma.ts",
+    "apps/api/src/lib/proxy-pin-rules.ts",
+    "apps/api/src/lib/proxy-rotation-bridge.ts",
+    "apps/api/src/lib/redis-pubsub.ts",
+    "apps/api/src/lib/redis.ts",
+    "apps/api/src/lib/socket.ts",
+    "apps/api/src/lib/__tests__/proxy-pin-rules.test.ts",
+    "apps/api/src/middleware/admin.ts",
+    "apps/api/src/middleware/auth.ts",
+    "apps/api/src/middleware/firewall.ts",
+    "apps/api/src/middleware/rate-limit.ts",
+    "apps/api/src/routes/accounts.ts",
+    "apps/api/src/routes/admin.ts",
+    "apps/api/src/routes/analytics.ts",
+    "apps/api/src/routes/auth.ts",
+    "apps/api/src/routes/proxies.ts",
+    "apps/api/src/routes/videos.ts",
+    "apps/api/src/routes/workspace.ts",
+    "apps/api/src/routes/__tests__/accounts-fingerprint.test.ts",
+    "apps/api/src/types/index.ts",
+    "apps/web/src/app/account/accounts/page.tsx",
+    "apps/web/src/app/account/admin/page.tsx",
+    "apps/web/src/app/account/dashboard/page.tsx",
+    "apps/web/src/app/account/layout.tsx",
+    "apps/web/src/app/account/proxies/page.tsx",
+    "apps/web/src/app/account/settings/page.tsx",
+    "apps/web/src/app/account/workspace/page.tsx",
+    "apps/web/src/app/auth/forgot-password/page.tsx",
+    "apps/web/src/app/auth/layout.tsx",
+    "apps/web/src/app/auth/reset-password/page.tsx",
+    "apps/web/src/app/auth/sign-in/page.tsx",
+    "apps/web/src/app/auth/sign-up/page.tsx",
+    "apps/web/src/app/layout.tsx",
+    "apps/web/src/app/not-found.tsx",
+    "apps/web/src/app/page.tsx",
+    "apps/web/src/components/layout/Header.tsx",
+    "apps/web/src/components/layout/Sidebar.tsx",
+    "apps/web/src/components/ui/alert.tsx",
+    "apps/web/src/components/ui/avatar.tsx",
+    "apps/web/src/components/ui/badge.tsx",
+    "apps/web/src/components/ui/button.tsx",
+    "apps/web/src/components/ui/card.tsx",
+    "apps/web/src/components/ui/checkbox.tsx",
+    "apps/web/src/components/ui/datatable.tsx",
+    "apps/web/src/components/ui/dialog.tsx",
+    "apps/web/src/components/ui/drawer.tsx",
+    "apps/web/src/components/ui/drop-zone.tsx",
+    "apps/web/src/components/ui/dropdown-menu.tsx",
+    "apps/web/src/components/ui/dropzone.tsx",
+    "apps/web/src/components/ui/empty-state.tsx",
+    "apps/web/src/components/ui/emptystate.tsx",
+    "apps/web/src/components/ui/input.tsx",
+    "apps/web/src/components/ui/label.tsx",
+    "apps/web/src/components/ui/live-terminal.tsx",
+    "apps/web/src/components/ui/modal.tsx",
+    "apps/web/src/components/ui/popover.tsx",
+    "apps/web/src/components/ui/progress-bar.tsx",
+    "apps/web/src/components/ui/progress.tsx",
+    "apps/web/src/components/ui/scroll-area.tsx",
+    "apps/web/src/components/ui/segmented-control.tsx",
+    "apps/web/src/components/ui/select.tsx",
+    "apps/web/src/components/ui/separator.tsx",
+    "apps/web/src/components/ui/sheet.tsx",
+    "apps/web/src/components/ui/skeleton.tsx",
+    "apps/web/src/components/ui/slider.tsx",
+    "apps/web/src/components/ui/sonner.tsx",
+    "apps/web/src/components/ui/stat-card.tsx",
+    "apps/web/src/components/ui/stepper.tsx",
+    "apps/web/src/components/ui/switch.tsx",
+    "apps/web/src/components/ui/table.tsx",
+    "apps/web/src/components/ui/tabs.tsx",
+    "apps/web/src/components/ui/terminal.tsx",
+    "apps/web/src/components/ui/textarea.tsx",
+    "apps/web/src/components/ui/toggle.tsx",
+    "apps/web/src/components/ui/tooltip.tsx",
+    "apps/web/src/components/ui/__tests__/Card.test.tsx",
+    "apps/web/src/lib/api.ts",
+    "apps/web/src/lib/socket.ts",
+    "apps/web/src/lib/utils.ts",
+    "apps/web/src/middleware.ts",
+    "apps/web/src/test/setup.ts",
+    "apps/worker/src/core/auth/cookie-store.ts",
+    "apps/worker/src/core/auth/session-validator.ts",
+    "apps/worker/src/core/browser/fingerprint-manager.ts",
+    "apps/worker/src/core/browser/patchright-launcher.ts",
+    "apps/worker/src/core/browser/__tests__/fingerprint-manager.test.ts",
+    "apps/worker/src/core/captcha/capsolver-client.ts",
+    "apps/worker/src/core/captcha/tiktok-captcha-handler.ts",
+    "apps/worker/src/core/humanity/biomouse.ts",
+    "apps/worker/src/core/humanity/typing-emulator.ts",
+    "apps/worker/src/core/proxy/carrier-validator.ts",
+    "apps/worker/src/core/proxy/lte-rotation.ts",
+    "apps/worker/src/core/proxy/rotation-client.ts",
+    "apps/worker/src/core/tls/curl-impersonate-client.ts",
+    "apps/worker/src/core/video/inspector.ts",
+    "apps/worker/src/core/video/uniquifier.ts",
+    "apps/worker/src/handlers/analytics.ts",
+    "apps/worker/src/handlers/cleanup.ts",
+    "apps/worker/src/handlers/cookies.ts",
+    "apps/worker/src/handlers/edit-profile.ts",
+    "apps/worker/src/handlers/index.ts",
+    "apps/worker/src/handlers/login.ts",
+    "apps/worker/src/handlers/shadowban-detector.ts",
+    "apps/worker/src/handlers/upload.ts",
+    "apps/worker/src/handlers/warmup.ts",
+    "apps/worker/src/handlers/__tests__/warmup.test.ts",
+    "apps/worker/src/index.ts",
+    "apps/worker/src/lib/account-context.ts",
+    "apps/worker/src/lib/bullmq.ts",
+    "apps/worker/src/lib/error-classifier.ts",
+    "apps/worker/src/lib/prisma.ts",
+    "apps/worker/src/lib/proxy-utils.ts",
+    "apps/worker/src/lib/redis-pubsub.ts",
+    "apps/worker/src/lib/socket-logger.ts",
+    "apps/worker/src/lib/__tests__/account-context.test.ts",
+    "apps/worker/src/lib/__tests__/proxy-utils.test.ts",
+    "apps/worker/src/plugins/base-plugin.ts",
+    "apps/worker/src/plugins/index.ts",
+    "apps/worker/src/types/undetected-chromedriver-js.d.ts",
+    "apps/worker/src/__tests__/capsolver-client.test.ts",
+    "apps/worker/src/__tests__/fingerprint-manager.test.ts",
+    "apps/worker/src/__tests__/fingerprint-mobile.test.ts",
+    "apps/worker/src/__tests__/infrastructure.test.ts",
+    "apps/worker/src/__tests__/shadowban-detector.test.ts",
+    "apps/worker/src/__tests__/video-inspector.test.ts",
+    "ops/vps_infrastructure",
+    "ops/account_operations",
+    "ops/debugging_playbook"
+  ],
+  "edges": [
+    {
+      "source": "apps/api/src/index.ts",
+      "targetImport": "express"
+    },
+    {
+      "source": "apps/api/src/index.ts",
+      "targetImport": "http"
+    },
+    {
+      "source": "apps/api/src/index.ts",
+      "targetImport": "cors"
+    },
+    {
+      "source": "apps/api/src/index.ts",
+      "targetImport": "helmet"
+    },
+    {
+      "source": "apps/api/src/index.ts",
+      "targetImport": "cookie-parser"
+    },
+    {
+      "source": "apps/api/src/index.ts",
+      "targetImport": "./lib/socket.js"
+    },
+    {
+      "source": "apps/api/src/index.ts",
+      "targetImport": "./middleware/firewall.js"
+    },
+    {
+      "source": "apps/api/src/index.ts",
+      "targetImport": "./routes/auth.js"
+    },
+    {
+      "source": "apps/api/src/index.ts",
+      "targetImport": "./routes/accounts.js"
+    },
+    {
+      "source": "apps/api/src/index.ts",
+      "targetImport": "./routes/proxies.js"
+    },
+    {
+      "source": "apps/api/src/index.ts",
+      "targetImport": "./routes/workspace.js"
+    },
+    {
+      "source": "apps/api/src/index.ts",
+      "targetImport": "./routes/videos.js"
+    },
+    {
+      "source": "apps/api/src/index.ts",
+      "targetImport": "./routes/analytics.js"
+    },
+    {
+      "source": "apps/api/src/index.ts",
+      "targetImport": "./routes/admin.js"
+    },
+    {
+      "source": "apps/api/src/index.ts",
+      "targetImport": "./lib/cron-scheduler.js"
+    },
+    {
+      "source": "apps/api/src/lib/bullmq.ts",
+      "targetImport": "bullmq"
+    },
+    {
+      "source": "apps/api/src/lib/bullmq.ts",
+      "targetImport": "./redis.js"
+    },
+    {
+      "source": "apps/api/src/lib/cron-scheduler.ts",
+      "targetImport": "./bullmq.js"
+    },
+    {
+      "source": "apps/api/src/lib/cron-scheduler.ts",
+      "targetImport": "./prisma.js"
+    },
+    {
+      "source": "apps/api/src/lib/fingerprint.ts",
+      "targetImport": "crypto"
+    },
+    {
+      "source": "apps/api/src/lib/job-dispatch.ts",
+      "targetImport": "./prisma.js"
+    },
+    {
+      "source": "apps/api/src/lib/job-dispatch.ts",
+      "targetImport": "./bullmq.js"
+    },
+    {
+      "source": "apps/api/src/lib/job-dispatch.ts",
+      "targetImport": "./bullmq.js"
+    },
+    {
+      "source": "apps/api/src/lib/prisma.ts",
+      "targetImport": "@prisma/client"
+    },
+    {
+      "source": "apps/api/src/lib/redis-pubsub.ts",
+      "targetImport": "ioredis"
+    },
+    {
+      "source": "apps/api/src/lib/redis.ts",
+      "targetImport": "ioredis"
+    },
+    {
+      "source": "apps/api/src/lib/socket.ts",
+      "targetImport": "http"
+    },
+    {
+      "source": "apps/api/src/lib/socket.ts",
+      "targetImport": "socket.io"
+    },
+    {
+      "source": "apps/api/src/lib/socket.ts",
+      "targetImport": "jsonwebtoken"
+    },
+    {
+      "source": "apps/api/src/lib/__tests__/proxy-pin-rules.test.ts",
+      "targetImport": "vitest"
+    },
+    {
+      "source": "apps/api/src/lib/__tests__/proxy-pin-rules.test.ts",
+      "targetImport": "../proxy-pin-rules.js"
+    },
+    {
+      "source": "apps/api/src/middleware/admin.ts",
+      "targetImport": "express"
+    },
+    {
+      "source": "apps/api/src/middleware/auth.ts",
+      "targetImport": "express"
+    },
+    {
+      "source": "apps/api/src/middleware/auth.ts",
+      "targetImport": "jsonwebtoken"
+    },
+    {
+      "source": "apps/api/src/middleware/auth.ts",
+      "targetImport": "../lib/prisma.js"
+    },
+    {
+      "source": "apps/api/src/middleware/auth.ts",
+      "targetImport": "../types/index.js"
+    },
+    {
+      "source": "apps/api/src/middleware/firewall.ts",
+      "targetImport": "express"
+    },
+    {
+      "source": "apps/api/src/middleware/firewall.ts",
+      "targetImport": "../lib/redis.js"
+    },
+    {
+      "source": "apps/api/src/middleware/rate-limit.ts",
+      "targetImport": "express"
+    },
+    {
+      "source": "apps/api/src/routes/accounts.ts",
+      "targetImport": "../lib/proxy-pin-rules.js"
+    },
+    {
+      "source": "apps/api/src/routes/accounts.ts",
+      "targetImport": "express"
+    },
+    {
+      "source": "apps/api/src/routes/accounts.ts",
+      "targetImport": "zod"
+    },
+    {
+      "source": "apps/api/src/routes/accounts.ts",
+      "targetImport": "../lib/prisma.js"
+    },
+    {
+      "source": "apps/api/src/routes/accounts.ts",
+      "targetImport": "../middleware/auth.js"
+    },
+    {
+      "source": "apps/api/src/routes/accounts.ts",
+      "targetImport": "crypto"
+    },
+    {
+      "source": "apps/api/src/routes/accounts.ts",
+      "targetImport": "../lib/fingerprint.js"
+    },
+    {
+      "source": "apps/api/src/routes/accounts.ts",
+      "targetImport": "../lib/redis-pubsub.js"
+    },
+    {
+      "source": "apps/api/src/routes/accounts.ts",
+      "targetImport": "../lib/job-dispatch.js"
+    },
+    {
+      "source": "apps/api/src/routes/admin.ts",
+      "targetImport": "express"
+    },
+    {
+      "source": "apps/api/src/routes/admin.ts",
+      "targetImport": "zod"
+    },
+    {
+      "source": "apps/api/src/routes/admin.ts",
+      "targetImport": "os"
+    },
+    {
+      "source": "apps/api/src/routes/admin.ts",
+      "targetImport": "net"
+    },
+    {
+      "source": "apps/api/src/routes/admin.ts",
+      "targetImport": "../lib/prisma.js"
+    },
+    {
+      "source": "apps/api/src/routes/admin.ts",
+      "targetImport": "../lib/redis.js"
+    },
+    {
+      "source": "apps/api/src/routes/admin.ts",
+      "targetImport": "../middleware/auth.js"
+    },
+    {
+      "source": "apps/api/src/routes/admin.ts",
+      "targetImport": "../middleware/admin.js"
+    },
+    {
+      "source": "apps/api/src/routes/analytics.ts",
+      "targetImport": "express"
+    },
+    {
+      "source": "apps/api/src/routes/analytics.ts",
+      "targetImport": "../lib/prisma.js"
+    },
+    {
+      "source": "apps/api/src/routes/analytics.ts",
+      "targetImport": "../middleware/auth.js"
+    },
+    {
+      "source": "apps/api/src/routes/auth.ts",
+      "targetImport": "express"
+    },
+    {
+      "source": "apps/api/src/routes/auth.ts",
+      "targetImport": "bcrypt"
+    },
+    {
+      "source": "apps/api/src/routes/auth.ts",
+      "targetImport": "jsonwebtoken"
+    },
+    {
+      "source": "apps/api/src/routes/auth.ts",
+      "targetImport": "zod"
+    },
+    {
+      "source": "apps/api/src/routes/auth.ts",
+      "targetImport": "../lib/prisma.js"
+    },
+    {
+      "source": "apps/api/src/routes/auth.ts",
+      "targetImport": "../middleware/auth.js"
+    },
+    {
+      "source": "apps/api/src/routes/auth.ts",
+      "targetImport": "../middleware/rate-limit.js"
+    },
+    {
+      "source": "apps/api/src/routes/proxies.ts",
+      "targetImport": "express"
+    },
+    {
+      "source": "apps/api/src/routes/proxies.ts",
+      "targetImport": "zod"
+    },
+    {
+      "source": "apps/api/src/routes/proxies.ts",
+      "targetImport": "../lib/prisma.js"
+    },
+    {
+      "source": "apps/api/src/routes/proxies.ts",
+      "targetImport": "../middleware/auth.js"
+    },
+    {
+      "source": "apps/api/src/routes/proxies.ts",
+      "targetImport": "crypto"
+    },
+    {
+      "source": "apps/api/src/routes/videos.ts",
+      "targetImport": "express"
+    },
+    {
+      "source": "apps/api/src/routes/videos.ts",
+      "targetImport": "fs"
+    },
+    {
+      "source": "apps/api/src/routes/videos.ts",
+      "targetImport": "../lib/prisma.js"
+    },
+    {
+      "source": "apps/api/src/routes/videos.ts",
+      "targetImport": "../middleware/auth.js"
+    },
+    {
+      "source": "apps/api/src/routes/workspace.ts",
+      "targetImport": "express"
+    },
+    {
+      "source": "apps/api/src/routes/workspace.ts",
+      "targetImport": "multer"
+    },
+    {
+      "source": "apps/api/src/routes/workspace.ts",
+      "targetImport": "path"
+    },
+    {
+      "source": "apps/api/src/routes/workspace.ts",
+      "targetImport": "fs"
+    },
+    {
+      "source": "apps/api/src/routes/workspace.ts",
+      "targetImport": "crypto"
+    },
+    {
+      "source": "apps/api/src/routes/workspace.ts",
+      "targetImport": "zod"
+    },
+    {
+      "source": "apps/api/src/routes/workspace.ts",
+      "targetImport": "../lib/prisma.js"
+    },
+    {
+      "source": "apps/api/src/routes/workspace.ts",
+      "targetImport": "../lib/job-dispatch.js"
+    },
+    {
+      "source": "apps/api/src/routes/workspace.ts",
+      "targetImport": "../middleware/auth.js"
+    },
+    {
+      "source": "apps/api/src/routes/workspace.ts",
+      "targetImport": "../middleware/rate-limit.js"
+    },
+    {
+      "source": "apps/api/src/routes/__tests__/accounts-fingerprint.test.ts",
+      "targetImport": "vitest"
+    },
+    {
+      "source": "apps/api/src/routes/__tests__/accounts-fingerprint.test.ts",
+      "targetImport": "../../lib/fingerprint.js"
+    },
+    {
+      "source": "apps/web/src/app/account/accounts/page.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/app/account/accounts/page.tsx",
+      "targetImport": "framer-motion"
+    },
+    {
+      "source": "apps/web/src/app/account/accounts/page.tsx",
+      "targetImport": "@/components/ui/card"
+    },
+    {
+      "source": "apps/web/src/app/account/accounts/page.tsx",
+      "targetImport": "@/components/ui/button"
+    },
+    {
+      "source": "apps/web/src/app/account/accounts/page.tsx",
+      "targetImport": "@/components/ui/input"
+    },
+    {
+      "source": "apps/web/src/app/account/accounts/page.tsx",
+      "targetImport": "@/components/ui/label"
+    },
+    {
+      "source": "apps/web/src/app/account/accounts/page.tsx",
+      "targetImport": "@/components/ui/checkbox"
+    },
+    {
+      "source": "apps/web/src/app/account/accounts/page.tsx",
+      "targetImport": "@/components/ui/badge"
+    },
+    {
+      "source": "apps/web/src/app/account/accounts/page.tsx",
+      "targetImport": "@/components/ui/tabs"
+    },
+    {
+      "source": "apps/web/src/app/account/accounts/page.tsx",
+      "targetImport": "@/components/ui/textarea"
+    },
+    {
+      "source": "apps/web/src/app/account/accounts/page.tsx",
+      "targetImport": "@/components/ui/separator"
+    },
+    {
+      "source": "apps/web/src/app/account/accounts/page.tsx",
+      "targetImport": "@/components/ui/table"
+    },
+    {
+      "source": "apps/web/src/app/account/accounts/page.tsx",
+      "targetImport": "@/components/ui/avatar"
+    },
+    {
+      "source": "apps/web/src/app/account/accounts/page.tsx",
+      "targetImport": "@/components/ui/dialog"
+    },
+    {
+      "source": "apps/web/src/app/account/accounts/page.tsx",
+      "targetImport": "@/components/ui/select"
+    },
+    {
+      "source": "apps/web/src/app/account/accounts/page.tsx",
+      "targetImport": "@/components/ui/dropdown-menu"
+    },
+    {
+      "source": "apps/web/src/app/account/accounts/page.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/app/account/accounts/page.tsx",
+      "targetImport": "@/lib/api"
+    },
+    {
+      "source": "apps/web/src/app/account/accounts/page.tsx",
+      "targetImport": "sonner"
+    },
+    {
+      "source": "apps/web/src/app/account/accounts/page.tsx",
+      "targetImport": "socket.io-client"
+    },
+    {
+      "source": "apps/web/src/app/account/admin/page.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/app/account/admin/page.tsx",
+      "targetImport": "framer-motion"
+    },
+    {
+      "source": "apps/web/src/app/account/admin/page.tsx",
+      "targetImport": "@/components/ui/card"
+    },
+    {
+      "source": "apps/web/src/app/account/admin/page.tsx",
+      "targetImport": "@/components/ui/badge"
+    },
+    {
+      "source": "apps/web/src/app/account/admin/page.tsx",
+      "targetImport": "@/components/ui/button"
+    },
+    {
+      "source": "apps/web/src/app/account/admin/page.tsx",
+      "targetImport": "@/components/ui/input"
+    },
+    {
+      "source": "apps/web/src/app/account/admin/page.tsx",
+      "targetImport": "@/components/ui/table"
+    },
+    {
+      "source": "apps/web/src/app/account/admin/page.tsx",
+      "targetImport": "@/components/ui/separator"
+    },
+    {
+      "source": "apps/web/src/app/account/admin/page.tsx",
+      "targetImport": "@/components/ui/progress"
+    },
+    {
+      "source": "apps/web/src/app/account/admin/page.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/app/account/admin/page.tsx",
+      "targetImport": "@/lib/api"
+    },
+    {
+      "source": "apps/web/src/app/account/admin/page.tsx",
+      "targetImport": "sonner"
+    },
+    {
+      "source": "apps/web/src/app/account/dashboard/page.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/app/account/dashboard/page.tsx",
+      "targetImport": "framer-motion"
+    },
+    {
+      "source": "apps/web/src/app/account/dashboard/page.tsx",
+      "targetImport": "@/components/ui/card"
+    },
+    {
+      "source": "apps/web/src/app/account/dashboard/page.tsx",
+      "targetImport": "@/components/ui/badge"
+    },
+    {
+      "source": "apps/web/src/app/account/dashboard/page.tsx",
+      "targetImport": "@/components/ui/separator"
+    },
+    {
+      "source": "apps/web/src/app/account/dashboard/page.tsx",
+      "targetImport": "recharts"
+    },
+    {
+      "source": "apps/web/src/app/account/dashboard/page.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/app/account/dashboard/page.tsx",
+      "targetImport": "@/lib/api"
+    },
+    {
+      "source": "apps/web/src/app/account/dashboard/page.tsx",
+      "targetImport": "sonner"
+    },
+    {
+      "source": "apps/web/src/app/account/layout.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/app/account/layout.tsx",
+      "targetImport": "next/navigation"
+    },
+    {
+      "source": "apps/web/src/app/account/layout.tsx",
+      "targetImport": "@/lib/api"
+    },
+    {
+      "source": "apps/web/src/app/account/layout.tsx",
+      "targetImport": "@/components/ui/avatar"
+    },
+    {
+      "source": "apps/web/src/app/account/layout.tsx",
+      "targetImport": "@/components/ui/button"
+    },
+    {
+      "source": "apps/web/src/app/account/layout.tsx",
+      "targetImport": "@/components/ui/separator"
+    },
+    {
+      "source": "apps/web/src/app/account/layout.tsx",
+      "targetImport": "@/components/ui/tooltip"
+    },
+    {
+      "source": "apps/web/src/app/account/layout.tsx",
+      "targetImport": "next/link"
+    },
+    {
+      "source": "apps/web/src/app/account/layout.tsx",
+      "targetImport": "framer-motion"
+    },
+    {
+      "source": "apps/web/src/app/account/layout.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/app/account/layout.tsx",
+      "targetImport": "sonner"
+    },
+    {
+      "source": "apps/web/src/app/account/layout.tsx",
+      "targetImport": "socket.io-client"
+    },
+    {
+      "source": "apps/web/src/app/account/proxies/page.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/app/account/proxies/page.tsx",
+      "targetImport": "framer-motion"
+    },
+    {
+      "source": "apps/web/src/app/account/proxies/page.tsx",
+      "targetImport": "@/components/ui/card"
+    },
+    {
+      "source": "apps/web/src/app/account/proxies/page.tsx",
+      "targetImport": "@/components/ui/button"
+    },
+    {
+      "source": "apps/web/src/app/account/proxies/page.tsx",
+      "targetImport": "@/components/ui/input"
+    },
+    {
+      "source": "apps/web/src/app/account/proxies/page.tsx",
+      "targetImport": "@/components/ui/label"
+    },
+    {
+      "source": "apps/web/src/app/account/proxies/page.tsx",
+      "targetImport": "@/components/ui/checkbox"
+    },
+    {
+      "source": "apps/web/src/app/account/proxies/page.tsx",
+      "targetImport": "@/components/ui/badge"
+    },
+    {
+      "source": "apps/web/src/app/account/proxies/page.tsx",
+      "targetImport": "@/components/ui/tabs"
+    },
+    {
+      "source": "apps/web/src/app/account/proxies/page.tsx",
+      "targetImport": "@/components/ui/textarea"
+    },
+    {
+      "source": "apps/web/src/app/account/proxies/page.tsx",
+      "targetImport": "@/components/ui/separator"
+    },
+    {
+      "source": "apps/web/src/app/account/proxies/page.tsx",
+      "targetImport": "@/components/ui/table"
+    },
+    {
+      "source": "apps/web/src/app/account/proxies/page.tsx",
+      "targetImport": "@/components/ui/dialog"
+    },
+    {
+      "source": "apps/web/src/app/account/proxies/page.tsx",
+      "targetImport": "@/components/ui/select"
+    },
+    {
+      "source": "apps/web/src/app/account/proxies/page.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/app/account/proxies/page.tsx",
+      "targetImport": "@/lib/api"
+    },
+    {
+      "source": "apps/web/src/app/account/proxies/page.tsx",
+      "targetImport": "sonner"
+    },
+    {
+      "source": "apps/web/src/app/account/settings/page.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/app/account/settings/page.tsx",
+      "targetImport": "framer-motion"
+    },
+    {
+      "source": "apps/web/src/app/account/settings/page.tsx",
+      "targetImport": "@/components/ui/card"
+    },
+    {
+      "source": "apps/web/src/app/account/settings/page.tsx",
+      "targetImport": "@/components/ui/button"
+    },
+    {
+      "source": "apps/web/src/app/account/settings/page.tsx",
+      "targetImport": "@/components/ui/input"
+    },
+    {
+      "source": "apps/web/src/app/account/settings/page.tsx",
+      "targetImport": "@/components/ui/label"
+    },
+    {
+      "source": "apps/web/src/app/account/settings/page.tsx",
+      "targetImport": "@/components/ui/switch"
+    },
+    {
+      "source": "apps/web/src/app/account/settings/page.tsx",
+      "targetImport": "@/components/ui/separator"
+    },
+    {
+      "source": "apps/web/src/app/account/settings/page.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/app/account/settings/page.tsx",
+      "targetImport": "@/lib/api"
+    },
+    {
+      "source": "apps/web/src/app/account/settings/page.tsx",
+      "targetImport": "sonner"
+    },
+    {
+      "source": "apps/web/src/app/account/workspace/page.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/app/account/workspace/page.tsx",
+      "targetImport": "framer-motion"
+    },
+    {
+      "source": "apps/web/src/app/account/workspace/page.tsx",
+      "targetImport": "@/components/ui/card"
+    },
+    {
+      "source": "apps/web/src/app/account/workspace/page.tsx",
+      "targetImport": "@/components/ui/button"
+    },
+    {
+      "source": "apps/web/src/app/account/workspace/page.tsx",
+      "targetImport": "@/components/ui/input"
+    },
+    {
+      "source": "apps/web/src/app/account/workspace/page.tsx",
+      "targetImport": "@/components/ui/label"
+    },
+    {
+      "source": "apps/web/src/app/account/workspace/page.tsx",
+      "targetImport": "@/components/ui/checkbox"
+    },
+    {
+      "source": "apps/web/src/app/account/workspace/page.tsx",
+      "targetImport": "@/components/ui/badge"
+    },
+    {
+      "source": "apps/web/src/app/account/workspace/page.tsx",
+      "targetImport": "@/components/ui/tabs"
+    },
+    {
+      "source": "apps/web/src/app/account/workspace/page.tsx",
+      "targetImport": "@/components/ui/textarea"
+    },
+    {
+      "source": "apps/web/src/app/account/workspace/page.tsx",
+      "targetImport": "@/components/ui/select"
+    },
+    {
+      "source": "apps/web/src/app/account/workspace/page.tsx",
+      "targetImport": "@/components/ui/separator"
+    },
+    {
+      "source": "apps/web/src/app/account/workspace/page.tsx",
+      "targetImport": "@/components/ui/alert"
+    },
+    {
+      "source": "apps/web/src/app/account/workspace/page.tsx",
+      "targetImport": "@/components/ui/live-terminal"
+    },
+    {
+      "source": "apps/web/src/app/account/workspace/page.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/app/account/workspace/page.tsx",
+      "targetImport": "@/lib/api"
+    },
+    {
+      "source": "apps/web/src/app/account/workspace/page.tsx",
+      "targetImport": "sonner"
+    },
+    {
+      "source": "apps/web/src/app/auth/forgot-password/page.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/app/auth/forgot-password/page.tsx",
+      "targetImport": "framer-motion"
+    },
+    {
+      "source": "apps/web/src/app/auth/forgot-password/page.tsx",
+      "targetImport": "@/components/ui/card"
+    },
+    {
+      "source": "apps/web/src/app/auth/forgot-password/page.tsx",
+      "targetImport": "@/components/ui/button"
+    },
+    {
+      "source": "apps/web/src/app/auth/forgot-password/page.tsx",
+      "targetImport": "@/components/ui/input"
+    },
+    {
+      "source": "apps/web/src/app/auth/forgot-password/page.tsx",
+      "targetImport": "@/components/ui/label"
+    },
+    {
+      "source": "apps/web/src/app/auth/forgot-password/page.tsx",
+      "targetImport": "@/components/ui/alert"
+    },
+    {
+      "source": "apps/web/src/app/auth/forgot-password/page.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/app/auth/forgot-password/page.tsx",
+      "targetImport": "next/link"
+    },
+    {
+      "source": "apps/web/src/app/auth/reset-password/page.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/app/auth/reset-password/page.tsx",
+      "targetImport": "framer-motion"
+    },
+    {
+      "source": "apps/web/src/app/auth/reset-password/page.tsx",
+      "targetImport": "@/components/ui/button"
+    },
+    {
+      "source": "apps/web/src/app/auth/reset-password/page.tsx",
+      "targetImport": "@/components/ui/input"
+    },
+    {
+      "source": "apps/web/src/app/auth/reset-password/page.tsx",
+      "targetImport": "@/components/ui/label"
+    },
+    {
+      "source": "apps/web/src/app/auth/reset-password/page.tsx",
+      "targetImport": "next/navigation"
+    },
+    {
+      "source": "apps/web/src/app/auth/sign-in/page.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/app/auth/sign-in/page.tsx",
+      "targetImport": "framer-motion"
+    },
+    {
+      "source": "apps/web/src/app/auth/sign-in/page.tsx",
+      "targetImport": "@/components/ui/card"
+    },
+    {
+      "source": "apps/web/src/app/auth/sign-in/page.tsx",
+      "targetImport": "@/components/ui/button"
+    },
+    {
+      "source": "apps/web/src/app/auth/sign-in/page.tsx",
+      "targetImport": "@/components/ui/input"
+    },
+    {
+      "source": "apps/web/src/app/auth/sign-in/page.tsx",
+      "targetImport": "@/components/ui/label"
+    },
+    {
+      "source": "apps/web/src/app/auth/sign-in/page.tsx",
+      "targetImport": "@/components/ui/checkbox"
+    },
+    {
+      "source": "apps/web/src/app/auth/sign-in/page.tsx",
+      "targetImport": "@/components/ui/alert"
+    },
+    {
+      "source": "apps/web/src/app/auth/sign-in/page.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/app/auth/sign-in/page.tsx",
+      "targetImport": "next/navigation"
+    },
+    {
+      "source": "apps/web/src/app/auth/sign-in/page.tsx",
+      "targetImport": "next/link"
+    },
+    {
+      "source": "apps/web/src/app/auth/sign-in/page.tsx",
+      "targetImport": "@/lib/api"
+    },
+    {
+      "source": "apps/web/src/app/auth/sign-up/page.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/app/auth/sign-up/page.tsx",
+      "targetImport": "framer-motion"
+    },
+    {
+      "source": "apps/web/src/app/auth/sign-up/page.tsx",
+      "targetImport": "@/components/ui/card"
+    },
+    {
+      "source": "apps/web/src/app/auth/sign-up/page.tsx",
+      "targetImport": "@/components/ui/button"
+    },
+    {
+      "source": "apps/web/src/app/auth/sign-up/page.tsx",
+      "targetImport": "@/components/ui/input"
+    },
+    {
+      "source": "apps/web/src/app/auth/sign-up/page.tsx",
+      "targetImport": "@/components/ui/label"
+    },
+    {
+      "source": "apps/web/src/app/auth/sign-up/page.tsx",
+      "targetImport": "@/components/ui/alert"
+    },
+    {
+      "source": "apps/web/src/app/auth/sign-up/page.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/app/auth/sign-up/page.tsx",
+      "targetImport": "next/navigation"
+    },
+    {
+      "source": "apps/web/src/app/auth/sign-up/page.tsx",
+      "targetImport": "next/link"
+    },
+    {
+      "source": "apps/web/src/app/auth/sign-up/page.tsx",
+      "targetImport": "@/lib/api"
+    },
+    {
+      "source": "apps/web/src/app/layout.tsx",
+      "targetImport": "next"
+    },
+    {
+      "source": "apps/web/src/app/layout.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/app/layout.tsx",
+      "targetImport": "@/components/ui/tooltip"
+    },
+    {
+      "source": "apps/web/src/app/layout.tsx",
+      "targetImport": "@/components/ui/sonner"
+    },
+    {
+      "source": "apps/web/src/app/not-found.tsx",
+      "targetImport": "@/components/ui/empty-state"
+    },
+    {
+      "source": "apps/web/src/app/not-found.tsx",
+      "targetImport": "@/components/ui/button"
+    },
+    {
+      "source": "apps/web/src/app/not-found.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/app/not-found.tsx",
+      "targetImport": "next/link"
+    },
+    {
+      "source": "apps/web/src/app/page.tsx",
+      "targetImport": "next/link"
+    },
+    {
+      "source": "apps/web/src/app/page.tsx",
+      "targetImport": "next/image"
+    },
+    {
+      "source": "apps/web/src/app/page.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/components/layout/Header.tsx",
+      "targetImport": "next/link"
+    },
+    {
+      "source": "apps/web/src/components/layout/Header.tsx",
+      "targetImport": "next/navigation"
+    },
+    {
+      "source": "apps/web/src/components/layout/Header.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/components/layout/Header.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/layout/Header.tsx",
+      "targetImport": "@/lib/api"
+    },
+    {
+      "source": "apps/web/src/components/layout/Header.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/layout/Sidebar.tsx",
+      "targetImport": "next/link"
+    },
+    {
+      "source": "apps/web/src/components/layout/Sidebar.tsx",
+      "targetImport": "next/navigation"
+    },
+    {
+      "source": "apps/web/src/components/layout/Sidebar.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/components/layout/Sidebar.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/alert.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/alert.tsx",
+      "targetImport": "class-variance-authority"
+    },
+    {
+      "source": "apps/web/src/components/ui/alert.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/avatar.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/avatar.tsx",
+      "targetImport": "@base-ui/react/avatar"
+    },
+    {
+      "source": "apps/web/src/components/ui/avatar.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/badge.tsx",
+      "targetImport": "@base-ui/react/merge-props"
+    },
+    {
+      "source": "apps/web/src/components/ui/badge.tsx",
+      "targetImport": "@base-ui/react/use-render"
+    },
+    {
+      "source": "apps/web/src/components/ui/badge.tsx",
+      "targetImport": "class-variance-authority"
+    },
+    {
+      "source": "apps/web/src/components/ui/badge.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/button.tsx",
+      "targetImport": "@base-ui/react/button"
+    },
+    {
+      "source": "apps/web/src/components/ui/button.tsx",
+      "targetImport": "class-variance-authority"
+    },
+    {
+      "source": "apps/web/src/components/ui/button.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/card.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/card.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/checkbox.tsx",
+      "targetImport": "@base-ui/react/checkbox"
+    },
+    {
+      "source": "apps/web/src/components/ui/checkbox.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/checkbox.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/components/ui/datatable.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/datatable.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/dialog.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/dialog.tsx",
+      "targetImport": "@base-ui/react/dialog"
+    },
+    {
+      "source": "apps/web/src/components/ui/dialog.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/dialog.tsx",
+      "targetImport": "@/components/ui/button"
+    },
+    {
+      "source": "apps/web/src/components/ui/dialog.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/components/ui/drawer.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/drawer.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/components/ui/drawer.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/drop-zone.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/drop-zone.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/drop-zone.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/components/ui/dropdown-menu.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/dropdown-menu.tsx",
+      "targetImport": "@base-ui/react/menu"
+    },
+    {
+      "source": "apps/web/src/components/ui/dropdown-menu.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/dropdown-menu.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/components/ui/dropzone.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/dropzone.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/components/ui/dropzone.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/empty-state.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/empty-state.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/emptystate.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/emptystate.tsx",
+      "targetImport": "./button"
+    },
+    {
+      "source": "apps/web/src/components/ui/input.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/input.tsx",
+      "targetImport": "@base-ui/react/input"
+    },
+    {
+      "source": "apps/web/src/components/ui/input.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/label.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/label.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/live-terminal.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/live-terminal.tsx",
+      "targetImport": "framer-motion"
+    },
+    {
+      "source": "apps/web/src/components/ui/live-terminal.tsx",
+      "targetImport": "@/lib/socket"
+    },
+    {
+      "source": "apps/web/src/components/ui/live-terminal.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/components/ui/live-terminal.tsx",
+      "targetImport": "@/components/ui/button"
+    },
+    {
+      "source": "apps/web/src/components/ui/modal.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/modal.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/components/ui/modal.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/modal.tsx",
+      "targetImport": "./button"
+    },
+    {
+      "source": "apps/web/src/components/ui/popover.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/popover.tsx",
+      "targetImport": "@base-ui/react/popover"
+    },
+    {
+      "source": "apps/web/src/components/ui/popover.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/progress-bar.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/progress-bar.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/progress.tsx",
+      "targetImport": "@base-ui/react/progress"
+    },
+    {
+      "source": "apps/web/src/components/ui/progress.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/scroll-area.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/scroll-area.tsx",
+      "targetImport": "@base-ui/react/scroll-area"
+    },
+    {
+      "source": "apps/web/src/components/ui/scroll-area.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/segmented-control.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/segmented-control.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/segmented-control.tsx",
+      "targetImport": "framer-motion"
+    },
+    {
+      "source": "apps/web/src/components/ui/select.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/select.tsx",
+      "targetImport": "@base-ui/react/select"
+    },
+    {
+      "source": "apps/web/src/components/ui/select.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/select.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/components/ui/separator.tsx",
+      "targetImport": "@base-ui/react/separator"
+    },
+    {
+      "source": "apps/web/src/components/ui/separator.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/sheet.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/sheet.tsx",
+      "targetImport": "@base-ui/react/dialog"
+    },
+    {
+      "source": "apps/web/src/components/ui/sheet.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/sheet.tsx",
+      "targetImport": "@/components/ui/button"
+    },
+    {
+      "source": "apps/web/src/components/ui/sheet.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/components/ui/skeleton.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/slider.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/slider.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/sonner.tsx",
+      "targetImport": "next-themes"
+    },
+    {
+      "source": "apps/web/src/components/ui/sonner.tsx",
+      "targetImport": "sonner"
+    },
+    {
+      "source": "apps/web/src/components/ui/sonner.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/components/ui/stat-card.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/stat-card.tsx",
+      "targetImport": "./card"
+    },
+    {
+      "source": "apps/web/src/components/ui/stat-card.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/components/ui/stepper.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/stepper.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/stepper.tsx",
+      "targetImport": "lucide-react"
+    },
+    {
+      "source": "apps/web/src/components/ui/switch.tsx",
+      "targetImport": "@base-ui/react/switch"
+    },
+    {
+      "source": "apps/web/src/components/ui/switch.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/table.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/table.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/tabs.tsx",
+      "targetImport": "@base-ui/react/tabs"
+    },
+    {
+      "source": "apps/web/src/components/ui/tabs.tsx",
+      "targetImport": "class-variance-authority"
+    },
+    {
+      "source": "apps/web/src/components/ui/tabs.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/terminal.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/terminal.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/textarea.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/textarea.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/toggle.tsx",
+      "targetImport": "react"
+    },
+    {
+      "source": "apps/web/src/components/ui/toggle.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/tooltip.tsx",
+      "targetImport": "@base-ui/react/tooltip"
+    },
+    {
+      "source": "apps/web/src/components/ui/tooltip.tsx",
+      "targetImport": "@/lib/utils"
+    },
+    {
+      "source": "apps/web/src/components/ui/__tests__/Card.test.tsx",
+      "targetImport": "@testing-library/react"
+    },
+    {
+      "source": "apps/web/src/components/ui/__tests__/Card.test.tsx",
+      "targetImport": "vitest"
+    },
+    {
+      "source": "apps/web/src/components/ui/__tests__/Card.test.tsx",
+      "targetImport": "../card"
+    },
+    {
+      "source": "apps/web/src/lib/socket.ts",
+      "targetImport": "socket.io-client"
+    },
+    {
+      "source": "apps/web/src/lib/utils.ts",
+      "targetImport": "clsx"
+    },
+    {
+      "source": "apps/web/src/lib/utils.ts",
+      "targetImport": "tailwind-merge"
+    },
+    {
+      "source": "apps/web/src/middleware.ts",
+      "targetImport": "next/server"
+    },
+    {
+      "source": "apps/worker/src/core/auth/cookie-store.ts",
+      "targetImport": "crypto"
+    },
+    {
+      "source": "apps/worker/src/core/auth/cookie-store.ts",
+      "targetImport": "fs/promises"
+    },
+    {
+      "source": "apps/worker/src/core/auth/cookie-store.ts",
+      "targetImport": "path"
+    },
+    {
+      "source": "apps/worker/src/core/auth/cookie-store.ts",
+      "targetImport": "../../lib/prisma.js"
+    },
+    {
+      "source": "apps/worker/src/core/auth/session-validator.ts",
+      "targetImport": "../tls/curl-impersonate-client.js"
+    },
+    {
+      "source": "apps/worker/src/core/auth/session-validator.ts",
+      "targetImport": "./cookie-store.js"
+    },
+    {
+      "source": "apps/worker/src/core/browser/fingerprint-manager.ts",
+      "targetImport": "node:crypto"
+    },
+    {
+      "source": "apps/worker/src/core/browser/fingerprint-manager.ts",
+      "targetImport": "node:child_process"
+    },
+    {
+      "source": "apps/worker/src/core/browser/fingerprint-manager.ts",
+      "targetImport": "patchright"
+    },
+    {
+      "source": "apps/worker/src/core/browser/patchright-launcher.ts",
+      "targetImport": "patchright"
+    },
+    {
+      "source": "apps/worker/src/core/browser/patchright-launcher.ts",
+      "targetImport": "patchright"
+    },
+    {
+      "source": "apps/worker/src/core/browser/patchright-launcher.ts",
+      "targetImport": "../auth/cookie-store.js"
+    },
+    {
+      "source": "apps/worker/src/core/browser/patchright-launcher.ts",
+      "targetImport": "./fingerprint-manager.js"
+    },
+    {
+      "source": "apps/worker/src/core/browser/patchright-launcher.ts",
+      "targetImport": "../../lib/prisma.js"
+    },
+    {
+      "source": "apps/worker/src/core/browser/patchright-launcher.ts",
+      "targetImport": "crypto"
+    },
+    {
+      "source": "apps/worker/src/core/browser/__tests__/fingerprint-manager.test.ts",
+      "targetImport": "vitest"
+    },
+    {
+      "source": "apps/worker/src/core/browser/__tests__/fingerprint-manager.test.ts",
+      "targetImport": "../fingerprint-manager.js"
+    },
+    {
+      "source": "apps/worker/src/core/captcha/tiktok-captcha-handler.ts",
+      "targetImport": "patchright"
+    },
+    {
+      "source": "apps/worker/src/core/captcha/tiktok-captcha-handler.ts",
+      "targetImport": "./capsolver-client.js"
+    },
+    {
+      "source": "apps/worker/src/core/humanity/biomouse.ts",
+      "targetImport": "ghost-cursor"
+    },
+    {
+      "source": "apps/worker/src/core/humanity/biomouse.ts",
+      "targetImport": "patchright"
+    },
+    {
+      "source": "apps/worker/src/core/humanity/typing-emulator.ts",
+      "targetImport": "patchright"
+    },
+    {
+      "source": "apps/worker/src/core/proxy/carrier-validator.ts",
+      "targetImport": "child_process"
+    },
+    {
+      "source": "apps/worker/src/core/proxy/carrier-validator.ts",
+      "targetImport": "util"
+    },
+    {
+      "source": "apps/worker/src/core/proxy/carrier-validator.ts",
+      "targetImport": "../tls/curl-impersonate-client.js"
+    },
+    {
+      "source": "apps/worker/src/core/proxy/lte-rotation.ts",
+      "targetImport": "../tls/curl-impersonate-client.js"
+    },
+    {
+      "source": "apps/worker/src/core/proxy/lte-rotation.ts",
+      "targetImport": "../../lib/proxy-utils.js"
+    },
+    {
+      "source": "apps/worker/src/core/proxy/rotation-client.ts",
+      "targetImport": "crypto"
+    },
+    {
+      "source": "apps/worker/src/core/tls/curl-impersonate-client.ts",
+      "targetImport": "child_process"
+    },
+    {
+      "source": "apps/worker/src/core/tls/curl-impersonate-client.ts",
+      "targetImport": "util"
+    },
+    {
+      "source": "apps/worker/src/core/video/inspector.ts",
+      "targetImport": "child_process"
+    },
+    {
+      "source": "apps/worker/src/core/video/inspector.ts",
+      "targetImport": "util"
+    },
+    {
+      "source": "apps/worker/src/core/video/uniquifier.ts",
+      "targetImport": "child_process"
+    },
+    {
+      "source": "apps/worker/src/core/video/uniquifier.ts",
+      "targetImport": "util"
+    },
+    {
+      "source": "apps/worker/src/core/video/uniquifier.ts",
+      "targetImport": "crypto"
+    },
+    {
+      "source": "apps/worker/src/core/video/uniquifier.ts",
+      "targetImport": "path"
+    },
+    {
+      "source": "apps/worker/src/core/video/uniquifier.ts",
+      "targetImport": "fs/promises"
+    },
+    {
+      "source": "apps/worker/src/handlers/analytics.ts",
+      "targetImport": "bullmq"
+    },
+    {
+      "source": "apps/worker/src/handlers/analytics.ts",
+      "targetImport": "../core/tls/curl-impersonate-client.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/analytics.ts",
+      "targetImport": "../core/auth/cookie-store.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/analytics.ts",
+      "targetImport": "../lib/socket-logger.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/analytics.ts",
+      "targetImport": "../lib/error-classifier.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/analytics.ts",
+      "targetImport": "../lib/account-context.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/analytics.ts",
+      "targetImport": "../lib/prisma.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/analytics.ts",
+      "targetImport": "../core/browser/fingerprint-manager.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/cleanup.ts",
+      "targetImport": "bullmq"
+    },
+    {
+      "source": "apps/worker/src/handlers/cleanup.ts",
+      "targetImport": "../lib/socket-logger.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/cleanup.ts",
+      "targetImport": "../lib/error-classifier.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/cleanup.ts",
+      "targetImport": "../lib/prisma.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/cleanup.ts",
+      "targetImport": "fs"
+    },
+    {
+      "source": "apps/worker/src/handlers/cleanup.ts",
+      "targetImport": "path"
+    },
+    {
+      "source": "apps/worker/src/handlers/cookies.ts",
+      "targetImport": "bullmq"
+    },
+    {
+      "source": "apps/worker/src/handlers/cookies.ts",
+      "targetImport": "../core/browser/patchright-launcher.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/cookies.ts",
+      "targetImport": "../core/auth/cookie-store.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/cookies.ts",
+      "targetImport": "../lib/socket-logger.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/cookies.ts",
+      "targetImport": "../lib/error-classifier.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/cookies.ts",
+      "targetImport": "../lib/account-context.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/cookies.ts",
+      "targetImport": "../lib/prisma.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/cookies.ts",
+      "targetImport": "patchright"
+    },
+    {
+      "source": "apps/worker/src/handlers/edit-profile.ts",
+      "targetImport": "bullmq"
+    },
+    {
+      "source": "apps/worker/src/handlers/edit-profile.ts",
+      "targetImport": "../core/browser/patchright-launcher.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/edit-profile.ts",
+      "targetImport": "../core/humanity/biomouse.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/edit-profile.ts",
+      "targetImport": "../core/humanity/typing-emulator.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/edit-profile.ts",
+      "targetImport": "../core/auth/cookie-store.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/edit-profile.ts",
+      "targetImport": "../lib/socket-logger.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/edit-profile.ts",
+      "targetImport": "../lib/error-classifier.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/edit-profile.ts",
+      "targetImport": "../lib/account-context.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/edit-profile.ts",
+      "targetImport": "patchright"
+    },
+    {
+      "source": "apps/worker/src/handlers/edit-profile.ts",
+      "targetImport": "fs"
+    },
+    {
+      "source": "apps/worker/src/handlers/edit-profile.ts",
+      "targetImport": "fs/promises"
+    },
+    {
+      "source": "apps/worker/src/handlers/edit-profile.ts",
+      "targetImport": "path"
+    },
+    {
+      "source": "apps/worker/src/handlers/edit-profile.ts",
+      "targetImport": "os"
+    },
+    {
+      "source": "apps/worker/src/handlers/edit-profile.ts",
+      "targetImport": "https"
+    },
+    {
+      "source": "apps/worker/src/handlers/edit-profile.ts",
+      "targetImport": "http"
+    },
+    {
+      "source": "apps/worker/src/handlers/index.ts",
+      "targetImport": "./upload.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/index.ts",
+      "targetImport": "./warmup.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/index.ts",
+      "targetImport": "./cookies.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/index.ts",
+      "targetImport": "./analytics.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/index.ts",
+      "targetImport": "./edit-profile.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/index.ts",
+      "targetImport": "./cleanup.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/index.ts",
+      "targetImport": "./shadowban-detector.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/index.ts",
+      "targetImport": "./login.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/login.ts",
+      "targetImport": "bullmq"
+    },
+    {
+      "source": "apps/worker/src/handlers/login.ts",
+      "targetImport": "../core/browser/patchright-launcher.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/login.ts",
+      "targetImport": "../core/humanity/biomouse.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/login.ts",
+      "targetImport": "../core/humanity/typing-emulator.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/login.ts",
+      "targetImport": "../core/captcha/tiktok-captcha-handler.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/login.ts",
+      "targetImport": "../core/auth/cookie-store.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/login.ts",
+      "targetImport": "../core/auth/session-validator.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/login.ts",
+      "targetImport": "../lib/redis-pubsub.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/login.ts",
+      "targetImport": "../lib/socket-logger.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/login.ts",
+      "targetImport": "../lib/prisma.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/login.ts",
+      "targetImport": "../lib/account-context.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/login.ts",
+      "targetImport": "crypto"
+    },
+    {
+      "source": "apps/worker/src/handlers/login.ts",
+      "targetImport": "patchright"
+    },
+    {
+      "source": "apps/worker/src/handlers/shadowban-detector.ts",
+      "targetImport": "bullmq"
+    },
+    {
+      "source": "apps/worker/src/handlers/shadowban-detector.ts",
+      "targetImport": "../lib/prisma.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/shadowban-detector.ts",
+      "targetImport": "../lib/bullmq.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/shadowban-detector.ts",
+      "targetImport": "../lib/socket-logger.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/shadowban-detector.ts",
+      "targetImport": "../lib/error-classifier.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/upload.ts",
+      "targetImport": "bullmq"
+    },
+    {
+      "source": "apps/worker/src/handlers/upload.ts",
+      "targetImport": "../core/browser/patchright-launcher.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/upload.ts",
+      "targetImport": "../core/auth/session-validator.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/upload.ts",
+      "targetImport": "../core/auth/cookie-store.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/upload.ts",
+      "targetImport": "../core/video/uniquifier.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/upload.ts",
+      "targetImport": "../core/humanity/biomouse.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/upload.ts",
+      "targetImport": "../core/humanity/typing-emulator.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/upload.ts",
+      "targetImport": "../lib/socket-logger.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/upload.ts",
+      "targetImport": "../lib/error-classifier.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/upload.ts",
+      "targetImport": "../lib/account-context.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/upload.ts",
+      "targetImport": "../lib/prisma.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/upload.ts",
+      "targetImport": "patchright"
+    },
+    {
+      "source": "apps/worker/src/handlers/upload.ts",
+      "targetImport": "fs"
+    },
+    {
+      "source": "apps/worker/src/handlers/warmup.ts",
+      "targetImport": "bullmq"
+    },
+    {
+      "source": "apps/worker/src/handlers/warmup.ts",
+      "targetImport": "../core/browser/patchright-launcher.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/warmup.ts",
+      "targetImport": "../core/auth/cookie-store.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/warmup.ts",
+      "targetImport": "../core/humanity/biomouse.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/warmup.ts",
+      "targetImport": "../core/humanity/typing-emulator.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/warmup.ts",
+      "targetImport": "../lib/socket-logger.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/warmup.ts",
+      "targetImport": "../lib/error-classifier.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/warmup.ts",
+      "targetImport": "../lib/prisma.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/warmup.ts",
+      "targetImport": "../lib/account-context.js"
+    },
+    {
+      "source": "apps/worker/src/handlers/warmup.ts",
+      "targetImport": "patchright"
+    },
+    {
+      "source": "apps/worker/src/handlers/warmup.ts",
+      "targetImport": "ghost-cursor"
+    },
+    {
+      "source": "apps/worker/src/handlers/__tests__/warmup.test.ts",
+      "targetImport": "vitest"
+    },
+    {
+      "source": "apps/worker/src/handlers/__tests__/warmup.test.ts",
+      "targetImport": "fs"
+    },
+    {
+      "source": "apps/worker/src/handlers/__tests__/warmup.test.ts",
+      "targetImport": "path"
+    },
+    {
+      "source": "apps/worker/src/handlers/__tests__/warmup.test.ts",
+      "targetImport": "../lib/prisma.js"
+    },
+    {
+      "source": "apps/worker/src/index.ts",
+      "targetImport": "bullmq"
+    },
+    {
+      "source": "apps/worker/src/index.ts",
+      "targetImport": "ioredis"
+    },
+    {
+      "source": "apps/worker/src/index.ts",
+      "targetImport": "./handlers/index.js"
+    },
+    {
+      "source": "apps/worker/src/lib/account-context.ts",
+      "targetImport": "./prisma.js"
+    },
+    {
+      "source": "apps/worker/src/lib/account-context.ts",
+      "targetImport": "../core/browser/fingerprint-manager.js"
+    },
+    {
+      "source": "apps/worker/src/lib/account-context.ts",
+      "targetImport": "./proxy-utils.js"
+    },
+    {
+      "source": "apps/worker/src/lib/bullmq.ts",
+      "targetImport": "bullmq"
+    },
+    {
+      "source": "apps/worker/src/lib/error-classifier.ts",
+      "targetImport": "./socket-logger.js"
+    },
+    {
+      "source": "apps/worker/src/lib/prisma.ts",
+      "targetImport": "@prisma/client"
+    },
+    {
+      "source": "apps/worker/src/lib/redis-pubsub.ts",
+      "targetImport": "ioredis"
+    },
+    {
+      "source": "apps/worker/src/lib/socket-logger.ts",
+      "targetImport": "socket.io-client"
+    },
+    {
+      "source": "apps/worker/src/lib/__tests__/account-context.test.ts",
+      "targetImport": "vitest"
+    },
+    {
+      "source": "apps/worker/src/lib/__tests__/account-context.test.ts",
+      "targetImport": "vitest-mock-extended"
+    },
+    {
+      "source": "apps/worker/src/lib/__tests__/account-context.test.ts",
+      "targetImport": "@prisma/client"
+    },
+    {
+      "source": "apps/worker/src/lib/__tests__/account-context.test.ts",
+      "targetImport": "../account-context.js"
+    },
+    {
+      "source": "apps/worker/src/lib/__tests__/proxy-utils.test.ts",
+      "targetImport": "vitest"
+    },
+    {
+      "source": "apps/worker/src/lib/__tests__/proxy-utils.test.ts",
+      "targetImport": "../proxy-utils.js"
+    },
+    {
+      "source": "apps/worker/src/plugins/index.ts",
+      "targetImport": "./base-plugin.js"
+    },
+    {
+      "source": "apps/worker/src/plugins/index.ts",
+      "targetImport": "./ffmpeg-uniqualize/index.js"
+    },
+    {
+      "source": "apps/worker/src/types/undetected-chromedriver-js.d.ts",
+      "targetImport": "selenium-webdriver"
+    },
+    {
+      "source": "apps/worker/src/__tests__/capsolver-client.test.ts",
+      "targetImport": "vitest"
+    },
+    {
+      "source": "apps/worker/src/__tests__/fingerprint-manager.test.ts",
+      "targetImport": "vitest"
+    },
+    {
+      "source": "apps/worker/src/__tests__/fingerprint-mobile.test.ts",
+      "targetImport": "vitest"
+    },
+    {
+      "source": "apps/worker/src/__tests__/fingerprint-mobile.test.ts",
+      "targetImport": "../core/browser/fingerprint-manager.js"
+    },
+    {
+      "source": "apps/worker/src/__tests__/infrastructure.test.ts",
+      "targetImport": "vitest"
+    },
+    {
+      "source": "apps/worker/src/__tests__/infrastructure.test.ts",
+      "targetImport": "fs"
+    },
+    {
+      "source": "apps/worker/src/__tests__/infrastructure.test.ts",
+      "targetImport": "path"
+    },
+    {
+      "source": "apps/worker/src/__tests__/shadowban-detector.test.ts",
+      "targetImport": "vitest"
+    },
+    {
+      "source": "apps/worker/src/__tests__/shadowban-detector.test.ts",
+      "targetImport": "vitest-mock-extended"
+    },
+    {
+      "source": "apps/worker/src/__tests__/shadowban-detector.test.ts",
+      "targetImport": "@prisma/client"
+    },
+    {
+      "source": "apps/worker/src/__tests__/video-inspector.test.ts",
+      "targetImport": "vitest"
+    },
+    {
+      "source": "apps/worker/src/__tests__/video-inspector.test.ts",
+      "targetImport": "../core/video/inspector.js"
+    },
+    {
+      "source": "ops/vps_infrastructure",
+      "target": "docker-compose.yml",
+      "relation": "deploys"
+    },
+    {
+      "source": "ops/vps_infrastructure",
+      "target": "apps/worker/src/index.ts",
+      "relation": "runs"
+    },
+    {
+      "source": "ops/vps_infrastructure",
+      "target": "apps/api/src/index.ts",
+      "relation": "runs"
+    },
+    {
+      "source": "ops/account_operations",
+      "target": "apps/worker/src/handlers/login.ts",
+      "relation": "operates"
+    },
+    {
+      "source": "ops/account_operations",
+      "target": "apps/worker/src/core/auth/cookie-store.ts",
+      "relation": "uses"
+    },
+    {
+      "source": "ops/account_operations",
+      "target": "apps/worker/src/core/auth/session-validator.ts",
+      "relation": "uses"
+    },
+    {
+      "source": "ops/account_operations",
+      "target": "apps/worker/src/core/captcha/tiktok-captcha-handler.ts",
+      "relation": "uses"
+    },
+    {
+      "source": "ops/account_operations",
+      "target": "apps/worker/src/core/browser/patchright-launcher.ts",
+      "relation": "uses"
+    },
+    {
+      "source": "ops/debugging_playbook",
+      "target": "ops/vps_infrastructure",
+      "relation": "references"
+    },
+    {
+      "source": "ops/debugging_playbook",
+      "target": "ops/account_operations",
+      "relation": "references"
+    },
+    {
+      "source": "ops/debugging_playbook",
+      "target": "apps/worker/src/handlers/login.ts",
+      "relation": "debugs"
+    }
+  ]
+}
