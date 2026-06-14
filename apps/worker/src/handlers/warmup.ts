@@ -507,8 +507,13 @@ async function _passiveWatching(
     await page.waitForTimeout(watchTime);
 
     // Random mouse idle movement (humans move mouse while watching)
-    if (Math.random() < 0.4) {
+    if (Math.random() < 0.6) {
       await humanIdleMove(page, cursor);
+    }
+    // Occasional micro-scroll while watching (reading comments, checking description)
+    if (Math.random() < 0.25) {
+      await humanScroll(page, _randomDelay(80, 200));
+      await page.waitForTimeout(_randomDelay(500, 1500));
     }
 
     // Very occasional like (1-2 per session max)
@@ -530,11 +535,16 @@ async function _passiveWatching(
     }
 
     // Navigate to next video (ArrowDown for YouTube Shorts, goBack for regular)
+    // Human-like: move mouse before navigating
+    await humanIdleMove(page, cursor);
     if (data.platform === 'YOUTUBE') {
       const url = page.url();
       if (url.includes('/shorts/')) {
+        await page.waitForTimeout(_randomDelay(200, 500));
         await page.keyboard.press('ArrowDown');
       } else {
+        // Humans often scroll up slightly before going back
+        if (Math.random() < 0.3) await humanScroll(page, _randomDelay(50, 150), 'up');
         await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
       }
     } else {
@@ -653,17 +663,25 @@ async function _lightEngagement(
       } catch { /* skip */ }
     }
 
-    // Random idle move
-    if (Math.random() < 0.3) {
+    // Random idle move + micro-scroll (human watching behavior)
+    if (Math.random() < 0.5) {
       await humanIdleMove(page, cursor);
+    }
+    if (Math.random() < 0.2) {
+      await humanScroll(page, _randomDelay(80, 200));
+      await page.waitForTimeout(_randomDelay(400, 1000));
     }
 
     // Scroll to next (ArrowDown for YouTube Shorts, goBack for regular, scroll for TikTok)
+    // Human-like: move mouse before navigating
+    await humanIdleMove(page, cursor);
     if (data.platform === 'YOUTUBE') {
       const url = page.url();
       if (url.includes('/shorts/')) {
+        await page.waitForTimeout(_randomDelay(200, 500));
         await page.keyboard.press('ArrowDown');
       } else {
+        if (Math.random() < 0.3) await humanScroll(page, _randomDelay(50, 150), 'up');
         await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
       }
     } else {
@@ -808,19 +826,27 @@ async function _activeEngagement(
       }
     }
 
-    // Random idle move
-    if (Math.random() < 0.3) {
+    // Random idle move + micro-scroll (human watching behavior)
+    if (Math.random() < 0.5) {
       await humanIdleMove(page, cursor);
+    }
+    if (Math.random() < 0.2) {
+      await humanScroll(page, _randomDelay(80, 200));
+      await page.waitForTimeout(_randomDelay(400, 1000));
     }
 
     // Navigate to next video: depends on video type
+    // Human-like: move mouse before navigating
+    await humanIdleMove(page, cursor);
     if (isYT) {
       const url = page.url();
       if (url.includes('/shorts/')) {
         // YouTube Shorts: ArrowDown scrolls to next Short
+        await page.waitForTimeout(_randomDelay(200, 500));
         await page.keyboard.press('ArrowDown');
       } else {
-        // Regular YouTube video: go back to search results to pick next
+        // Regular YouTube video: scroll up slightly then go back
+        if (Math.random() < 0.3) await humanScroll(page, _randomDelay(50, 150), 'up');
         await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
       }
       await page.waitForTimeout(_randomDelay(1500, 3000));
