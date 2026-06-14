@@ -37,6 +37,8 @@ interface WarmupJobData {
   warmupDay?: number;
   /** Hashtags to use for warmup (e.g. ['dota2', 'gaming']) */
   hashtags?: string[];
+  /** Which session within the current day (0-based). Used for multi-session scheduling. */
+  sessionInDay?: number;
 }
 
 /** Inline context shim passed to phase helpers (replaces WarmupJobData). */
@@ -162,8 +164,13 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
       warmupDay = Math.min((acc.lastWarmupDay ?? 0) + 1, totalDays);
     }
 
+    // Track which session we're in within this warmup day
+    const sessionInDay = data.sessionInDay ?? 0;
+    // Each day has 2-4 sessions (deterministic per account for consistency)
+    const sessionsPerDay = 2 + (parseInt(data.accountId.slice(-2), 16) % 3); // 2, 3, or 4
+
     logger.info(
-      `🔥 Прогрев аккаунта — День ${warmupDay}/${totalDays} (${ctxAcc.platform})`,
+      `🔥 Прогрев аккаунта — День ${warmupDay}/${totalDays}, сессия ${sessionInDay + 1}/${sessionsPerDay} (${ctxAcc.platform})`,
     );
 
     const ctx = await launchStealthContext({
@@ -223,39 +230,70 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
       await _activeEngagement(page, cursor, phaseCtx, logger, job);
     }
 
-    logger.info(`✅ Прогрев День ${warmupDay}/${totalDays} завершён`);
+    logger.info(`✅ Прогрев День ${warmupDay}/${totalDays}, сессия ${sessionInDay + 1}/${sessionsPerDay} завершена`);
 
-    // Save the completed warmup day for sequential tracking (BUG-M7 fix)
-    if (warmupDay >= totalDays) {
+    // ── Self-reschedule: multi-session per day + sleep ────────
+    // Real user behavior:
+    //   Session 1 (morning)  → break 1.5-4h
+    //   Session 2 (day)      → break 1.5-4h
+    //   Session 3 (evening)  → 💤 sleep 6-8h → next day
+    //
+    // sessionsPerDay: 2-4 (deterministic per account)
+    // sessionInDay:   0-based index of current session
+
+    const { addJob } = await import('../lib/bullmq.js');
+    const isLastSessionOfDay = sessionInDay + 1 >= sessionsPerDay;
+    const isLastDay = warmupDay >= totalDays;
+
+    if (isLastDay && isLastSessionOfDay) {
+      // 🎉 All done — warmup complete
       await prisma.socialAccount.update({
         where: { id: data.accountId },
         data: { warmupCompletedAt: new Date(), status: 'ALIVE', lastWarmupDay: warmupDay },
       });
       logger.info(`🎉 Прогрев завершён! Аккаунт ${data.accountId} готов к загрузкам.`);
-    } else {
-      // Save progress for intermediate days
+
+    } else if (isLastSessionOfDay) {
+      // 💤 Last session of the day — "sleep" 6-8 hours, then start next day
+      const sleepDelay = _randomDelay(6 * 3600_000, 8 * 3600_000);
+      const sleepHours = (sleepDelay / 3600_000).toFixed(1);
+
       await prisma.socialAccount.update({
         where: { id: data.accountId },
         data: { lastWarmupDay: warmupDay },
       });
-
-      // ── Self-reschedule next day's warmup ──────────────────
-      // Delay 20-28 hours (randomized to avoid pattern detection)
-      const nextDayDelay = _randomDelay(20 * 3600_000, 28 * 3600_000);
-      // H-6 FIX: Use shared bullmq addJob instead of creating a new Queue each time
-      const { addJob } = await import('../lib/bullmq.js');
 
       await addJob('warmup' as any, {
         userId: data.userId,
         accountId: data.accountId,
         hashtags: data.hashtags,
         cookiesDir: data.cookiesDir,
+        sessionInDay: 0, // reset to first session of new day
       }, {
-        delay: nextDayDelay,
-        jobId: `warmup-${data.accountId}-day${warmupDay + 1}`,
+        delay: sleepDelay,
+        jobId: `warmup-${data.accountId}-day${warmupDay + 1}-s0`,
       });
-      const nextHours = Math.round(nextDayDelay / 3600_000);
-      logger.info(`⏰ Следующий день прогрева (${warmupDay + 1}/${totalDays}) запланирован через ~${nextHours}ч`);
+      logger.info(`💤 Сон ~${sleepHours}ч. Следующий день прогрева (${warmupDay + 1}/${totalDays}) запланирован`);
+
+    } else {
+      // ☕ Mid-day break — next session in 1.5-4 hours
+      const breakDelay = _randomDelay(90 * 60_000, 240 * 60_000);
+      const breakMins = Math.round(breakDelay / 60_000);
+      const nextSession = sessionInDay + 1;
+
+      // Don't increment warmupDay yet — still same day
+      await addJob('warmup' as any, {
+        userId: data.userId,
+        accountId: data.accountId,
+        hashtags: data.hashtags,
+        cookiesDir: data.cookiesDir,
+        warmupDay: warmupDay, // keep same day
+        sessionInDay: nextSession,
+      }, {
+        delay: breakDelay,
+        jobId: `warmup-${data.accountId}-day${warmupDay}-s${nextSession}`,
+      });
+      logger.info(`☕ Перерыв ~${breakMins} мин. Сессия ${nextSession + 1}/${sessionsPerDay} запланирована`);
     }
 
     await job.updateProgress(100);
