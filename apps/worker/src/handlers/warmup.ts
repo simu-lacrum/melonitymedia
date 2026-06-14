@@ -596,6 +596,7 @@ async function _activeEngagement(
         const likeSel = data.platform === 'TIKTOK' ? SEL.TIKTOK.LIKE : SEL.YOUTUBE.LIKE;
         await humanClick(page, cursor, likeSel, { postClickDelay: 500 });
         liked++;
+        logger.info(`  ❤️ Лайк видео ${i + 1} (всего: ${liked})`);
       } catch { /* skip */ }
     }
 
@@ -657,6 +658,7 @@ async function _activeEngagement(
     await humanScroll(page, _randomDelay(300, 600));
     await page.waitForTimeout(_randomDelay(1500, 3000));
     await job.updateProgress(Math.round((i / watchCount) * 100));
+    logger.info(`  📺 Видео ${i + 1}/${watchCount} (${Math.round(watchTime / 1000)}с)`);
   }
 
   logger.info(`  Итого: ${liked} лайков, ${comments} комментариев, ${follows} подписок`);
