@@ -43,6 +43,7 @@ model User {
   proxies      Proxy[]
   tasks        Task[]
   videos       Video[]
+  banners      Banner[]
   presets      Preset[]
   auditLogs    AuditLog[]
 }
@@ -253,6 +254,24 @@ enum VideoStatus {
   PROCESSING
   UPLOADED
   FAILED
+}
+
+// ── Banner ──────────────────────────────────────────────────
+// Animated video banner overlaid onto uploaded videos.
+// Stored per-user. Supports alpha-channel or black-bg banners.
+model Banner {
+  id           String   @id @default(cuid())
+  userId       String
+  filename     String   // sanitized filename on disk
+  originalName String   // original upload filename
+  filepath     String   // full path on disk
+  mimeType     String
+  size         Int      // bytes
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 // ── Task ────────────────────────────────────────────────────

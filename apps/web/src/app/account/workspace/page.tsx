@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { LiveTerminal } from "@/components/ui/live-terminal"
-import { Play, Users, Save, Loader2, CheckCircle, AlertCircle, Upload, X, Hash, Settings2 } from "lucide-react"
+import { Play, Users, Save, Loader2, CheckCircle, AlertCircle, Upload, X, Hash, Settings2, Image, Trash2 } from "lucide-react"
 import { api, ApiError } from "@/lib/api"
 import { toast } from "sonner"
 
@@ -59,6 +59,7 @@ interface UploadConfig {
   description: string
   hashtags: string[]
   scheduleAt: string
+  bannerId: string
 }
 
 const DEFAULT_CONFIGS = {
@@ -75,7 +76,7 @@ const DEFAULT_CONFIGS = {
   } as EditProfileConfig,
   UPLOAD: {
     mode: "UPLOAD", concurrency: 3, headless: true, videoId: "",
-    title: "", description: "", hashtags: [], scheduleAt: "",
+    title: "", description: "", hashtags: [], scheduleAt: "", bannerId: "",
   } as UploadConfig,
 }
 
@@ -86,6 +87,13 @@ interface VideoFile {
   size: number
   description?: string
   hashtags?: string[]
+}
+
+interface BannerFile {
+  id: string
+  originalName: string
+  filename: string
+  size: number
 }
 
 export default function WorkspacePage() {
@@ -105,6 +113,8 @@ export default function WorkspacePage() {
   const [hashtagInput, setHashtagInput] = React.useState("")
   const [videos, setVideos] = React.useState<VideoFile[]>([])
   const [uploading, setUploading] = React.useState(false)
+  const [banners, setBanners] = React.useState<BannerFile[]>([])
+  const [uploadingBanner, setUploadingBanner] = React.useState(false)
 
   React.useEffect(() => {
     api.get<{ presets: Preset[] }>("/api/workspace/presets")
@@ -124,6 +134,9 @@ export default function WorkspacePage() {
     if (mode === "UPLOAD") {
       api.get<{ videos: VideoFile[] }>("/api/videos")
         .then((data) => setVideos(data.videos || []))
+        .catch(() => {})
+      api.get<{ banners: BannerFile[] }>("/api/workspace/banners")
+        .then((data) => setBanners(data.banners || []))
         .catch(() => {})
     }
   }, [mode])
@@ -265,6 +278,45 @@ export default function WorkspacePage() {
       toast.error("Ошибка загрузки видео")
     } finally {
       setUploading(false)
+    }
+  }
+
+  const handleBannerUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadingBanner(true)
+    try {
+      const formData = new FormData()
+      formData.append("banner", file)
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"}/api/workspace/upload-banner`,
+        { method: "POST", body: formData, credentials: "include" }
+      )
+      if (!res.ok) throw new Error("Banner upload failed")
+      const data = await res.json()
+      setBanners([data.banner, ...banners])
+      setUpload({ ...upload, bannerId: data.banner.id })
+      toast.success("Баннер загружен")
+    } catch {
+      toast.error("Ошибка загрузки баннера")
+    } finally {
+      setUploadingBanner(false)
+    }
+  }
+
+  const handleDeleteBanner = async (bannerId: string) => {
+    try {
+      await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"}/api/workspace/banner/${bannerId}`,
+        { method: "DELETE", credentials: "include" }
+      )
+      setBanners(banners.filter(b => b.id !== bannerId))
+      if (upload.bannerId === bannerId) {
+        setUpload({ ...upload, bannerId: "" })
+      }
+      toast.success("Баннер удалён")
+    } catch {
+      toast.error("Ошибка удаления баннера")
     }
   }
 
@@ -446,6 +498,51 @@ export default function WorkspacePage() {
                   </SelectContent>
                 </Select>
               )}
+            </div>
+
+            {/* Banner upload */}
+            <div className="flex flex-col gap-2">
+              <Label>Баннер (необязательно)</Label>
+              <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary/50 transition-colors">
+                {uploadingBanner ? (
+                  <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                ) : (
+                  <Image className="size-4 text-muted-foreground" />
+                )}
+                <span className="text-xs text-muted-foreground">
+                  {uploadingBanner ? "Загрузка..." : "Загрузить баннер (.mp4, .webm, .mov)"}
+                </span>
+                <input type="file" accept=".mp4,.webm,.mov" className="hidden"
+                  onChange={handleBannerUpload} disabled={uploadingBanner}
+                />
+              </label>
+
+              {banners.length > 0 && (
+                <div className="flex flex-col gap-1">
+                  <Select value={upload.bannerId} onValueChange={(v) => setUpload({ ...upload, bannerId: v ?? "" })}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="-- Без баннера --" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Без баннера</SelectItem>
+                      {banners.map(b => (
+                        <SelectItem key={b.id} value={b.id}>
+                          {b.originalName} ({(b.size / 1024 / 1024).toFixed(1)} MB)
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {upload.bannerId && upload.bannerId !== "none" && (
+                    <Button variant="ghost" size="sm" className="self-end text-xs text-destructive"
+                      onClick={() => handleDeleteBanner(upload.bannerId)}>
+                      <Trash2 className="size-3 mr-1" /> Удалить баннер
+                    </Button>
+                  )}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Баннер накладывается на видео сверху или снизу (рандомно). Файл без фона.
+              </p>
             </div>
 
             <div className="flex flex-col gap-2">

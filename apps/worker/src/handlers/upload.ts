@@ -18,6 +18,7 @@ import { launchStealthContext, closeBrowser } from '../core/browser/patchright-l
 import { validateCookies } from '../core/auth/session-validator.js';
 import { persistCookies, type BrowserCookie } from '../core/auth/cookie-store.js';
 import { uniquifyVideo, cleanupUniquifiedVideo } from '../core/video/uniquifier.js';
+import { applyBannerOverlay, cleanupBanneredVideo } from '../core/video/banner-overlay.js';
 import { createPageCursor, humanClick, humanScroll } from '../core/humanity/biomouse.js';
 import { humanType } from '../core/humanity/typing-emulator.js';
 import { SocketLogger } from '../lib/socket-logger.js';
@@ -43,6 +44,8 @@ interface UploadJobData {
   platformIndex?: number;
   /** Total number of accounts across all platforms in this job (for cleanup) */
   totalAccountsInJob?: number;
+  /** Path to banner video for overlay (optional) */
+  bannerPath?: string;
 }
 
 // ── Main ────────────────────────────────────────────────────
@@ -52,6 +55,7 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
   const logger = new SocketLogger(data.userId);
   let browser: Browser | null = null;
   let uniquifiedPath: string | null = null;
+  let banneredPath: string | null = null;
   let ctx: any = null;
 
   try {
@@ -180,6 +184,19 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
       uniquifiedPath = outputPath;
       videoToUpload = outputPath;
     }
+
+    // ── Banner overlay (if banner provided) ──────────────────
+    if (data.bannerPath && fs.existsSync(data.bannerPath)) {
+      logger.info('Наложение баннера на видео (FFmpeg overlay)...');
+      const { outputPath: bannered, position } = await applyBannerOverlay({
+        inputPath: videoToUpload,
+        bannerPath: data.bannerPath,
+        position: 'random',
+      });
+      banneredPath = bannered;
+      videoToUpload = bannered;
+      logger.info(`Баннер наложен (позиция: ${position === 'top' ? 'верх' : 'низ'})`);
+    }
     await job.updateProgress(25);
 
     // ── Launch stealth browser ──────────────────────────────
@@ -276,6 +293,11 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
     // Clean up uniquified video (original stays)
     if (uniquifiedPath) {
       await cleanupUniquifiedVideo(uniquifiedPath);
+    }
+
+    // Clean up bannered video
+    if (banneredPath) {
+      await cleanupBanneredVideo(banneredPath);
     }
 
     logger.disconnect();

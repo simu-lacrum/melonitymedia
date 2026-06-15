@@ -53,6 +53,35 @@ const upload = multer({
   },
 });
 
+// ── Banner Multer Setup ─────────────────────────────────────
+const BANNER_DIR = process.env.BANNER_DIR || './banners';
+if (!fs.existsSync(BANNER_DIR)) {
+  fs.mkdirSync(BANNER_DIR, { recursive: true });
+}
+
+const bannerStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, BANNER_DIR),
+  filename: (_req, file, cb) => {
+    const hash = crypto.randomBytes(16).toString('hex');
+    const ext = path.extname(file.originalname);
+    cb(null, `banner_${hash}${ext}`);
+  },
+});
+
+const bannerUpload = multer({
+  storage: bannerStorage,
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB max per banner
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['.mp4', '.webm', '.mov'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowed.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Допустимые форматы баннера: .mp4, .webm, .mov'));
+    }
+  },
+});
+
 // ── POST /upload — upload video file ────────────────────────
 router.post('/upload', upload.single('video'), async (req: Request, res: Response) => {
   try {
@@ -213,6 +242,8 @@ router.post('/launch', async (req: Request, res: Response) => {
           title: (cfg.title as string) || video.originalName,
           description: (cfg.description as string) || video.description || "",
           hashtags: (cfg.hashtags as string[]) ?? video.hashtags ?? [],
+          bannerId: (cfg.bannerId as string) || undefined,
+          bannerPath: undefined as string | undefined,
         };
       }
 
@@ -246,6 +277,17 @@ router.post('/launch', async (req: Request, res: Response) => {
         if (type === 'UPLOAD' && platformIndexMap) {
           (extra as Record<string, unknown>).platformIndex = platformIndexMap.get(accountId) ?? index;
           (extra as Record<string, unknown>).totalAccountsInJob = targetAccountIds.length;
+        }
+        // Resolve bannerId → bannerPath for UPLOAD jobs
+        if (type === 'UPLOAD' && (extra as Record<string, unknown>).bannerId) {
+          const banner = await prisma.banner.findFirst({
+            where: { id: (extra as Record<string, unknown>).bannerId as string, userId: req.user!.id },
+            select: { filepath: true },
+          });
+          if (banner) {
+            (extra as Record<string, unknown>).bannerPath = banner.filepath;
+          }
+          delete (extra as Record<string, unknown>).bannerId;
         }
         // Calculate per-account delay: each subsequent account gets additional delay
         const perAccountDelay = delayMin + Math.floor(Math.random() * (delayMax - delayMin + 1));
@@ -490,6 +532,76 @@ router.get('/cookies/export', authRateLimit, async (req: Request, res: Response)
   } catch (err) {
     console.error('[Workspace] Cookies export error:', err);
     res.status(500).json({ error: 'Ошибка при экспорте cookies' });
+  }
+});
+
+// ── Banner CRUD ─────────────────────────────────────────────
+
+// POST /upload-banner — upload a banner video file
+router.post('/upload-banner', bannerUpload.single('banner'), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ error: 'Файл баннера не загружен' });
+      return;
+    }
+
+    const banner = await prisma.banner.create({
+      data: {
+        userId: req.user!.id,
+        filename: req.file.filename,
+        originalName: req.file.originalname,
+        filepath: req.file.path,
+        mimeType: req.file.mimetype,
+        size: req.file.size,
+      },
+    });
+
+    res.status(201).json({ banner });
+  } catch (err) {
+    console.error('[Workspace] Banner upload error:', err);
+    res.status(500).json({ error: 'Ошибка при загрузке баннера' });
+  }
+});
+
+// GET /banners — list user's banners
+router.get('/banners', async (req: Request, res: Response) => {
+  try {
+    const banners = await prisma.banner.findMany({
+      where: { userId: req.user!.id },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        originalName: true,
+        filename: true,
+        size: true,
+        createdAt: true,
+      },
+    });
+    res.json({ banners });
+  } catch (err) {
+    console.error('[Workspace] Banners list error:', err);
+    res.status(500).json({ error: 'Ошибка при получении списка баннеров' });
+  }
+});
+
+// DELETE /banner/:id — delete a banner
+router.delete('/banner/:id', async (req: Request, res: Response) => {
+  try {
+    const banner = await prisma.banner.findFirst({
+      where: { id: req.params.id as string, userId: req.user!.id },
+    });
+    if (!banner) {
+      res.status(404).json({ error: 'Баннер не найден' });
+      return;
+    }
+    // Delete file from disk
+    try { fs.unlinkSync(banner.filepath); } catch { /* non-critical */ }
+    // Delete DB record
+    await prisma.banner.delete({ where: { id: banner.id } });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[Workspace] Banner delete error:', err);
+    res.status(500).json({ error: 'Ошибка при удалении баннера' });
   }
 });
 
