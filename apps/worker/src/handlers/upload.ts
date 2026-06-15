@@ -14,6 +14,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { Job } from 'bullmq';
+import fs from 'node:fs';
 import { launchStealthContext, closeBrowser } from '../core/browser/patchright-launcher.js';
 import { validateCookies } from '../core/auth/session-validator.js';
 import { persistCookies, type BrowserCookie } from '../core/auth/cookie-store.js';
@@ -26,7 +27,7 @@ import { emitWorkerError } from '../lib/error-classifier.js';
 import { loadAccountContext } from '../lib/account-context.js';
 import { prisma } from '../lib/prisma.js';
 import type { Browser } from 'patchright';
-import fs from 'fs';
+
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -165,27 +166,11 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
 
     await job.updateProgress(10);
 
-    // ── Uniquify video for this account ─────────────────────
-    // Logic: first account per platform gets the ORIGINAL (no FFmpeg overhead).
-    // Subsequent accounts get a uniquified copy. Cross-platform is safe
-    // (same video on YT + TT is fine — different detection systems).
-    const isFirstForPlatform = (data.platformIndex ?? 0) === 0;
-    let videoToUpload: string;
-
-    if (isFirstForPlatform) {
-      logger.info('Первый аккаунт на платформе — загрузка без уникализации');
-      videoToUpload = data.videoPath;
-    } else {
-      logger.info('Уникализация видео (FFmpeg pipeline)...');
-      const { outputPath } = await uniquifyVideo({
-        accountId: data.accountId,
-        inputPath: data.videoPath,
-      });
-      uniquifiedPath = outputPath;
-      videoToUpload = outputPath;
-    }
-
     // ── Banner overlay (if banner provided) ──────────────────
+    // Applied FIRST to the base video. Uniquification runs after,
+    // so each account gets a unique copy of the bannered video.
+    let videoToUpload: string = data.videoPath;
+
     if (data.bannerPath && fs.existsSync(data.bannerPath)) {
       logger.info('Наложение баннера на видео (FFmpeg overlay)...');
       const { outputPath: bannered, position } = await applyBannerOverlay({
@@ -196,6 +181,24 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
       banneredPath = bannered;
       videoToUpload = bannered;
       logger.info(`Баннер наложен (позиция: ${position === 'top' ? 'верх' : 'низ'})`);
+    }
+
+    // ── Uniquify video for this account ─────────────────────
+    // Logic: first account per platform gets the bannered original (no extra FFmpeg).
+    // Subsequent accounts get a uniquified copy of the bannered video.
+    // Cross-platform is safe (same video on YT + TT — different detection systems).
+    const isFirstForPlatform = (data.platformIndex ?? 0) === 0;
+
+    if (isFirstForPlatform) {
+      logger.info('Первый аккаунт на платформе — загрузка без уникализации');
+    } else {
+      logger.info('Уникализация видео (FFmpeg pipeline)...');
+      const { outputPath } = await uniquifyVideo({
+        accountId: data.accountId,
+        inputPath: videoToUpload,
+      });
+      uniquifiedPath = outputPath;
+      videoToUpload = outputPath;
     }
     await job.updateProgress(25);
 
@@ -298,6 +301,26 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
     // Clean up bannered video
     if (banneredPath) {
       await cleanupBanneredVideo(banneredPath);
+    }
+
+    // After the LAST account in the job — clean up original files from VPS
+    // (video file + banner file are no longer needed)
+    const isLastAccount = (data.platformIndex ?? 0) >= ((data.totalAccountsInJob ?? 1) - 1);
+    if (isLastAccount) {
+      try {
+        // Delete original video file
+        if (data.videoPath && fs.existsSync(data.videoPath)) {
+          fs.unlinkSync(data.videoPath);
+          console.log(`[Upload] Cleaned up original video: ${data.videoPath}`);
+        }
+        // Delete banner file
+        if (data.bannerPath && fs.existsSync(data.bannerPath)) {
+          fs.unlinkSync(data.bannerPath);
+          console.log(`[Upload] Cleaned up banner: ${data.bannerPath}`);
+        }
+      } catch (cleanupErr) {
+        console.warn('[Upload] Non-critical cleanup error:', cleanupErr);
+      }
     }
 
     logger.disconnect();
