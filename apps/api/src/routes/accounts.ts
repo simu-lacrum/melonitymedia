@@ -125,6 +125,11 @@ function encryptCookies(jsonStr: string): { encrypted: Buffer; iv: Buffer; authT
 // ── GET / — list all accounts for current user ──────────────
 router.get('/', async (req: Request, res: Response) => {
   try {
+    // Optional pagination (backwards-compatible: frontend can omit these)
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit as string) || 200));
+    const skip = (page - 1) * limit;
+
     const accounts = await prisma.socialAccount.findMany({
       where: { userId: req.user!.id },
       include: {
@@ -134,6 +139,8 @@ router.get('/', async (req: Request, res: Response) => {
         _count: { select: { videos: { where: { isUploaded: true } } } },
       },
       orderBy: { createdAt: 'desc' },
+      take: limit,
+      skip,
     });
 
     // Strip encrypted cookie data from response (never send to frontend)

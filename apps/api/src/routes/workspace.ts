@@ -270,25 +270,35 @@ router.post('/launch', async (req: Request, res: Response) => {
       }
     }
 
+    // Pre-resolve banner path ONCE before iterating accounts (fixes N+1 query)
+    let resolvedBannerPath: string | undefined;
+    // Pre-resolve extra ONCE (fixes N+1 video.findFirstOrThrow inside loop)
+    const baseExtra = await buildExtra();
+    if (type === 'UPLOAD') {
+      const bannerId = (baseExtra as Record<string, unknown>).bannerId as string | undefined;
+      if (bannerId) {
+        const banner = await prisma.banner.findFirst({
+          where: { id: bannerId, userId: req.user!.id },
+          select: { filepath: true },
+        });
+        if (banner) resolvedBannerPath = banner.filepath;
+      }
+    }
+
     const results = await Promise.all(
       targetAccountIds.map(async (accountId, index) => {
-        const extra = await buildExtra();
+        // Clone pre-resolved extra for this account (no DB calls here)
+        const extra = { ...baseExtra as Record<string, unknown> };
         // Inject platformIndex and totalAccountsInJob for UPLOAD jobs
         if (type === 'UPLOAD' && platformIndexMap) {
-          (extra as Record<string, unknown>).platformIndex = platformIndexMap.get(accountId) ?? index;
-          (extra as Record<string, unknown>).totalAccountsInJob = targetAccountIds.length;
+          extra.platformIndex = platformIndexMap.get(accountId) ?? index;
+          extra.totalAccountsInJob = targetAccountIds.length;
         }
-        // Resolve bannerId → bannerPath for UPLOAD jobs
-        if (type === 'UPLOAD' && (extra as Record<string, unknown>).bannerId) {
-          const banner = await prisma.banner.findFirst({
-            where: { id: (extra as Record<string, unknown>).bannerId as string, userId: req.user!.id },
-            select: { filepath: true },
-          });
-          if (banner) {
-            (extra as Record<string, unknown>).bannerPath = banner.filepath;
-          }
-          delete (extra as Record<string, unknown>).bannerId;
+        // Use pre-resolved banner path instead of per-account query
+        if (type === 'UPLOAD' && resolvedBannerPath) {
+          extra.bannerPath = resolvedBannerPath;
         }
+        delete extra.bannerId;
         // Calculate per-account delay: each subsequent account gets additional delay
         const perAccountDelay = delayMin + Math.floor(Math.random() * (delayMax - delayMin + 1));
         const totalDelay = index * perAccountDelay;

@@ -81,7 +81,7 @@ export default function ProxiesPage() {
     if (showModal) {
       api.get<{ accounts: LinkedAccount[] }>("/api/accounts")
         .then(data => setDialogAccounts(data.accounts || []))
-        .catch(() => {})
+        .catch(() => { toast.error('Не удалось загрузить список аккаунтов') })
     }
   }, [showModal])
 
@@ -124,11 +124,14 @@ export default function ProxiesPage() {
       })
 
       if (bindAccountIds.length > 0 && result.proxy?.id) {
-        await Promise.all(
-          bindAccountIds.map(accId =>
-            api.patch(`/api/accounts/${accId}`, { pinnedProxyId: result.proxy.id }).catch(() => {})
-          )
-        )
+        try {
+          await api.patch('/api/accounts/bulk/proxy', {
+            accountIds: bindAccountIds,
+            proxyId: result.proxy.id,
+          })
+        } catch {
+          toast.error('Не удалось привязать прокси к некоторым аккаунтам')
+        }
       }
 
       toast.success("Прокси добавлен")
@@ -152,12 +155,16 @@ export default function ProxiesPage() {
 
       if (bindAccountIds.length > 0 && result.ids?.length > 0) {
         // Distribute proxies across accounts round-robin
-        await Promise.all(
+        const bindResults = await Promise.allSettled(
           bindAccountIds.map((accId, idx) => {
             const proxyId = result.ids[idx % result.ids.length]
-            return api.patch(`/api/accounts/${accId}`, { pinnedProxyId: proxyId }).catch(() => {})
+            return api.patch(`/api/accounts/${accId}`, { pinnedProxyId: proxyId })
           })
         )
+        const failCount = bindResults.filter(r => r.status === 'rejected').length
+        if (failCount > 0) {
+          toast.error(`Не удалось привязать прокси к ${failCount} аккаунтам`)
+        }
       }
 
       toast.success("Прокси импортированы")

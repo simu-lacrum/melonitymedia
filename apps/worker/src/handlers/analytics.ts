@@ -77,26 +77,46 @@ export async function analyticsHandler(job: Job<any>): Promise<ProfileStats | { 
       console.log(`[Analytics] Safety net: reset ${stale.count} stale VERIFYING accounts to AUTH_NEEDED`);
     }
 
-    const accounts = await prisma.socialAccount.findMany({
-      where: { status: 'ALIVE' },
-      select: { id: true, userId: true, secUid: true, nickname: true },
-    });
-
     // H-6 FIX: Use shared bullmq addJob instead of creating a new Queue each time
     const { addJob } = await import('../lib/bullmq.js');
 
+    // Cursor-based batching: load accounts in chunks of 500 to prevent OOM
+    const BATCH_SIZE = 500;
+    let cursor: string | undefined = undefined;
     let dispatched = 0;
-    for (const acc of accounts) {
-      await addJob('analytics-cron', {
-        userId: acc.userId,
-        accountId: acc.id,
-        secUid: acc.secUid,
-        nickname: acc.nickname,
-      }, {
-        delay: dispatched * 5_000, // 5s stagger to avoid rate-limits
-        jobId: `analytics-${acc.id}`,
+    let hasMore = true;
+
+    while (hasMore) {
+      const accounts: { id: string; userId: string; secUid: string | null; nickname: string | null }[] = await prisma.socialAccount.findMany({
+        where: { status: 'ALIVE' },
+        select: { id: true, userId: true, secUid: true, nickname: true },
+        take: BATCH_SIZE,
+        skip: cursor ? 1 : 0,
+        cursor: cursor ? { id: cursor } : undefined,
+        orderBy: { id: 'asc' },
       });
-      dispatched++;
+
+      if (accounts.length === 0) {
+        hasMore = false;
+        break;
+      }
+
+      cursor = accounts[accounts.length - 1].id;
+
+      for (const acc of accounts) {
+        await addJob('analytics-cron', {
+          userId: acc.userId,
+          accountId: acc.id,
+          secUid: acc.secUid,
+          nickname: acc.nickname,
+        }, {
+          delay: dispatched * 5_000, // 5s stagger to avoid rate-limits
+          jobId: `analytics-${acc.id}`,
+        });
+        dispatched++;
+      }
+
+      if (accounts.length < BATCH_SIZE) hasMore = false;
     }
 
     console.log(`[Analytics] Cron fan-out: dispatched ${dispatched} jobs`);

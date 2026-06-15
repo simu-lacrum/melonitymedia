@@ -105,6 +105,7 @@ router.get('/', async (req: Request, res: Response) => {
       where: { userId: req.user!.id },
       include: { _count: { select: { accounts: true } } },
       orderBy: { createdAt: 'desc' },
+      take: 200, // safety limit to prevent OOM on large proxy lists
     });
     res.json({ proxies: proxies.map(enrichProxy) });
   } catch (err) {
