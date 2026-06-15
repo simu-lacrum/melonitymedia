@@ -151,11 +151,42 @@ console.log(`
 `);
 
 // ── Graceful Shutdown ───────────────────────────────────────
+// On SIGTERM (docker stop / CI/CD deploy):
+// 1. Stop accepting NEW jobs
+// 2. Wait for CURRENT jobs to finish (upload can take 5-10 min)
+// 3. Close Redis connection
+// Docker stop_grace_period is set to 10m in docker-compose.yml
+// Hard timeout here is 9.5m as safety before Docker SIGKILL
+const HARD_TIMEOUT_MS = 9.5 * 60 * 1000; // 9.5 minutes
+
+let isShuttingDown = false;
+
 const shutdown = async (signal: string) => {
-  console.log(`\n[Worker] Received ${signal}. Closing workers...`);
-  await Promise.all(workers.map(w => w.close()));
-  await connection.quit();
-  console.log('[Worker] All workers closed');
+  if (isShuttingDown) return; // prevent double-shutdown
+  isShuttingDown = true;
+
+  console.log(`\n[Worker] ⚠️  Received ${signal}. Starting graceful shutdown...`);
+  console.log(`[Worker] Waiting for active jobs to complete (timeout: 9.5min)...`);
+
+  // Hard timeout — if jobs hang, force exit before Docker SIGKILL
+  const hardTimer = setTimeout(() => {
+    console.error('[Worker] ⛔ Hard timeout reached. Force exiting.');
+    process.exit(1);
+  }, HARD_TIMEOUT_MS);
+  hardTimer.unref(); // don't keep process alive just for this timer
+
+  try {
+    // Worker.close() waits for running jobs to finish, then stops polling
+    await Promise.all(workers.map(w => w.close()));
+    console.log('[Worker] ✅ All workers closed gracefully');
+
+    await connection.quit();
+    console.log('[Worker] ✅ Redis disconnected');
+  } catch (err) {
+    console.error('[Worker] Error during shutdown:', err);
+  }
+
+  clearTimeout(hardTimer);
   process.exit(0);
 };
 
