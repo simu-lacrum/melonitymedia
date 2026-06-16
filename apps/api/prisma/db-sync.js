@@ -52,6 +52,29 @@ async function main() {
       UPDATE "User" SET "isApproved" = true, "approvedAt" = NOW()
       WHERE "isApproved" = false AND "role" = 'ADMIN'
     `);
+    // Create DailySnapshot table for real analytics time-series
+    // One row per account per day, upserted by analytics cron
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "DailySnapshot" (
+        "id" TEXT NOT NULL DEFAULT gen_random_uuid()::text,
+        "accountId" TEXT NOT NULL,
+        "userId" TEXT NOT NULL,
+        "date" DATE NOT NULL,
+        "views" INTEGER NOT NULL DEFAULT 0,
+        "followers" INTEGER NOT NULL DEFAULT 0,
+        "likes" INTEGER NOT NULL DEFAULT 0,
+        "videos" INTEGER NOT NULL DEFAULT 0,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "DailySnapshot_pkey" PRIMARY KEY ("id"),
+        CONSTRAINT "DailySnapshot_accountId_date_key" UNIQUE ("accountId", "date"),
+        CONSTRAINT "DailySnapshot_accountId_fkey" FOREIGN KEY ("accountId") REFERENCES "SocialAccount"("id") ON DELETE CASCADE,
+        CONSTRAINT "DailySnapshot_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE
+      );
+    `);
+    // Create indexes if they don't exist
+    await prisma.$executeRawUnsafe(`
+      CREATE INDEX IF NOT EXISTS "DailySnapshot_userId_date_idx" ON "DailySnapshot"("userId", "date");
+    `);
 
     console.log('[db-sync] Schema synced OK');
   } catch (err) {

@@ -44,43 +44,54 @@ router.get('/summary', async (req: Request, res: Response) => {
   }
 });
 
-// ── GET /views-chart — time-series data for Recharts ────────
+// ── GET /views-chart — real time-series from DailySnapshot ──
 router.get('/views-chart', async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
     const rawDays = parseInt(req.query.days as string);
-    const days = Number.isNaN(rawDays) ? 30 : Math.max(1, Math.min(rawDays, 365));
+    const days = Number.isNaN(rawDays) ? 7 : Math.max(1, Math.min(rawDays, 365));
 
-    // BUG-13 fix: Return proper time-series [{date, views}] for Recharts.
-    // Without a dedicated ViewsHistory model, we generate synthetic daily data
-    // by distributing account views across the requested date range.
-    const accounts = await prisma.socialAccount.findMany({
-      where: { userId },
-      select: { views: true, createdAt: true },
+    const startDate = new Date();
+    startDate.setHours(0, 0, 0, 0);
+    startDate.setDate(startDate.getDate() - days + 1);
+
+    // Fetch real snapshots aggregated by day across all accounts
+    const snapshots = await prisma.dailySnapshot.groupBy({
+      by: ['date'],
+      where: {
+        userId,
+        date: { gte: startDate },
+      },
+      _sum: {
+        views: true,
+        followers: true,
+        likes: true,
+      },
+      orderBy: { date: 'asc' },
     });
 
-    const now = new Date();
-    const startDate = new Date(now.getTime() - days * 86_400_000);
-    const totalViews = accounts.reduce((sum, a) => sum + (a.views ?? 0), 0);
+    // Build a complete date series (fill gaps with zeros)
+    const snapshotMap = new Map<string, { views: number; followers: number; likes: number }>();
+    for (const s of snapshots) {
+      const key = new Date(s.date).toISOString().slice(0, 10);
+      snapshotMap.set(key, {
+        views: s._sum.views ?? 0,
+        followers: s._sum.followers ?? 0,
+        likes: s._sum.likes ?? 0,
+      });
+    }
 
-    // Build date series
-    const data: { date: string; views: number }[] = [];
+    const data: { date: string; views: number; followers: number; likes: number }[] = [];
     for (let i = 0; i < days; i++) {
       const d = new Date(startDate.getTime() + i * 86_400_000);
-      const dateStr = d.toISOString().slice(0, 10); // YYYY-MM-DD
-
-      // Count accounts that existed on this date
-      const activeAccounts = accounts.filter(a => new Date(a.createdAt) <= d).length;
-
-      // Distribute views proportionally with slight daily variation
-      const baseViews = activeAccounts > 0
-        ? Math.round((totalViews / days) * (activeAccounts / Math.max(accounts.length, 1)))
-        : 0;
-      // Add deterministic variance based on date (so chart isn't a flat line)
-      const dayHash = (d.getDate() * 7 + d.getMonth() * 31) % 20;
-      const variance = Math.round(baseViews * (dayHash - 10) / 100);
-
-      data.push({ date: dateStr, views: Math.max(0, baseViews + variance) });
+      const key = d.toISOString().slice(0, 10);
+      const snap = snapshotMap.get(key);
+      data.push({
+        date: key,
+        views: snap?.views ?? 0,
+        followers: snap?.followers ?? 0,
+        likes: snap?.likes ?? 0,
+      });
     }
 
     res.json({ data, days });

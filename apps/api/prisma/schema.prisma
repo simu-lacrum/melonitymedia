@@ -47,7 +47,8 @@ model User {
   videos       Video[]
   banners      Banner[]
   presets      Preset[]
-  auditLogs    AuditLog[]
+  auditLogs      AuditLog[]
+  dailySnapshots DailySnapshot[]
 }
 
 enum Role {
@@ -115,6 +116,7 @@ model SocialAccount {
   user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   pinnedProxy Proxy? @relation(fields: [pinnedProxyId], references: [id], onDelete: SetNull)
   videos Video[]
+  dailySnapshots DailySnapshot[]
 
   @@index([userId])
   @@index([userId, platform])
@@ -349,4 +351,25 @@ model AuditLog {
   @@index([userId])
   @@index([action])
   @@index([createdAt])
+}
+
+// ── DailySnapshot ───────────────────────────────────────────
+// One row per account per day. Upserted by analytics cron.
+// Enables real time-series charts on the dashboard.
+model DailySnapshot {
+  id          String   @id @default(cuid())
+  accountId   String
+  userId      String
+  date        DateTime @db.Date   // calendar date (no time), e.g. 2026-06-16
+  views       Int      @default(0)
+  followers   Int      @default(0)
+  likes       Int      @default(0)
+  videos      Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  account SocialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, date])  // one snapshot per account per day
+  @@index([userId, date])
 }

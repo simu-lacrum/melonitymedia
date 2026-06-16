@@ -63,12 +63,13 @@ export default function DashboardPage() {
     async function loadDashboard() {
       try {
         setLoading(true)
-        const [accountsRes, videosRes, analyticsRes, tasksRes, proxiesRes] = await Promise.allSettled([
+        const [accountsRes, videosRes, analyticsRes, tasksRes, proxiesRes, chartRes] = await Promise.allSettled([
           api.get<{ accounts: any[] }>("/api/accounts"),
           api.get<{ videos: any[] }>("/api/videos"),
           api.get<{ totalViews: number; aliveAccounts: number; totalFollowers: number; uploadedVideos: number }>("/api/analytics/summary"),
           api.get<{ tasks: ActiveTask[] }>("/api/analytics/active-tasks"),
           api.get<{ proxies: any[] }>("/api/proxies"),
+          api.get<{ data: { date: string; views: number; followers: number; likes: number }[] }>("/api/analytics/views-chart?days=7"),
         ])
 
         const accounts = accountsRes.status === "fulfilled" ? accountsRes.value.accounts : []
@@ -76,6 +77,7 @@ export default function DashboardPage() {
         const analytics = analyticsRes.status === "fulfilled" ? analyticsRes.value : null
         const tasks = tasksRes.status === "fulfilled" ? tasksRes.value.tasks : []
         const proxies = proxiesRes.status === "fulfilled" ? proxiesRes.value.proxies : []
+        const chartPoints = chartRes.status === "fulfilled" ? chartRes.value.data : []
 
         setActiveTasks(tasks)
         setStats({
@@ -91,25 +93,15 @@ export default function DashboardPage() {
           totalFollowers: analytics?.totalFollowers ?? 0,
         })
 
-        // Build chart data
-        const dayMap = new Map<string, { views: number; interactions: number }>()
-        const now = new Date()
-        for (let i = 6; i >= 0; i--) {
-          const d = new Date(now)
-          d.setDate(d.getDate() - i)
-          const key = d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })
-          dayMap.set(key, { views: 0, interactions: 0 })
-        }
-        accounts.forEach((a: any) => {
-          const created = new Date(a.createdAt)
-          const key = created.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })
-          if (dayMap.has(key)) {
-            const entry = dayMap.get(key)!
-            entry.views += a.views ?? 0
-            entry.interactions += a.likes ?? 0
+        // Real chart data from DailySnapshot table via API
+        setChartData(chartPoints.map((p) => {
+          const d = new Date(p.date)
+          return {
+            date: d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" }),
+            views: p.views,
+            interactions: p.likes,
           }
-        })
-        setChartData(Array.from(dayMap.entries()).map(([date, data]) => ({ date, ...data })))
+        }))
 
         // Activity feed
         setActivity(

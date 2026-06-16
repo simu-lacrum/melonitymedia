@@ -310,11 +310,39 @@ async function _persistStats(
 ): Promise<void> {
   try {
     // Update account-level aggregate stats
-    await prisma.socialAccount.update({
+    const account = await prisma.socialAccount.update({
       where: { id: accountId },
       data: {
         views: stats.views,
         followers: stats.followers,
+      },
+      select: { userId: true },
+    });
+
+    // Upsert daily snapshot for real time-series charts
+    // One row per account per calendar day — if analytics runs
+    // multiple times per day, the latest values win.
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    await prisma.dailySnapshot.upsert({
+      where: {
+        accountId_date: { accountId, date: today },
+      },
+      create: {
+        accountId,
+        userId: account.userId,
+        date: today,
+        views: stats.views,
+        followers: stats.followers,
+        likes: stats.likes,
+        videos: stats.videos,
+      },
+      update: {
+        views: stats.views,
+        followers: stats.followers,
+        likes: stats.likes,
+        videos: stats.videos,
       },
     });
 
