@@ -16,6 +16,7 @@ import { persistCookies, type BrowserCookie } from '../core/auth/cookie-store.js
 import { SocketLogger } from '../lib/socket-logger.js';
 import { emitWorkerError } from '../lib/error-classifier.js';
 import { loadAccountContext } from '../lib/account-context.js';
+import { acquireAccountLock, releaseAccountLock } from '../lib/account-lock.js';
 import { prisma } from '../lib/prisma.js';
 import type { Browser } from 'patchright';
 
@@ -34,8 +35,16 @@ export async function cookiesHandler(job: Job<CookiesJobData>): Promise<string> 
   const data = job.data;
   const logger = new SocketLogger(data.userId);
   let browser: Browser | null = null;
+  let lockAcquired = false;
 
   try {
+    // Acquire per-account lock — prevent concurrent browser sessions
+    const holder = await acquireAccountLock(data.accountId, 'cookies');
+    if (holder) {
+      logger.warn(`⏭️ Пропускаю cookies — для аккаунта уже запущен: ${holder}`);
+      throw new Error(`Account ${data.accountId} is busy: ${holder}`);
+    }
+    lockAcquired = true;
     logger.info(`Обновление cookies для ${data.accountId}...`);
 
     // Resolve everything fresh from DB — never trust BullMQ payload
@@ -100,6 +109,7 @@ export async function cookiesHandler(job: Job<CookiesJobData>): Promise<string> 
     emitWorkerError(logger, data.accountId, 'cookies', err);
     throw err;
   } finally {
+    if (lockAcquired) await releaseAccountLock(data.accountId, 'cookies');
     await closeBrowser(browser);
     logger.disconnect();
   }

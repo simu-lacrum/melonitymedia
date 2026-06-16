@@ -33,6 +33,7 @@ import { waitForVerificationCode, waitForVerificationResult, type VerificationRe
 import { SocketLogger } from '../lib/socket-logger.js';
 import { prisma } from '../lib/prisma.js';
 import { loadAccountContext } from '../lib/account-context.js';
+import { acquireAccountLock, releaseAccountLock } from '../lib/account-lock.js';
 import crypto from 'crypto';
 import type { Browser } from 'patchright';
 
@@ -220,8 +221,16 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
   const mode = data.mode || 'credentials';
   const logger = new SocketLogger(data.userId);
   let browser: Browser | null = null;
+  let lockAcquired = false;
 
   try {
+    // Acquire per-account lock — prevent concurrent browser sessions
+    const holder = await acquireAccountLock(data.accountId, 'login');
+    if (holder) {
+      logger.warn(`⏭️ Пропускаю логин — для аккаунта уже запущен: ${holder}`);
+      throw new Error(`Account ${data.accountId} is busy: ${holder}`);
+    }
+    lockAcquired = true;
     const ctx = await loadAccountContext(data.accountId);
 
     // ════════════════════════════════════════════════════════
@@ -1131,6 +1140,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
 
     throw err;
   } finally {
+    if (lockAcquired) await releaseAccountLock(data.accountId, 'login');
     await closeBrowser(browser);
     logger.disconnect();
   }

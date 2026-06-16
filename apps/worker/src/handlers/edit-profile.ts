@@ -20,6 +20,7 @@ import { persistCookies, type BrowserCookie } from '../core/auth/cookie-store.js
 import { SocketLogger } from '../lib/socket-logger.js';
 import { emitWorkerError } from '../lib/error-classifier.js';
 import { loadAccountContext } from '../lib/account-context.js';
+import { acquireAccountLock, releaseAccountLock } from '../lib/account-lock.js';
 import type { Browser } from 'patchright';
 import fs from 'fs';
 import fsp from 'fs/promises';
@@ -127,8 +128,16 @@ export async function editProfileHandler(job: Job<EditProfileJobData>): Promise<
   let browser: Browser | null = null;
   let ctx: any = null;
   let avatarTmpPath: string | null = null;
+  let lockAcquired = false;
 
   try {
+    // Acquire per-account lock — prevent concurrent browser sessions
+    const holder = await acquireAccountLock(data.accountId, 'edit-profile');
+    if (holder) {
+      logger.warn(`⏭️ Пропускаю редактирование — для аккаунта уже запущен: ${holder}`);
+      throw new Error(`Account ${data.accountId} is busy: ${holder}`);
+    }
+    lockAcquired = true;
     logger.info(`Редактирование профиля ${data.accountId}...`);
 
     // Resolve everything fresh from DB — never trust BullMQ payload
@@ -191,6 +200,7 @@ export async function editProfileHandler(job: Job<EditProfileJobData>): Promise<
     emitWorkerError(logger, data.accountId, 'edit-profile', err);
     throw err;
   } finally {
+    if (lockAcquired) await releaseAccountLock(data.accountId, 'edit-profile');
     // Persist cookies to BOTH disk AND DB (BUG-H2 fix)
     if (ctx?.context) {
       try {

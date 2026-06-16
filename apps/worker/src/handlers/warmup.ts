@@ -24,6 +24,7 @@ import { SocketLogger } from '../lib/socket-logger.js';
 import { emitWorkerError } from '../lib/error-classifier.js';
 import { prisma } from '../lib/prisma.js';
 import { loadAccountContext } from '../lib/account-context.js';
+import { acquireAccountLock, releaseAccountLock } from '../lib/account-lock.js';
 import type { Browser, Page } from 'patchright';
 import type { GhostCursor } from 'ghost-cursor';
 
@@ -139,8 +140,16 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
   const data = job.data;
   const logger = new SocketLogger(data.userId);
   let browser: Browser | null = null;
+  let lockAcquired = false;
 
   try {
+    // Acquire per-account lock — prevent concurrent browser sessions
+    const holder = await acquireAccountLock(data.accountId, 'warmup');
+    if (holder) {
+      logger.warn(`⏭️ Пропускаю прогрев — для аккаунта уже запущен: ${holder}`);
+      throw new Error(`Account ${data.accountId} is busy: ${holder}`);
+    }
+    lockAcquired = true;
     const ctxAcc = await loadAccountContext(data.accountId);
 
     if (!ctxAcc.warmupStartedAt) {
@@ -302,6 +311,7 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     emitWorkerError(logger, data.accountId, 'warmup', err);
     throw err;
   } finally {
+    if (lockAcquired) await releaseAccountLock(data.accountId, 'warmup');
     // Persist cookies to BOTH disk AND DB before closing browser (BUG-C5 fix)
     if (browser) {
       try {

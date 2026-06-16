@@ -25,6 +25,7 @@ import { humanType } from '../core/humanity/typing-emulator.js';
 import { SocketLogger } from '../lib/socket-logger.js';
 import { emitWorkerError } from '../lib/error-classifier.js';
 import { loadAccountContext } from '../lib/account-context.js';
+import { acquireAccountLock, releaseAccountLock } from '../lib/account-lock.js';
 import { prisma } from '../lib/prisma.js';
 import type { Browser } from 'patchright';
 
@@ -58,8 +59,16 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
   let uniquifiedPath: string | null = null;
   let banneredPath: string | null = null;
   let ctx: any = null;
+  let lockAcquired = false;
 
   try {
+    // Acquire per-account lock — prevent concurrent browser sessions
+    const holder = await acquireAccountLock(data.accountId, 'upload');
+    if (holder) {
+      logger.warn(`⏭️ Пропускаю залив — для аккаунта уже запущен: ${holder}`);
+      throw new Error(`Account ${data.accountId} is busy: ${holder}`);
+    }
+    lockAcquired = true;
     await prisma.video.update({ where: { id: data.videoId }, data: { status: 'PROCESSING' } });
 
     const ctxAcc = await loadAccountContext(data.accountId);
@@ -274,6 +283,7 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
     emitWorkerError(logger, data.accountId, 'upload', err);
     throw err;
   } finally {
+    if (lockAcquired) await releaseAccountLock(data.accountId, 'upload');
     // Save updated session cookies BEFORE closing browser (M-1 fix)
     // Cookies like tt_webid, s_v_web_id get refreshed during sessions.
     // Without saving them, accounts get logged out frequently.

@@ -17,11 +17,11 @@
 
 import { Job } from 'bullmq';
 import { launchStealthContext, closeBrowser } from '../core/browser/patchright-launcher.js';
-import { loadCookiesFromEncryptedStore, type BrowserCookie } from '../core/auth/cookie-store.js';
 import { SocketLogger } from '../lib/socket-logger.js';
 import { emitWorkerError } from '../lib/error-classifier.js';
 import { loadAccountContext } from '../lib/account-context.js';
 import { prisma } from '../lib/prisma.js';
+import { acquireAccountLock, releaseAccountLock } from '../lib/account-lock.js';
 import type { Browser } from 'patchright';
 
 // ── Types ───────────────────────────────────────────────────
@@ -111,6 +111,7 @@ export async function analyticsHandler(job: Job<any>): Promise<ProfileStats | { 
   // ── Per-Account Analytics Mode ────────────────────────────
   const logger = new SocketLogger(data.userId);
   let browser: Browser | null = null;
+  let lockAcquired = false;
 
   try {
     const ctxAcc = await loadAccountContext(data.accountId);
@@ -118,34 +119,27 @@ export async function analyticsHandler(job: Job<any>): Promise<ProfileStats | { 
 
     logger.info(`📊 Сбор аналитики для ${data.accountId} (${platform})...`);
 
-    // Load saved cookies
-    const cookies = await loadCookiesFromEncryptedStore(
-      data.accountId,
-      data.cookiesDir ?? '/data/cookies',
-    );
-    if (cookies.length === 0) {
-      logger.warn('⚠️ Нет cookies — пропускаю сбор статистики');
+    // ── Per-account lock: skip if warmup/upload/login is running ──
+    // Two browser sessions for the same account = different IPs/fingerprint
+    // collisions = instant ban.
+    const holder = await acquireAccountLock(data.accountId, 'analytics');
+    if (holder) {
+      logger.info(`⏭️ Пропускаю аналитику — для аккаунта уже запущен: ${holder}`);
       return _emptyStats();
     }
+    lockAcquired = true;
 
-    // Launch browser with account fingerprint
-    const stealth = await launchStealthContext(fingerprint, proxyUrl);
+    // Launch browser with SAME LaunchOptions as login/warmup/upload
+    // This ensures identical fingerprint, proxy, and cookie injection
+    const stealth = await launchStealthContext({
+      accountId: data.accountId,
+      proxyUrl,
+      cookiesPath: data.cookiesDir ?? '/data/cookies',
+      fingerprint,
+    });
     browser = stealth.browser;
-    const context = stealth.context;
+    const page = stealth.page;
 
-    // Inject saved cookies into browser context
-    await context.addCookies(cookies.map(c => ({
-      name: c.name,
-      value: c.value,
-      domain: c.domain,
-      path: c.path || '/',
-      expires: c.expires || -1,
-      httpOnly: c.httpOnly ?? false,
-      secure: c.secure ?? false,
-      sameSite: (c.sameSite as 'Strict' | 'Lax' | 'None') || 'Lax',
-    })));
-
-    const page = await context.newPage();
     let stats: ProfileStats;
 
     if (platform === 'TIKTOK') {
@@ -170,6 +164,7 @@ export async function analyticsHandler(job: Job<any>): Promise<ProfileStats | { 
     emitWorkerError(logger, data.accountId, 'analytics', err);
     throw err;
   } finally {
+    if (lockAcquired) await releaseAccountLock(data.accountId, 'analytics');
     if (browser) await closeBrowser(browser);
     logger.disconnect();
   }
