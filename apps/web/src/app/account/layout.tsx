@@ -29,10 +29,16 @@ export default function AccountLayout({
         setUser(data)
         setLoading(false)
       })
-      .catch(() => {
-        router.push("/auth/sign-in")
+      .catch((err) => {
+        // Use window.location for hard redirect — ensures layout unmounts
+        // and loading spinner doesn't persist
+        if (err?.body?.pendingApproval) {
+          window.location.href = "/auth/sign-in"
+        } else {
+          window.location.href = "/auth/sign-in"
+        }
       })
-  }, [router])
+  }, [])
 
   // ── Global worker error listener ──────────────────────────
   // Listens for structured error events from ALL worker handlers
