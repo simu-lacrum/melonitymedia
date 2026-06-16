@@ -31,6 +31,23 @@ async function main() {
       END $$;
     `);
 
+    // Add isApproved + approvedAt columns for admin approval system
+    // New users default to false (need admin approval before they can login)
+    // All existing users are auto-approved to prevent lockout
+    await prisma.$executeRawUnsafe(`
+      DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'User' AND column_name = 'isApproved'
+        ) THEN
+          ALTER TABLE "User" ADD COLUMN "isApproved" BOOLEAN NOT NULL DEFAULT false;
+          ALTER TABLE "User" ADD COLUMN "approvedAt" TIMESTAMP(3);
+          -- Approve all existing users (they were registered before this feature)
+          UPDATE "User" SET "isApproved" = true, "approvedAt" = NOW();
+        END IF;
+      END $$;
+    `);
+
     console.log('[db-sync] Schema synced OK');
   } catch (err) {
     // Non-fatal: log but don't crash the server
