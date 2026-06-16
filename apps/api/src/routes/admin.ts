@@ -80,6 +80,8 @@ router.get('/users', async (_req: Request, res: Response) => {
         maxThreads: true,
         isBanned: true,
         bannedAt: true,
+        isApproved: true,
+        approvedAt: true,
         createdAt: true,
         _count: { select: { accounts: true, tasks: true } },
       },
@@ -255,6 +257,93 @@ router.post('/users/:id/unban', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[Admin] Unban error:', err);
     res.status(500).json({ error: 'Ошибка при разблокировке' });
+  }
+});
+
+// ── POST /users/:id/approve — approve pending registration ──
+router.post('/users/:id/approve', async (req: Request, res: Response) => {
+  try {
+    const targetUser = await prisma.user.findUnique({
+      where: { id: req.params.id as string },
+      select: { id: true, isApproved: true },
+    });
+
+    if (!targetUser) {
+      res.status(404).json({ error: 'Пользователь не найден' });
+      return;
+    }
+
+    if (targetUser.isApproved) {
+      res.status(400).json({ error: 'Пользователь уже одобрен' });
+      return;
+    }
+
+    await prisma.user.update({
+      where: { id: req.params.id as string },
+      data: { isApproved: true, approvedAt: new Date() },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        userId: req.user!.id,
+        action: 'user.approve',
+        details: { targetUserId: req.params.id as string },
+        ip: req.ip,
+      },
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Admin] Approve error:', err);
+    res.status(500).json({ error: 'Ошибка при одобрении' });
+  }
+});
+
+// ── POST /users/:id/revoke — revoke access (unapprove) ──────
+router.post('/users/:id/revoke', async (req: Request, res: Response) => {
+  try {
+    if (req.params.id === req.user!.id) {
+      res.status(400).json({ error: 'Нельзя отозвать доступ у самого себя' });
+      return;
+    }
+
+    const targetUser = await prisma.user.findUnique({
+      where: { id: req.params.id as string },
+      select: { id: true, isApproved: true, role: true },
+    });
+
+    if (!targetUser) {
+      res.status(404).json({ error: 'Пользователь не найден' });
+      return;
+    }
+
+    await prisma.user.update({
+      where: { id: req.params.id as string },
+      data: { isApproved: false, approvedAt: null },
+    });
+
+    // Cancel all pending/running tasks for this user
+    await prisma.task.updateMany({
+      where: {
+        userId: req.params.id as string,
+        status: { in: ['PENDING', 'RUNNING'] },
+      },
+      data: { status: 'CANCELLED' },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        userId: req.user!.id,
+        action: 'user.revoke',
+        details: { targetUserId: req.params.id as string },
+        ip: req.ip,
+      },
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Admin] Revoke error:', err);
+    res.status(500).json({ error: 'Ошибка при отзыве доступа' });
   }
 });
 

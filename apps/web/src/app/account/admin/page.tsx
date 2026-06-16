@@ -11,7 +11,7 @@ import { Separator } from "@/components/ui/separator"
 import { Progress } from "@/components/ui/progress"
 import {
   Server, Database, HardDrive, Cpu, Shield, Users, Ban,
-  Loader2, RefreshCw, Plus, Trash2, AlertCircle
+  Loader2, RefreshCw, Plus, Trash2, AlertCircle, CheckCircle, XCircle, Undo2
 } from "lucide-react"
 import { api, ApiError } from "@/lib/api"
 import { toast } from "sonner"
@@ -37,6 +37,8 @@ interface AdminUser {
   maxThreads: number
   isBanned: boolean
   bannedAt?: string
+  isApproved: boolean
+  approvedAt?: string
   createdAt: string
   _count: { accounts: number; tasks: number }
 }
@@ -82,6 +84,31 @@ export default function AdminPage() {
       toast.success("Пользователь заблокирован")
       loadAll()
     } catch { toast.error("Ошибка бана") }
+  }
+
+  const handleUnban = async (userId: string) => {
+    try {
+      await api.post(`/api/admin/users/${userId}/unban`)
+      toast.success("Пользователь разблокирован")
+      loadAll()
+    } catch { toast.error("Ошибка разблокировки") }
+  }
+
+  const handleApprove = async (userId: string) => {
+    try {
+      await api.post(`/api/admin/users/${userId}/approve`)
+      toast.success("Доступ одобрен")
+      loadAll()
+    } catch { toast.error("Ошибка одобрения") }
+  }
+
+  const handleRevoke = async (userId: string) => {
+    if (!confirm("Отозвать доступ у пользователя? Все его задачи будут отменены.")) return
+    try {
+      await api.post(`/api/admin/users/${userId}/revoke`)
+      toast.success("Доступ отозван")
+      loadAll()
+    } catch { toast.error("Ошибка отзыва доступа") }
   }
 
   const handleBlockIp = async () => {
@@ -257,21 +284,62 @@ export default function AdminPage() {
                   <TableCell>
                     {user.isBanned ? (
                       <Badge variant="destructive">Заблокирован</Badge>
+                    ) : !user.isApproved ? (
+                      <Badge variant="outline" className="border-amber-500 text-amber-500">Ожидает</Badge>
                     ) : (
                       <Badge variant="default">Активен</Badge>
                     )}
                   </TableCell>
                   <TableCell>
-                    {!user.isBanned && user.role !== "ADMIN" && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-                        onClick={() => handleBan(user.id)}
-                      >
-                        <Ban className="size-4" />
-                      </Button>
-                    )}
+                    <div className="flex items-center gap-1">
+                      {/* Pending approval → show Approve button */}
+                      {!user.isApproved && !user.isBanned && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-8 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-500/10"
+                          onClick={() => handleApprove(user.id)}
+                          title="Одобрить"
+                        >
+                          <CheckCircle className="size-4" />
+                        </Button>
+                      )}
+                      {/* Approved non-admin → show Revoke + Ban */}
+                      {user.isApproved && user.role !== "ADMIN" && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-8 text-amber-500 hover:text-amber-600 hover:bg-amber-500/10"
+                            onClick={() => handleRevoke(user.id)}
+                            title="Отозвать доступ"
+                          >
+                            <XCircle className="size-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => handleBan(user.id)}
+                            title="Заблокировать"
+                          >
+                            <Ban className="size-4" />
+                          </Button>
+                        </>
+                      )}
+                      {/* Banned → show Unban */}
+                      {user.isBanned && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-8 text-blue-500 hover:text-blue-600 hover:bg-blue-500/10"
+                          onClick={() => handleUnban(user.id)}
+                          title="Разблокировать"
+                        >
+                          <Undo2 className="size-4" />
+                        </Button>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

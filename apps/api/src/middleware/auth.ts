@@ -30,15 +30,21 @@ export async function authMiddleware(
   try {
     const payload = jwt.verify(token, JWT_SECRET) as JwtPayload;
 
-    // Check if user is banned — instant rejection
+    // Check if user is banned or not approved — instant rejection
     const user = await prisma.user.findUnique({
       where: { id: payload.id },
-      select: { isBanned: true },
+      select: { isBanned: true, isApproved: true },
     });
 
     if (!user || user.isBanned) {
       res.clearCookie('melonity_token');
       res.status(403).json({ error: 'Аккаунт заблокирован' });
+      return;
+    }
+
+    if (!user.isApproved) {
+      res.clearCookie('melonity_token');
+      res.status(403).json({ error: 'Аккаунт ожидает одобрения администратором', pendingApproval: true });
       return;
     }
 

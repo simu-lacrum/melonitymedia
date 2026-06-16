@@ -35,6 +35,8 @@ model User {
   maxThreads   Int       @default(3)    // concurrent browser sessions limit
   isBanned     Boolean   @default(false)
   bannedAt     DateTime?
+  isApproved   Boolean   @default(false) // admin must approve new registrations
+  approvedAt   DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 

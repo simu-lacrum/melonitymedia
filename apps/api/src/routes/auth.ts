@@ -71,21 +71,33 @@ router.post('/register', authRateLimit, async (req: Request, res: Response) => {
       return;
     }
 
-    // First user ever → ADMIN. This is the bootstrap mechanism:
+    // First user ever → ADMIN + auto-approved. This is the bootstrap mechanism:
     // no seed script needed, just register and you're admin.
     const userCount = await prisma.user.count();
-    const role = userCount === 0 ? 'ADMIN' : 'USER';
+    const isFirstUser = userCount === 0;
+    const role = isFirstUser ? 'ADMIN' : 'USER';
 
     const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
     const user = await prisma.user.create({
-      data: { email, passwordHash, name: displayName, role },
+      data: {
+        email,
+        passwordHash,
+        name: displayName,
+        role,
+        isApproved: isFirstUser,  // first user (admin) auto-approved
+        approvedAt: isFirstUser ? new Date() : null,
+      },
     });
 
-    issueToken(res, { id: user.id, email: user.email, role: user.role });
+    // If approved (admin), issue token immediately
+    if (user.isApproved) {
+      issueToken(res, { id: user.id, email: user.email, role: user.role });
+    }
 
     res.status(201).json({
       user: { id: user.id, email: user.email, name: user.name, role: user.role },
+      pendingApproval: !user.isApproved,
     });
   } catch (err) {
     console.error('[Auth] Registration error:', err);
@@ -113,6 +125,11 @@ router.post('/login', authRateLimit, async (req: Request, res: Response) => {
 
     if (user.isBanned) {
       res.status(403).json({ error: 'Аккаунт заблокирован' });
+      return;
+    }
+
+    if (!user.isApproved) {
+      res.status(403).json({ error: 'Аккаунт ожидает одобрения администратором', pendingApproval: true });
       return;
     }
 

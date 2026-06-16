@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Loader2, AlertCircle } from "lucide-react"
+import { Loader2, AlertCircle, Clock } from "lucide-react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { api } from "@/lib/api"
@@ -16,6 +16,7 @@ export default function SignUpPage() {
   const router = useRouter()
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState("")
+  const [pendingApproval, setPendingApproval] = React.useState(false)
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -35,8 +36,14 @@ export default function SignUpPage() {
     }
 
     try {
-      await api.post("/api/auth/register", { email, username, password })
-      router.push("/account/dashboard")
+      const res = await api.post<{ pendingApproval?: boolean }>("/api/auth/register", { email, username, password })
+      if (res.pendingApproval) {
+        // Non-admin user → show pending message
+        setPendingApproval(true)
+      } else {
+        // First user (admin) → auto-approved, redirect
+        router.push("/account/dashboard")
+      }
     } catch (err: any) {
       setError(err.message || "Ошибка регистрации")
     } finally {
@@ -52,10 +59,26 @@ export default function SignUpPage() {
     >
       <Card className="w-full">
         <CardHeader className="text-center pb-2">
-          <CardTitle className="text-2xl font-semibold">Регистрация</CardTitle>
-          <CardDescription>Создайте аккаунт MelonityMedia</CardDescription>
+          <CardTitle className="text-2xl font-semibold">{pendingApproval ? "Заявка отправлена" : "Регистрация"}</CardTitle>
+          <CardDescription>{pendingApproval ? "Ожидайте одобрения администратора" : "Создайте аккаунт MelonityMedia"}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
+          {pendingApproval ? (
+            <div className="flex flex-col items-center gap-4 py-6">
+              <div className="size-16 rounded-full bg-amber-500/10 flex items-center justify-center">
+                <Clock className="size-8 text-amber-500" />
+              </div>
+              <div className="text-center space-y-2">
+                <p className="text-sm text-muted-foreground">
+                  Ваш аккаунт успешно создан. Администратор должен одобрить вашу заявку, прежде чем вы сможете войти.
+                </p>
+              </div>
+              <Link href="/auth/sign-in">
+                <Button variant="outline">Перейти ко входу</Button>
+              </Link>
+            </div>
+          ) : (
+            <>
           {error && (
             <Alert variant="destructive">
               <AlertCircle className="size-4" />
@@ -101,6 +124,8 @@ export default function SignUpPage() {
               Войти
             </Link>
           </div>
+            </>
+          )}
         </CardContent>
       </Card>
     </motion.div>
