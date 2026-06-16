@@ -97,7 +97,7 @@ const QUEUE_CONFIGS: QueueConfig[] = [
   { name: 'warmup',          handler: warmupHandler,               concurrency: 3 },
   { name: 'cookies',         handler: cookiesHandler,              concurrency: 3 },
   { name: 'edit-profile',    handler: editProfileHandler,          concurrency: 3 },
-  { name: 'analytics-cron',  handler: analyticsHandler,            concurrency: 2 },
+  { name: 'analytics-cron',  handler: analyticsHandler,            concurrency: 1 },
   { name: 'cleanup',         handler: cleanupHandler,              concurrency: 1 },
   { name: 'shadowban-check', handler: shadowbanDetectorHandler,    concurrency: 2 },
   { name: 'login',           handler: loginHandler,                concurrency: 3 },

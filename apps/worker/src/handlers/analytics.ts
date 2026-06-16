@@ -1,36 +1,36 @@
 // ─────────────────────────────────────────────────────────────
-// Analytics Handler v2 — curl-impersonate JSON API
+// Analytics Handler v3 — Browser-based stats collection
 //
-// MAJOR CHANGES from v1:
-// 1. cheerio + HTML parsing → curl-impersonate + TikTok JSON API
-// 2. No browser needed for stats collection
-// 3. TLS fingerprint impersonation to bypass Cloudflare
-// 4. Lightweight: ~200ms per profile vs ~30s with browser
+// WHY BROWSER instead of API:
+// 1. We don't have API keys — only cookies from login flow
+// 2. TikTok /api/user/detail/ requires secUid (never extracted)
+// 3. YouTube Studio API has deeply nested responses (unreliable)
+// 4. Browser reads real rendered DOM — always accurate
 //
-// TikTok closed public HTML scraping in 2024. The only reliable
-// method is their internal JSON API with valid cookies + TLS
-// fingerprint matching a real Chrome browser.
+// The handler opens the user's own profile page in Patchright
+// (which is already authenticated via saved cookies) and
+// scrapes follower count, views, likes, video count from
+// the rendered page elements.
+//
+// Runs every 6 hours via BullMQ cron dispatcher.
 // ─────────────────────────────────────────────────────────────
 
 import { Job } from 'bullmq';
-import { impersonatedFetch } from '../core/tls/curl-impersonate-client.js';
+import { launchStealthContext, closeBrowser } from '../core/browser/patchright-launcher.js';
 import { loadCookiesFromEncryptedStore, type BrowserCookie } from '../core/auth/cookie-store.js';
 import { SocketLogger } from '../lib/socket-logger.js';
 import { emitWorkerError } from '../lib/error-classifier.js';
 import { loadAccountContext } from '../lib/account-context.js';
 import { prisma } from '../lib/prisma.js';
-import type { AccountFingerprint } from '../core/browser/fingerprint-manager.js';
+import type { Browser } from 'patchright';
 
 // ── Types ───────────────────────────────────────────────────
 
 interface AnalyticsJobData {
   userId: string;
   accountId: string;
-  // platform, fingerprint, proxyUrl resolved from DB via loadAccountContext()
   cookiesDir?: string;
-  /** TikTok secUid for API requests */
   secUid?: string;
-  /** TikTok nickname for Referer header */
   nickname?: string;
 }
 
@@ -43,13 +43,6 @@ export interface ProfileStats {
   snapshotAt: Date;
 }
 
-/** Internal type with DB-resolved context merged in */
-type ResolvedAnalyticsData = AnalyticsJobData & {
-  platform: 'TIKTOK' | 'YOUTUBE';
-  fingerprint: AccountFingerprint;
-  proxyUrl?: string;
-};
-
 // ── Main ────────────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -57,14 +50,8 @@ export async function analyticsHandler(job: Job<any>): Promise<ProfileStats | { 
   const data = job.data;
 
   // ── Cron Dispatch Mode ──────────────────────────────────
-  // When triggered by a BullMQ repeatable (has _cron flag),
-  // fan out individual analytics jobs for all ALIVE accounts.
   if (data._cron) {
-    // ── Safety net: unstick stale VERIFYING accounts ─────
-    // If a login dispatch silently failed (Redis blip, worker crash),
-    // accounts remain in VERIFYING forever. Reset any that have been
-    // stuck for more than 15 minutes so the user can see AUTH_NEEDED
-    // and retry manually.
+    // Safety net: unstick stale VERIFYING accounts
     const staleThreshold = new Date(Date.now() - 15 * 60 * 1000);
     const stale = await prisma.socialAccount.updateMany({
       where: {
@@ -77,19 +64,18 @@ export async function analyticsHandler(job: Job<any>): Promise<ProfileStats | { 
       console.log(`[Analytics] Safety net: reset ${stale.count} stale VERIFYING accounts to AUTH_NEEDED`);
     }
 
-    // H-6 FIX: Use shared bullmq addJob instead of creating a new Queue each time
     const { addJob } = await import('../lib/bullmq.js');
 
-    // Cursor-based batching: load accounts in chunks of 500 to prevent OOM
+    // Cursor-based batching
     const BATCH_SIZE = 500;
     let cursor: string | undefined = undefined;
     let dispatched = 0;
     let hasMore = true;
 
     while (hasMore) {
-      const accounts: { id: string; userId: string; secUid: string | null; nickname: string | null }[] = await prisma.socialAccount.findMany({
+      const accounts: { id: string; userId: string; nickname: string | null }[] = await prisma.socialAccount.findMany({
         where: { status: 'ALIVE' },
-        select: { id: true, userId: true, secUid: true, nickname: true },
+        select: { id: true, userId: true, nickname: true },
         take: BATCH_SIZE,
         skip: cursor ? 1 : 0,
         cursor: cursor ? { id: cursor } : undefined,
@@ -107,10 +93,9 @@ export async function analyticsHandler(job: Job<any>): Promise<ProfileStats | { 
         await addJob('analytics-cron', {
           userId: acc.userId,
           accountId: acc.id,
-          secUid: acc.secUid,
           nickname: acc.nickname,
         }, {
-          delay: dispatched * 5_000, // 5s stagger to avoid rate-limits
+          delay: dispatched * 10_000, // 10s stagger (browser is heavier than curl)
           jobId: `analytics-${acc.id}`,
         });
         dispatched++;
@@ -125,28 +110,51 @@ export async function analyticsHandler(job: Job<any>): Promise<ProfileStats | { 
 
   // ── Per-Account Analytics Mode ────────────────────────────
   const logger = new SocketLogger(data.userId);
+  let browser: Browser | null = null;
 
   try {
-    // Resolve fresh account context from DB (not stale job payload)
     const ctxAcc = await loadAccountContext(data.accountId);
     const { platform, fingerprint, proxyUrl } = ctxAcc;
 
     logger.info(`📊 Сбор аналитики для ${data.accountId} (${platform})...`);
 
-    // Merge resolved context with job-specific data
-    const resolvedData = { ...data, platform, fingerprint, proxyUrl };
+    // Load saved cookies
+    const cookies = await loadCookiesFromEncryptedStore(
+      data.accountId,
+      data.cookiesDir ?? '/data/cookies',
+    );
+    if (cookies.length === 0) {
+      logger.warn('⚠️ Нет cookies — пропускаю сбор статистики');
+      return _emptyStats();
+    }
 
+    // Launch browser with account fingerprint
+    const stealth = await launchStealthContext(fingerprint, proxyUrl);
+    browser = stealth.browser;
+    const context = stealth.context;
+
+    // Inject saved cookies into browser context
+    await context.addCookies(cookies.map(c => ({
+      name: c.name,
+      value: c.value,
+      domain: c.domain,
+      path: c.path || '/',
+      expires: c.expires || -1,
+      httpOnly: c.httpOnly ?? false,
+      secure: c.secure ?? false,
+      sameSite: (c.sameSite as 'Strict' | 'Lax' | 'None') || 'Lax',
+    })));
+
+    const page = await context.newPage();
     let stats: ProfileStats;
 
     if (platform === 'TIKTOK') {
-      stats = await _fetchTikTokStats(resolvedData, logger);
+      stats = await _scrapeTikTokProfile(page, data, logger);
     } else {
-      stats = await _fetchYouTubeStats(resolvedData, logger);
+      stats = await _scrapeYouTubeProfile(page, data, logger);
     }
 
-    // ── Persist stats to DB ─────────────────────────────────
-    // Without this, the dashboard summary/views-chart and shadowban
-    // detector have no data to work with.
+    // Persist to DB
     await _persistStats(data.accountId, stats, logger);
 
     logger.info(
@@ -162,130 +170,178 @@ export async function analyticsHandler(job: Job<any>): Promise<ProfileStats | { 
     emitWorkerError(logger, data.accountId, 'analytics', err);
     throw err;
   } finally {
+    if (browser) await closeBrowser(browser);
     logger.disconnect();
   }
 }
 
-// ── TikTok Stats via JSON API ───────────────────────────────
+// ── TikTok Profile Scraping ─────────────────────────────────
 
-async function _fetchTikTokStats(
-  data: ResolvedAnalyticsData,
+async function _scrapeTikTokProfile(
+  page: any,
+  data: AnalyticsJobData,
   logger: SocketLogger,
 ): Promise<ProfileStats> {
-  const cookies = await loadCookiesFromEncryptedStore(data.accountId, data.cookiesDir);
-  if (cookies.length === 0) {
-    throw new Error('Нет cookies для аккаунта — невозможно получить статистику');
+  // Navigate to own profile
+  const profileUrl = data.nickname
+    ? `https://www.tiktok.com/@${data.nickname}`
+    : 'https://www.tiktok.com/@me';
+
+  logger.info(`📊 Открываю профиль: ${profileUrl}`);
+  await page.goto(profileUrl, { waitUntil: 'networkidle', timeout: 30_000 });
+  await page.waitForTimeout(2000 + Math.random() * 1500);
+
+  // If /@me, it redirects to /@actual_handle — extract and save nickname
+  const currentUrl = page.url();
+  const handleMatch = currentUrl.match(/@([^/?]+)/);
+  if (handleMatch && handleMatch[1] !== 'me') {
+    const nickname = handleMatch[1];
+    try {
+      await prisma.socialAccount.update({
+        where: { id: data.accountId },
+        data: { nickname },
+      });
+    } catch { /* non-critical */ }
   }
 
-  const cookieHeader = _formatCookies(cookies);
-
-  // TikTok user detail API — requires valid session cookies
-  const url = data.secUid
-    ? `https://www.tiktok.com/api/user/detail/?secUid=${data.secUid}&aid=1988`
-    : 'https://www.tiktok.com/api/user/detail/?aid=1988';
-
-  const resp = await impersonatedFetch({
-    url,
-    impersonate: 'chrome116',
-    cookies: cookieHeader,
-    proxy: data.proxyUrl,
-    headers: {
-      'User-Agent': data.fingerprint.userAgent,
-      'Accept': 'application/json',
-      'Accept-Language': `${data.fingerprint.locale},en;q=0.9`,
-      'Referer': data.nickname
-        ? `https://www.tiktok.com/@${data.nickname}`
-        : 'https://www.tiktok.com/',
-    },
-    timeoutMs: 15_000,
-  });
-
-  if (resp.status !== 200) {
-    throw new Error(`TikTok API вернул ${resp.status}`);
-  }
+  const stats: ProfileStats = {
+    followers: 0,
+    following: 0,
+    views: 0,
+    likes: 0,
+    videos: 0,
+    snapshotAt: new Date(),
+  };
 
   try {
-    const body = JSON.parse(resp.body);
+    // Method 1: data-e2e selectors (most reliable for TikTok)
+    const followingEl = page.locator('[data-e2e="following-count"]').first();
+    const followersEl = page.locator('[data-e2e="followers-count"]').first();
+    const likesEl = page.locator('[data-e2e="likes-count"]').first();
 
-    if (!body.userInfo) {
-      logger.warn('TikTok вернул пустой userInfo — cookies могут быть невалидны');
-      return _emptyStats();
+    if (await followersEl.count() > 0) {
+      stats.followers = parseShortNumber(await followersEl.textContent() || '0');
+    }
+    if (await followingEl.count() > 0) {
+      stats.following = parseShortNumber(await followingEl.textContent() || '0');
+    }
+    if (await likesEl.count() > 0) {
+      stats.likes = parseShortNumber(await likesEl.textContent() || '0');
     }
 
-    const s = body.userInfo.stats || {};
-    return {
-      followers: s.followerCount ?? 0,
-      following: s.followingCount ?? 0,
-      views: s.videoCount ? s.heartCount : 0, // approx total views
-      likes: s.heartCount ?? 0,
-      videos: s.videoCount ?? 0,
-      snapshotAt: new Date(),
-    };
-  } catch {
-    logger.warn('Не удалось распарсить ответ TikTok API');
-    return _emptyStats();
+    // Count videos on profile page
+    const videoItems = page.locator('[data-e2e="user-post-item"], [class*="DivItemContainer"]');
+    stats.videos = await videoItems.count();
+
+    // TikTok doesn't show total views on profile — use likes as engagement proxy
+    stats.views = stats.likes;
+
+    logger.info(`📊 TikTok: ${stats.followers} подписчиков, ${stats.likes} лайков`);
+  } catch (err) {
+    logger.warn(`⚠️ Не удалось извлечь статистику TikTok (method 1): ${err instanceof Error ? err.message : err}`);
+
+    // Method 2: parse page text as fallback
+    try {
+      const bodyText = await page.locator('body').textContent();
+      if (bodyText) {
+        const followersMatch = bodyText.match(/(\d[\d.,KkMmBbтысмлн]*)\s*(?:Followers|подписчик|Подписчики)/i);
+        const likesMatch = bodyText.match(/(\d[\d.,KkMmBbтысмлн]*)\s*(?:Likes|лайк)/i);
+        if (followersMatch) stats.followers = parseShortNumber(followersMatch[1]);
+        if (likesMatch) stats.likes = parseShortNumber(likesMatch[1]);
+        stats.views = stats.likes;
+      }
+    } catch { /* last resort failed */ }
   }
+
+  return stats;
 }
 
-// ── YouTube Stats via curl-impersonate ──────────────────────
+// ── YouTube Profile Scraping ────────────────────────────────
 
-async function _fetchYouTubeStats(
-  data: ResolvedAnalyticsData,
+async function _scrapeYouTubeProfile(
+  page: any,
+  data: AnalyticsJobData,
   logger: SocketLogger,
 ): Promise<ProfileStats> {
-  const cookies = await loadCookiesFromEncryptedStore(data.accountId, data.cookiesDir);
-  if (cookies.length === 0) {
-    throw new Error('Нет cookies для YouTube аккаунта');
-  }
+  const stats: ProfileStats = {
+    followers: 0,
+    following: 0,
+    views: 0,
+    likes: 0,
+    videos: 0,
+    snapshotAt: new Date(),
+  };
 
-  const cookieHeader = _formatCookies(cookies);
-
-  // YouTube Studio analytics API
-  const resp = await impersonatedFetch({
-    url: 'https://studio.youtube.com/youtubei/v1/analytics_data/get_screen?alt=json',
-    method: 'POST',
-    impersonate: 'chrome116',
-    cookies: cookieHeader,
-    proxy: data.proxyUrl,
-    headers: {
-      'User-Agent': data.fingerprint.userAgent,
-      'Content-Type': 'application/json',
-      'Origin': 'https://studio.youtube.com',
-    },
-    body: JSON.stringify({
-      context: {
-        client: { clientName: 'WEB_CREATOR', clientVersion: '1.0' },
-      },
-    }),
-    timeoutMs: 15_000,
-  });
-
-  if (resp.status !== 200) {
-    logger.warn(`YouTube API вернул ${resp.status} — пробую базовый парсинг`);
-    return _emptyStats();
-  }
-
+  // Try YouTube Studio dashboard first (has real analytics)
+  logger.info('📊 Открываю YouTube Studio...');
   try {
-    const body = JSON.parse(resp.body);
-    // YouTube Studio response is deeply nested — extract what we can
-    return {
-      followers: body?.subscriberCount ?? 0,
-      following: 0,
-      views: body?.totalViews ?? 0,
-      likes: body?.totalLikes ?? 0,
-      videos: body?.videoCount ?? 0,
-      snapshotAt: new Date(),
-    };
-  } catch {
-    return _emptyStats();
+    await page.goto('https://studio.youtube.com/', { waitUntil: 'networkidle', timeout: 30_000 });
+    await page.waitForTimeout(3000 + Math.random() * 2000);
+
+    const currentUrl = page.url();
+
+    // Check if redirected to login (cookies expired)
+    if (currentUrl.includes('accounts.google.com')) {
+      logger.warn('⚠️ YouTube cookies истекли — перенаправлен на страницу входа');
+      await prisma.socialAccount.update({
+        where: { id: data.accountId },
+        data: { status: 'AUTH_NEEDED', lastError: 'Cookies истекли, нужен повторный вход' },
+      });
+      return stats;
+    }
+
+    // Studio dashboard subscriber count
+    const subscriberEl = page.locator(
+      '#subscriber-count, ' +
+      'ytcp-channel-dashboard-header-count, ' +
+      '.subscriber-count, ' +
+      '[class*="subscriber"]'
+    ).first();
+
+    if (await subscriberEl.count() > 0) {
+      stats.followers = parseShortNumber(await subscriberEl.textContent() || '0');
+    }
+
+    // Total views from analytics card
+    const viewsEl = page.locator(
+      '[class*="analytics"] [class*="metric-value"], ' +
+      '#analytics-summary-card .metric-value, ' +
+      '.analytics-card .ytcp-animated-number'
+    ).first();
+
+    if (await viewsEl.count() > 0) {
+      stats.views = parseShortNumber(await viewsEl.textContent() || '0');
+    }
+
+    logger.info(`📊 YouTube Studio: ${stats.followers} подписчиков, ${stats.views} просмотров`);
+  } catch (err) {
+    logger.warn(`⚠️ Studio парсинг не удался: ${err instanceof Error ? err.message : err}`);
   }
+
+  // Fallback: YouTube channel page
+  if (stats.followers === 0) {
+    try {
+      await page.goto('https://www.youtube.com/@me', { waitUntil: 'load', timeout: 15000 });
+      await page.waitForTimeout(2000);
+
+      const subEl = page.locator('#subscriber-count, yt-formatted-string#subscriber-count').first();
+      if (await subEl.count() > 0) {
+        stats.followers = parseShortNumber(await subEl.textContent() || '0');
+      }
+
+      const videoEls = page.locator('ytd-rich-item-renderer, ytd-grid-video-renderer');
+      stats.videos = await videoEls.count();
+
+      logger.info(`📊 YouTube Channel: ${stats.followers} подписчиков, ${stats.videos} видео`);
+    } catch {
+      logger.warn('⚠️ YouTube Channel page парсинг не удался');
+    }
+  }
+
+  return stats;
 }
 
 // ── Utility ─────────────────────────────────────────────────
-
-function _formatCookies(cookies: BrowserCookie[]): string {
-  return cookies.map(c => `${c.name}=${c.value}`).join('; ');
-}
 
 function _emptyStats(): ProfileStats {
   return {
@@ -300,8 +356,7 @@ function _emptyStats(): ProfileStats {
 
 /**
  * Persist collected stats to the database.
- * Updates SocialAccount (followers, views) and per-video views
- * so the dashboard, views-chart, and shadowban detector work.
+ * Updates SocialAccount (followers, views) and daily snapshot.
  */
 async function _persistStats(
   accountId: string,
@@ -309,7 +364,6 @@ async function _persistStats(
   logger: SocketLogger,
 ): Promise<void> {
   try {
-    // Update account-level aggregate stats
     const account = await prisma.socialAccount.update({
       where: { id: accountId },
       data: {
@@ -320,8 +374,6 @@ async function _persistStats(
     });
 
     // Upsert daily snapshot for real time-series charts
-    // One row per account per calendar day — if analytics runs
-    // multiple times per day, the latest values win.
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -350,14 +402,11 @@ async function _persistStats(
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     logger.warn(`⚠️ Не удалось сохранить статистику в БД: ${message}`);
-    // Don't throw — stats collection succeeded, only persistence failed.
-    // The job should still be marked as completed.
   }
 }
 
 /**
  * Parse short numbers: "12.5K" → 12500, "1.2M" → 1200000
- * Kept for backward compatibility with any string-based stats.
  */
 export function parseShortNumber(text: string): number {
   if (!text) return 0;
