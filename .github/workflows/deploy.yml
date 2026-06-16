@@ -37,13 +37,15 @@ jobs:
             grep -q '^REDIS_PASSWORD=' .env || echo "REDIS_PASSWORD=${REDIS_PASS}" >> .env
             echo "  REDIS_URL=$(grep REDIS_URL .env | head -1)"
 
-            echo "══════ Cleaning orphan containers ══════"
-            # Remove any dead/exited containers that block recreation
-            docker ps -a --filter "name=melonitymedia" --format "{{.ID}} {{.Names}} {{.Status}}" | grep -i "exited\|dead\|created" | awk '{print $1}' | xargs -r docker rm -f 2>/dev/null || true
+            echo "══════ Stopping app containers gracefully ══════"
+            # Stop app services gracefully (respects stop_grace_period)
+            # DB and Redis keep running (they are NOT in this list)
+            docker compose stop api web worker 2>/dev/null || true
+            docker compose rm -f api web worker 2>/dev/null || true
 
-            echo "══════ Building & restarting app containers ══════"
+            echo "══════ Building & starting app containers ══════"
             # Only rebuild app services — not DB/Redis (they persist data)
-            docker compose up -d --build --force-recreate --remove-orphans api web worker
+            docker compose up -d --build --remove-orphans api web worker
 
             echo "══════ Ensuring infrastructure is running ══════"
             docker compose up -d db redis
