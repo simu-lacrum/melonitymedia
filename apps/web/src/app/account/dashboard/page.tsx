@@ -175,7 +175,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Charts + Tasks + Activity */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
         {/* Chart */}
         <Card className="lg:col-span-2">
           <CardHeader>
@@ -214,7 +214,7 @@ export default function DashboardPage() {
                 Активные задачи
               </CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-col gap-3">
+            <CardContent className="flex flex-col gap-3 max-h-[340px] overflow-y-auto">
               {activeTasks.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Нет активных задач</p>
               ) : (

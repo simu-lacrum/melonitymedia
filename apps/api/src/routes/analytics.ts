@@ -93,10 +93,17 @@ router.get('/views-chart', async (req: Request, res: Response) => {
 // ── GET /active-tasks — currently running BullMQ jobs ───────
 router.get('/active-tasks', async (req: Request, res: Response) => {
   try {
+    // Only show tasks that are actually active:
+    // - RUNNING: currently being processed by worker
+    // - PENDING: queued recently (last 2 hours) — older PENDING = stuck/stale
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
     const tasks = await prisma.task.findMany({
       where: {
         userId: req.user!.id,
-        status: { in: ['PENDING', 'RUNNING'] },
+        OR: [
+          { status: 'RUNNING' },
+          { status: 'PENDING', createdAt: { gte: twoHoursAgo } },
+        ],
       },
       orderBy: { createdAt: 'desc' },
       take: 10,
