@@ -189,7 +189,7 @@ async function detect2FAType(page: any, platform: 'TIKTOK' | 'YOUTUBE'): Promise
     }
 
     // ── Check 5: Google Prompt "type/match the number" challenge ──
-    if (/type.*number|match.*number|введите.*число|выберите.*число|number.*shown|число.*которое.*видите|нажмите.*на.*число/i.test(bodyText) && isChallengePage) {
+    if (/(type|match).{1,15}number|введите.{1,20}число|выберите.{1,20}число|number.{1,15}shown|число.{1,15}видите|нажмите.{1,20}число/i.test(bodyText) && isChallengePage) {
       // Extract the challenge number displayed on screen
       const challengeNumber = await _extractChallengeNumber(page);
       return { has2FA: true, type: 'number_match', challengeNumber, hint: challengeNumber ? `Google показывает число ${challengeNumber}. Выберите его на вашем телефоне.` : 'Google показывает число для подтверждения. Выберите его на телефоне.' };
@@ -242,7 +242,7 @@ async function _extractChallengeNumber(page: any): Promise<string | undefined> {
     // Pattern 3: Fallback parsing body text but safely (no 0, no years)
     const bodyText = await page.textContent('body').catch(() => '');
     const afterInstruction = bodyText.match(
-      /(?:type|match|enter|tap|select|нажмите|выберите|введите|число.*которое.*видите)[^0-9]*([1-9][0-9]?)\b/i
+      /(?:type|match|enter|tap|select|нажмите|выберите|введите|число.{1,15}видите)[^0-9]{0,25}([1-9][0-9]?)\b/i
     );
     if (afterInstruction) return afterInstruction[1];
 
@@ -338,7 +338,7 @@ async function _waitForDeviceConfirmationWithTransition(
     }
 
     // Transition detection: phone_prompt → number_match
-    if (currentType === 'phone_prompt' && /type.*number|match.*number|выберите.*число|число.*которое.*видите|нажмите.*на.*число/i.test(bodyText)) {
+    if (currentType === 'phone_prompt' && /(type|match).{1,15}number|выберите.{1,20}число|число.{1,15}видите|нажмите.{1,20}число/i.test(bodyText)) {
       const challengeNumber = await _extractChallengeNumber(page);
       currentType = 'number_match';
       logger.info(`🔄 Challenge изменился: phone_prompt → number_match (число: ${challengeNumber})`);
@@ -1218,7 +1218,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
         emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
         throw new LoginError('CAPTCHA_FAILED', 'Captcha not resolved');
       }
-      else if (/(account.*(suspended|disabled))|(suspended.*account)|заблокирован|приостановлен|(аккаунт.*(отключен|удален))/i.test(bodyText)) {
+      else if (/(?:account\s+(?:is\s+)?(?:suspended|disabled))|(?:suspended\s+account)|аккаунт.{1,20}(?:заблокирован|приостановлен|отключен|удален)/i.test(bodyText)) {
         const errMsg = 'Аккаунт приостановлен платформой.';
         emitLoginEvent(logger, data.accountId, 'login:failed', {
           code: 'ACCOUNT_SUSPENDED',
