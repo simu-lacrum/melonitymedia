@@ -23,6 +23,8 @@ export default function AccountLayout({
   const [user, setUser] = React.useState<any>(null)
   const [loading, setLoading] = React.useState(true)
 
+  const [serverError, setServerError] = React.useState(false)
+
   React.useEffect(() => {
     api.get("/api/auth/me")
       .then((data) => {
@@ -30,12 +32,15 @@ export default function AccountLayout({
         setLoading(false)
       })
       .catch((err) => {
-        // Use window.location for hard redirect — ensures layout unmounts
-        // and loading spinner doesn't persist
-        if (err?.body?.pendingApproval) {
+        // Only redirect to sign-in for AUTH errors (401/403)
+        // For server errors (500/502/network) show error state
+        // to prevent infinite redirect loop when API is down
+        const status = err?.status ?? 0
+        if (status === 401 || status === 403) {
           window.location.href = "/auth/sign-in"
         } else {
-          window.location.href = "/auth/sign-in"
+          setServerError(true)
+          setLoading(false)
         }
       })
   }, [])
@@ -113,6 +118,27 @@ export default function AccountLayout({
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <Loader2 className="size-8 text-primary animate-spin" />
+      </div>
+    )
+  }
+
+  if (serverError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-center space-y-4">
+          <div className="text-4xl">⚠️</div>
+          <h2 className="text-xl font-semibold text-foreground">Сервер недоступен</h2>
+          <p className="text-sm text-muted-foreground max-w-sm">
+            API сервер не отвечает. Возможно, идёт обновление. Попробуйте через минуту.
+          </p>
+          <Button
+            onClick={() => window.location.reload()}
+            variant="outline"
+            className="mt-4"
+          >
+            Попробовать снова
+          </Button>
+        </div>
       </div>
     )
   }
