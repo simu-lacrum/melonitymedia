@@ -7,7 +7,7 @@ export function connectSocket() {
   // Socket.IO connects to domain root — nginx routes /socket.io/ directly to API
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
   const origin = apiUrl.replace(/\/api\/?$/, '') || apiUrl;
-  socket = io(origin, {
+  socket = io(`${origin}/logs`, {
     withCredentials: true,
     transports: ['websocket'],
   });

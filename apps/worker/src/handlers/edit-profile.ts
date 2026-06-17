@@ -452,7 +452,7 @@ async function _editYouTubeProfile(
   if (data.changes.name || data.changes.bio) {
     logger.info('Переход в YouTube Studio для редактирования...');
     // Use 'load' not 'networkidle' — YouTube Studio has endless background XHRs
-    await page.goto('https://studio.youtube.com', { waitUntil: 'load', timeout: 30_000 });
+    await page.goto('https://studio.youtube.com', { waitUntil: 'domcontentloaded', timeout: 60_000 });
     await page.waitForTimeout(_randomDelay(8000, 12000)); // Longer delay — let Studio fully render
 
     // Dismiss ALL overlays/modals (welcome tour, cookie consent, etc.)
@@ -508,7 +508,7 @@ async function _editYouTubeProfile(
       logger.info('Пробую прямой URL /channel/editing/basic_info...');
       try {
         await page.goto('https://studio.youtube.com/channel/editing/basic_info', {
-          waitUntil: 'load', timeout: 30_000,
+          waitUntil: 'domcontentloaded', timeout: 60_000,
         });
         await page.waitForTimeout(_randomDelay(5000, 8000));
         if (page.url().includes('/editing')) {
@@ -542,7 +542,7 @@ async function _editYouTubeProfile(
 
         // Now try Studio again
         await page.goto('https://studio.youtube.com/channel/editing/basic_info', {
-          waitUntil: 'load', timeout: 30_000,
+          waitUntil: 'domcontentloaded', timeout: 60_000,
         });
         await page.waitForTimeout(_randomDelay(10000, 15000));  // Extra wait for SPA render
         
