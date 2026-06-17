@@ -53,6 +53,9 @@ jobs:
             echo "══════ Waiting 30s for containers to start ══════"
             sleep 30
 
+            echo "══════ Restarting nginx (pick up new container IPs) ══════"
+            docker compose restart nginx
+
             echo "══════ Container status ══════"
             docker compose ps
 
