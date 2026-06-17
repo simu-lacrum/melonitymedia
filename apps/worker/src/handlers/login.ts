@@ -24,7 +24,7 @@
 
 import { Job } from 'bullmq';
 import { launchStealthContext, closeBrowser } from '../core/browser/patchright-launcher.js';
-import { createPageCursor, humanClick } from '../core/humanity/biomouse.js';
+import { createPageCursor, humanClick, humanPreActionWander, humanScroll, humanIdleMove } from '../core/humanity/biomouse.js';
 import { humanType } from '../core/humanity/typing-emulator.js';
 import { handleTikTokCaptcha } from '../core/captcha/tiktok-captcha-handler.js';
 import { persistCookies, type BrowserCookie } from '../core/auth/cookie-store.js';
@@ -96,9 +96,9 @@ function decryptField(encrypted: Buffer, iv: Buffer, authTag: Buffer): string {
 }
 
 // ── 2FA type detection ──────────────────────────────────────
-type TwoFAType = 'email' | 'sms' | 'authenticator' | 'unknown';
+type TwoFAType = 'email' | 'sms' | 'authenticator' | 'number_match' | 'phone_prompt' | 'unknown';
 
-async function detect2FAType(page: any, platform: 'TIKTOK' | 'YOUTUBE'): Promise<{ has2FA: boolean; type: TwoFAType; hint: string }> {
+async function detect2FAType(page: any, platform: 'TIKTOK' | 'YOUTUBE'): Promise<{ has2FA: boolean; type: TwoFAType; hint: string; challengeNumber?: string }> {
   if (platform === 'TIKTOK') {
     const currentUrl = page.url();
     const bodyText = await page.textContent('body') || '';
@@ -172,7 +172,7 @@ async function detect2FAType(page: any, platform: 'TIKTOK' | 'YOUTUBE'): Promise
 
     // ── Check 2: "Tap Yes on your phone" / trusted device prompt ──
     if (/tap.*yes|нажмите.*да|check.*phone|проверьте.*телефон|trying to sign in|пытается.*войти/i.test(bodyText) && isChallengePage) {
-      return { has2FA: true, type: 'sms', hint: 'Google просит подтвердить вход на доверенном устройстве. Откройте уведомление на телефоне и нажмите "Да".' };
+      return { has2FA: true, type: 'phone_prompt', hint: 'Google просит подтвердить вход на доверенном устройстве. Откройте уведомление на телефоне и нажмите "Да".' };
     }
 
     // ── Check 3: Recovery email/phone selection page ──
@@ -188,9 +188,11 @@ async function detect2FAType(page: any, platform: 'TIKTOK' | 'YOUTUBE'): Promise
       return { has2FA: true, type: 'unknown', hint: 'Google просит использовать аппаратный ключ безопасности (Security Key). Вставьте ключ и нажмите кнопку.' };
     }
 
-    // ── Check 5: Google Prompt "type the number" challenge ──
-    if (/type.*number|match.*number|введите.*число|number.*shown/i.test(bodyText) && isChallengePage) {
-      return { has2FA: true, type: 'sms', hint: 'Google показывает число для подтверждения. Откройте уведомление на телефоне и выберите показанное число.' };
+    // ── Check 5: Google Prompt "type/match the number" challenge ──
+    if (/type.*number|match.*number|введите.*число|выберите.*число|number.*shown|число.*которое.*видите|нажмите.*на.*число/i.test(bodyText) && isChallengePage) {
+      // Extract the challenge number displayed on screen
+      const challengeNumber = _extractChallengeNumber(bodyText);
+      return { has2FA: true, type: 'number_match', challengeNumber, hint: challengeNumber ? `Google показывает число ${challengeNumber}. Выберите его на вашем телефоне.` : 'Google показывает число для подтверждения. Выберите его на телефоне.' };
     }
 
     // ── Check 6: Generic challenge page without specific type ──
@@ -212,7 +214,154 @@ async function detect2FAType(page: any, platform: 'TIKTOK' | 'YOUTUBE'): Promise
       return { has2FA: true, type: 'unknown', hint: 'Google запросил дополнительные данные для подтверждения' };
     }
   }
-  return { has2FA: false, type: 'unknown', hint: '' };
+  return { has2FA: false, type: 'unknown', hint: '', challengeNumber: undefined };
+}
+
+/**
+ * Extract the challenge number from Google's "match the number" page.
+ * Google shows a prominent 2-digit number that the user must tap on their phone.
+ * The number is typically displayed in large text within the challenge page body.
+ */
+function _extractChallengeNumber(bodyText: string): string | undefined {
+  // Google "match the number" page shows the number prominently.
+  // Common patterns:
+  // - Standalone 2-digit number in the challenge area
+  // - Number after "Нажмите на число" / "match the number" / "type the number"
+  // Strategy: find all 2-digit numbers in the page, the challenge number
+  // is typically one of the first standalone numbers.
+
+  // Pattern 1: Number after instructional text
+  const afterInstruction = bodyText.match(
+    /(?:type|match|enter|tap|select|нажмите|выберите|введите|число.*которое.*видите)[^0-9]*(\d{1,3})/i
+  );
+  if (afterInstruction) return afterInstruction[1];
+
+  // Pattern 2: Look for isolated 2-digit numbers (Google challenge numbers are 2-digit)
+  // Filter out common noise: years, timestamps, etc.
+  const allNumbers = bodyText.match(/\b(\d{2})\b/g);
+  if (allNumbers && allNumbers.length > 0) {
+    // Filter out obviously wrong numbers (00, years like 20, 24, etc.)
+    const candidates = allNumbers.filter(n => {
+      const num = parseInt(n, 10);
+      return num >= 10 && num <= 99 && num !== 20 && num !== 24;
+    });
+    if (candidates.length > 0) return candidates[0];
+  }
+
+  return undefined;
+}
+
+/**
+ * Wait for Google device confirmation (phone_prompt or number_match).
+ * Polls the page URL — when Google accepts confirmation on the phone,
+ * it redirects away from the challenge page.
+ *
+ * @returns true if confirmed, false if timeout
+ */
+async function _waitForDeviceConfirmation(
+  page: any,
+  logger: SocketLogger,
+  timeoutMs: number = 10 * 60 * 1000,
+): Promise<boolean> {
+  const startTime = Date.now();
+  const pollInterval = 3000; // Check every 3 seconds
+
+  while (Date.now() - startTime < timeoutMs) {
+    await page.waitForTimeout(pollInterval);
+
+    const currentUrl = page.url();
+
+    // Success: redirected away from challenge page
+    if (!(/accounts\.google\.com\/(signin\/(challenge|v2\/challenge)|CheckCookie|ServiceLogin)/i.test(currentUrl))
+        && !(/challenge|interstitial|speedbump/i.test(currentUrl))) {
+      logger.info(`✅ Подтверждение на устройстве получено! Redirect: ${currentUrl}`);
+      return true;
+    }
+
+    // Check if the page changed to a different challenge type (e.g. phone_prompt → number_match)
+    const bodyText = await page.textContent('body').catch(() => '') || '';
+    
+    // Check for error states
+    if (/denied|отклонено|declined|wrong.*number|неверное.*число/i.test(bodyText)) {
+      logger.warn(`❌ Подтверждение отклонено на устройстве`);
+      return false;
+    }
+
+    // Log progress every 30 seconds
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    if (elapsed % 30 === 0 && elapsed > 0) {
+      logger.info(`⏳ Ожидаю подтверждение на устройстве... (${elapsed}с)`);
+    }
+  }
+
+  return false; // Timeout
+}
+
+/**
+ * Wait for device confirmation with transition detection.
+ * Handles the flow: phone_prompt ("tap Yes") → number_match ("pick the number").
+ * When a transition is detected, emits updated 2FA info to the frontend.
+ */
+async function _waitForDeviceConfirmationWithTransition(
+  page: any,
+  accountId: string,
+  logger: SocketLogger,
+  initialType: TwoFAType,
+  timeoutMs: number,
+): Promise<boolean> {
+  const startTime = Date.now();
+  const pollInterval = 3000;
+  let currentType = initialType;
+
+  while (Date.now() - startTime < timeoutMs) {
+    await page.waitForTimeout(pollInterval);
+
+    const currentUrl = page.url();
+
+    // Success: redirected away from challenge page
+    const isStillOnChallenge = /accounts\.google\.com\/(signin\/(challenge|v2\/challenge)|CheckCookie|ServiceLogin)/i.test(currentUrl)
+      || /challenge|interstitial|speedbump/i.test(currentUrl);
+
+    if (!isStillOnChallenge) {
+      logger.info(`✅ Подтверждение получено! Redirect: ${currentUrl}`);
+      return true;
+    }
+
+    // Check page content for transitions and errors
+    const bodyText = await page.textContent('body').catch(() => '') || '';
+
+    // Error: user denied or wrong number
+    if (/denied|отклонено|declined|wrong.*number|неверное.*число/i.test(bodyText)) {
+      logger.warn(`❌ Подтверждение отклонено`);
+      return false;
+    }
+
+    // Transition detection: phone_prompt → number_match
+    if (currentType === 'phone_prompt' && /type.*number|match.*number|выберите.*число|число.*которое.*видите|нажмите.*на.*число/i.test(bodyText)) {
+      const challengeNumber = _extractChallengeNumber(bodyText);
+      currentType = 'number_match';
+      logger.info(`🔄 Challenge изменился: phone_prompt → number_match (число: ${challengeNumber})`);
+
+      // Emit updated challenge to frontend
+      emitLoginEvent(logger, accountId, 'login:2fa_required', {
+        type: 'number_match',
+        hint: challengeNumber
+          ? `Google показывает число ${challengeNumber}. Выберите его на вашем телефоне.`
+          : 'Google показывает число для подтверждения. Выберите его на телефоне.',
+        platform: 'YOUTUBE',
+        challengeNumber,
+        timeoutSeconds: Math.max(60, Math.floor((timeoutMs - (Date.now() - startTime)) / 1000)),
+      });
+    }
+
+    // Log progress every 30 seconds
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    if (elapsed % 30 === 0 && elapsed > 0) {
+      logger.info(`⏳ Ожидаю подтверждение... (${elapsed}с, тип: ${currentType})`);
+    }
+  }
+
+  return false;
 }
 
 // ── Main handler ────────────────────────────────────────────
@@ -498,6 +647,8 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
 
       // ── Step 1: Enter email ──────────────────────────────
       logger.info(`⌨️ Ввожу email...`);
+      // Human-like: wander the page before typing (simulate reading)
+      await humanPreActionWander(page, cursor);
       // Google uses #identifierId as main email input (type="email")
       // Wait explicitly for the input to appear (Google JS renders it async)
       const emailSelector = '#identifierId, input[type="email"], input[autocomplete="username"], input[name="identifier"]';
@@ -609,6 +760,9 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
 
       // ── Step 2: Enter password ───────────────────────────
       logger.info(`⌨️ Ввожу пароль...`);
+      // Human-like: idle movement before password entry
+      await humanIdleMove(page, cursor);
+      await page.waitForTimeout(800 + Math.random() * 1200);
       // Google shows password on a separate page, wait for it (longer timeout for slow proxies)
       try {
         await page.waitForSelector('input[type="password"], input[autocomplete="current-password"]', { timeout: 15000 });
@@ -769,15 +923,43 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
         hint: twoFA.hint,
         platform: ctx.platform,
         maskedContact, // so frontend can show which email/phone
+        challengeNumber: twoFA.challengeNumber, // for number_match type
         timeoutSeconds: 600, // 10 minutes
       });
 
-      // ── Step 2: Wait for code with resend support ───────
-      // Loop: wait for user input. If resend → click resend in browser, re-wait.
-      logger.info(`⏳ Ожидаю код подтверждения (10 мин)...`);
-      const codeResult = await _waitForCodeWithResend(
-        page, cursor, data.accountId, ctx.platform, logger, 10 * 60 * 1000,
-      );
+      // ── Step 2: Handle based on 2FA type ───────────────────
+      if (twoFA.type === 'phone_prompt' || twoFA.type === 'number_match') {
+        // For device-based challenges: poll the page URL waiting for
+        // Google to redirect after user confirms on phone
+        logger.info(`📱 Ожидаю подтверждение на устройстве (${twoFA.type === 'number_match' ? `число: ${twoFA.challengeNumber}` : 'нажмите Да'})...`);
+
+        // While polling, also check if challenge changes (phone_prompt → number_match)
+        const confirmed = await _waitForDeviceConfirmationWithTransition(
+          page, data.accountId, logger, twoFA.type, 10 * 60 * 1000,
+        );
+
+        if (!confirmed) {
+          const errMsg = twoFA.type === 'number_match'
+            ? 'Время ожидания выбора числа истекло (10 мин). Повторите попытку.'
+            : 'Время ожидания подтверждения на устройстве истекло (10 мин). Повторите попытку.';
+          await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED', lastError: errMsg });
+          emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
+          emitLoginEvent(logger, data.accountId, 'login:failed', {
+            code: 'TWO_FA_TIMEOUT',
+            message: errMsg,
+          });
+          throw new LoginError('TWO_FA_TIMEOUT', 'Device confirmation timeout');
+        }
+
+        // Device confirmed — skip code entry, go straight to post-login
+        logger.info(`✅ Устройство подтвердило вход!`);
+      } else {
+        // ── Classic code-based 2FA (SMS/email/authenticator) ──
+        // Loop: wait for user input. If resend → click resend in browser, re-wait.
+        logger.info(`⏳ Ожидаю код подтверждения (10 мин)...`);
+        const codeResult = await _waitForCodeWithResend(
+          page, cursor, data.accountId, ctx.platform, logger, 10 * 60 * 1000,
+        );
 
       if (!codeResult) {
         const errMsg = 'Время ожидания кода истекло (10 мин). Повторите попытку входа.';
@@ -883,6 +1065,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
         });
         throw new LoginError('TWO_FA_INVALID', 'Invalid 2FA code');
       }
+      } // end else (classic code-based 2FA)
 
       await job.updateProgress(70);
     }
@@ -919,20 +1102,40 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
             type: lateFA.type,
             hint: lateFA.hint,
             platform: ctx.platform,
+            challengeNumber: lateFA.challengeNumber,
             timeoutSeconds: 600,
           });
 
-          const code = await waitForVerificationCode(data.accountId, 10 * 60 * 1000);
-          if (!code) {
-            const errMsg = `${platformLabel} требует подтверждение. Время ожидания кода истекло (10 мин).`;
-            await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED', lastError: errMsg });
-            emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
-            emitLoginEvent(logger, data.accountId, 'login:failed', {
-              code: 'TWO_FA_TIMEOUT',
-              message: errMsg,
-            });
-            throw new LoginError('TWO_FA_TIMEOUT', 'Late verification timeout');
-          }
+          if (lateFA.type === 'phone_prompt' || lateFA.type === 'number_match') {
+            // Device-based challenge — poll for confirmation
+            logger.info(`📱 Late detection: ожидаю подтверждение на устройстве...`);
+            const confirmed = await _waitForDeviceConfirmationWithTransition(
+              page, data.accountId, logger, lateFA.type, 10 * 60 * 1000,
+            );
+            if (!confirmed) {
+              const errMsg = `${platformLabel} требует подтверждение. Время ожидания истекло (10 мин).`;
+              await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED', lastError: errMsg });
+              emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
+              emitLoginEvent(logger, data.accountId, 'login:failed', {
+                code: 'TWO_FA_TIMEOUT',
+                message: errMsg,
+              });
+              throw new LoginError('TWO_FA_TIMEOUT', 'Late device confirmation timeout');
+            }
+            logger.info(`✅ Устройство подтвердило вход (late detection)!`);
+          } else {
+            // Code-based challenge
+            const code = await waitForVerificationCode(data.accountId, 10 * 60 * 1000);
+            if (!code) {
+              const errMsg = `${platformLabel} требует подтверждение. Время ожидания кода истекло (10 мин).`;
+              await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED', lastError: errMsg });
+              emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
+              emitLoginEvent(logger, data.accountId, 'login:failed', {
+                code: 'TWO_FA_TIMEOUT',
+                message: errMsg,
+              });
+              throw new LoginError('TWO_FA_TIMEOUT', 'Late verification timeout');
+            }
 
           // Enter the code — platform-specific selectors
           logger.info(`📱 Код получен, ввожу...`);
@@ -990,6 +1193,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
             emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
             throw new LoginError('TWO_FA_INVALID', errMsg);
           }
+          } // end else (code-based late 2FA)
         } else {
           // Verification page detected but no code input — inform user
           const errMsg = `${platformLabel} запросил подтверждение входа. Зайдите в аккаунт вручную, подтвердите, затем повторите.`;

@@ -72,9 +72,10 @@ export default function AccountsPage() {
     accountId: string
     username: string  // display name for the account
     hint: string
-    type: string      // email | sms | authenticator | unknown
+    type: string      // email | sms | authenticator | number_match | phone_prompt | unknown
     platform: string
     maskedContact: string  // e.g. x***r@mail.com or +7***123
+    challengeNumber: string  // for number_match: the number to select on phone
     deadline: number  // unix timestamp (ms) when timeout expires
   }
   const [twoFAQueue, setTwoFAQueue] = React.useState<TwoFARequest[]>([])
@@ -162,7 +163,7 @@ export default function AccountsPage() {
       fetchAccounts()
     })
 
-    socket.on("login:2fa_required", (data: { accountId: string; type: string; hint: string; timeoutSeconds: number; platform?: string; maskedContact?: string }) => {
+    socket.on("login:2fa_required", (data: { accountId: string; type: string; hint: string; timeoutSeconds: number; platform?: string; maskedContact?: string; challengeNumber?: string }) => {
       // Find the account to get username for display (use ref for latest data)
       const matchAccount = accountsRef.current.find(a => a.id === data.accountId)
       const displayName = matchAccount?.username || `ID: ${data.accountId.slice(0, 8)}`
@@ -174,12 +175,16 @@ export default function AccountsPage() {
         type: data.type,
         platform: data.platform || "TIKTOK",
         maskedContact: data.maskedContact || "",
+        challengeNumber: data.challengeNumber || "",
         deadline: Date.now() + (data.timeoutSeconds || 600) * 1000,
       }
 
       setTwoFAQueue(prev => {
-        // Don't add duplicate for same account
-        if (prev.some(r => r.accountId === data.accountId)) return prev
+        // Update existing request for same account (transition: phone_prompt → number_match)
+        const existing = prev.find(r => r.accountId === data.accountId)
+        if (existing) {
+          return prev.map(r => r.accountId === data.accountId ? request : r)
+        }
         return [...prev, request]
       })
       setTwoFACode("")
@@ -824,7 +829,7 @@ export default function AccountsPage() {
                       {currentTwoFA.platform === "TIKTOK" ? "TikTok" : "YouTube"}
                     </Badge>
                     <span>•</span>
-                    <span>{currentTwoFA.type === "email" ? "📧 Email" : currentTwoFA.type === "sms" ? "📱 SMS" : currentTwoFA.type === "authenticator" ? "🔐 Authenticator" : "🔑 Код"}</span>
+                    <span>{currentTwoFA.type === "email" ? "📧 Email" : currentTwoFA.type === "sms" ? "📱 SMS" : currentTwoFA.type === "authenticator" ? "🔐 Authenticator" : currentTwoFA.type === "number_match" ? "🔢 Выбор числа" : currentTwoFA.type === "phone_prompt" ? "📲 Подтверждение" : "🔑 Код"}</span>
                   </div>
                 </div>
               </div>
@@ -859,35 +864,81 @@ export default function AccountsPage() {
                 )}
               </div>
 
-              {/* Code input */}
-              <div className="flex flex-col gap-2">
-                <Label>Введите код {currentTwoFA.type === "email" ? "из email" : currentTwoFA.type === "sms" ? "из SMS" : currentTwoFA.type === "authenticator" ? "из приложения" : "подтверждения"}</Label>
-                <Input
-                  placeholder="123456"
-                  value={twoFACode}
-                  onChange={(e) => setTwoFACode(e.target.value.replace(/[^0-9]/g, "").slice(0, 8))}
-                  className="text-center text-2xl font-mono tracking-[0.3em] h-14"
-                  autoFocus
-                  onKeyDown={(e) => { if (e.key === "Enter") handleSubmit2FA() }}
-                  disabled={twoFALoading}
-                />
-              </div>
+              {/* Conditional content based on 2FA type */}
+              {currentTwoFA.type === "number_match" ? (
+                <>
+                  {/* Number match challenge — show the number prominently */}
+                  <div className="flex flex-col items-center gap-3 py-4">
+                    <div className="text-sm text-muted-foreground text-center">
+                      Выберите это число на вашем телефоне:
+                    </div>
+                    <div className="text-6xl font-bold text-primary bg-primary/10 rounded-2xl px-8 py-6 border-2 border-primary/20 tabular-nums tracking-wider shadow-lg animate-pulse">
+                      {currentTwoFA.challengeNumber || "??"}
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="size-4 animate-spin" />
+                      <span>Ожидаем подтверждение на устройстве...</span>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-2 text-xs text-muted-foreground bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-3 rounded-lg">
+                    <AlertCircle className="size-4 mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                    <span>Откройте уведомление Google на телефоне и нажмите на число <strong>{currentTwoFA.challengeNumber || "показанное выше"}</strong>. После этого вход продолжится автоматически.</span>
+                  </div>
+                </>
+              ) : currentTwoFA.type === "phone_prompt" ? (
+                <>
+                  {/* Phone prompt — "Tap Yes" instruction */}
+                  <div className="flex flex-col items-center gap-3 py-4">
+                    <div className="text-5xl">📲</div>
+                    <div className="text-lg font-semibold text-foreground text-center">
+                      Подтвердите вход на телефоне
+                    </div>
+                    <div className="text-sm text-muted-foreground text-center max-w-[280px]">
+                      Откройте уведомление Google на вашем телефоне и нажмите &quot;Да&quot;
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground mt-2">
+                      <Loader2 className="size-4 animate-spin" />
+                      <span>Ожидаем подтверждение...</span>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-2 text-xs text-muted-foreground bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3 rounded-lg">
+                    <AlertCircle className="size-4 mt-0.5 shrink-0 text-blue-600 dark:text-blue-400" />
+                    <span>Google может дополнительно попросить выбрать число — в этом случае окно обновится автоматически.</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Classic code input — SMS/email/authenticator */}
+                  <div className="flex flex-col gap-2">
+                    <Label>Введите код {currentTwoFA.type === "email" ? "из email" : currentTwoFA.type === "sms" ? "из SMS" : currentTwoFA.type === "authenticator" ? "из приложения" : "подтверждения"}</Label>
+                    <Input
+                      placeholder="123456"
+                      value={twoFACode}
+                      onChange={(e) => setTwoFACode(e.target.value.replace(/[^0-9]/g, "").slice(0, 8))}
+                      className="text-center text-2xl font-mono tracking-[0.3em] h-14"
+                      autoFocus
+                      onKeyDown={(e) => { if (e.key === "Enter") handleSubmit2FA() }}
+                      disabled={twoFALoading}
+                    />
+                  </div>
 
-              {/* Resend button */}
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-muted-foreground hover:text-foreground self-center"
-                onClick={handleResendCode}
-                disabled={resendLoading || twoFALoading}
-              >
-                {resendLoading ? <><Loader2 className="size-3 mr-1.5 animate-spin" />Отправка...</> : "🔄 Отправить код повторно"}
-              </Button>
+                  {/* Resend button */}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-muted-foreground hover:text-foreground self-center"
+                    onClick={handleResendCode}
+                    disabled={resendLoading || twoFALoading}
+                  >
+                    {resendLoading ? <><Loader2 className="size-3 mr-1.5 animate-spin" />Отправка...</> : "🔄 Отправить код повторно"}
+                  </Button>
 
-              <div className="flex items-start gap-2 text-xs text-muted-foreground bg-accent/50 p-3 rounded-lg">
-                <AlertCircle className="size-4 mt-0.5 shrink-0" />
-                <span>Код будет отправлен воркеру, который введёт его в браузере. После отправки дождитесь результата.</span>
-              </div>
+                  <div className="flex items-start gap-2 text-xs text-muted-foreground bg-accent/50 p-3 rounded-lg">
+                    <AlertCircle className="size-4 mt-0.5 shrink-0" />
+                    <span>Код будет отправлен воркеру, который введёт его в браузере. После отправки дождитесь результата.</span>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -902,9 +953,11 @@ export default function AccountsPage() {
                 {twoFAQueue.length > 1 ? "Пропустить" : "Отмена"}
               </Button>
             </div>
-            <Button onClick={handleSubmit2FA} disabled={twoFALoading || !twoFACode.trim()} className="active:scale-[0.97] transition-transform">
-              {twoFALoading ? <><Loader2 className="size-4 mr-2 animate-spin" />Отправка...</> : "Подтвердить"}
-            </Button>
+            {currentTwoFA && currentTwoFA.type !== "number_match" && currentTwoFA.type !== "phone_prompt" && (
+              <Button onClick={handleSubmit2FA} disabled={twoFALoading || !twoFACode.trim()} className="active:scale-[0.97] transition-transform">
+                {twoFALoading ? <><Loader2 className="size-4 mr-2 animate-spin" />Отправка...</> : "Подтвердить"}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

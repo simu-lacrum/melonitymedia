@@ -164,6 +164,68 @@ export async function humanIdleMove(
   await cursor.moveTo({ x, y });
 }
 
+// ── Random Mouse Wander ─────────────────────────────────────
+
+/**
+ * Simulate a human "looking around" the page by making several
+ * random cursor movements over a given duration.
+ * Use before form fills or clicks to appear natural.
+ *
+ * @param page - Patchright page instance
+ * @param cursor - Ghost cursor instance
+ * @param durationMs - Total duration to wander (ms)
+ */
+export async function randomMouseWander(
+  page: Page,
+  cursor: GhostCursor,
+  durationMs: number = 2000,
+): Promise<void> {
+  const viewport = page.viewportSize();
+  if (!viewport) return;
+
+  const startTime = Date.now();
+  const moveCount = randomDelay(3, 6); // 3-6 random movements
+  const intervalMs = Math.floor(durationMs / moveCount);
+
+  for (let i = 0; i < moveCount; i++) {
+    if (Date.now() - startTime >= durationMs) break;
+
+    const x = randomDelay(80, viewport.width - 80);
+    const y = randomDelay(80, viewport.height - 80);
+
+    try {
+      await cursor.moveTo({ x, y });
+    } catch {
+      // ghost-cursor may fail on edge coords — ignore
+    }
+
+    await page.waitForTimeout(randomDelay(intervalMs * 0.5, intervalMs * 1.5));
+  }
+}
+
+/**
+ * Human-like pre-action sequence: slight scroll + wander + pause.
+ * Call before filling forms to simulate a human reading the page.
+ */
+export async function humanPreActionWander(
+  page: Page,
+  cursor: GhostCursor,
+): Promise<void> {
+  // Small scroll to "look at the page"
+  const scrollChance = Math.random();
+  if (scrollChance < 0.4) {
+    await humanScroll(page, randomDelay(50, 200), 'down');
+    await page.waitForTimeout(randomDelay(300, 800));
+    await humanScroll(page, randomDelay(30, 100), 'up');
+  }
+
+  // Random mouse wander
+  await randomMouseWander(page, cursor, randomDelay(1000, 2500));
+
+  // Brief thinking pause
+  await page.waitForTimeout(randomDelay(200, 600));
+}
+
 // ── Utility ─────────────────────────────────────────────────
 
 /**
