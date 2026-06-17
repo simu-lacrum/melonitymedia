@@ -57,6 +57,12 @@ async function downloadAvatar(
   accountId: string,
   maxRedirects = 5,
 ): Promise<string> {
+  if (!url.startsWith('http')) {
+    // Treat as local file from shared Docker volume (/app/uploads...)
+    const localFile = path.join('/app', url);
+    return Promise.resolve(localFile);
+  }
+
   const ext = url.match(/\.(png|jpg|jpeg|gif|webp)/i)?.[1] || 'jpg';
   const tmpPath = path.join(os.tmpdir(), `avatar_${accountId}_${Date.now()}.${ext}`);
 
@@ -163,9 +169,13 @@ export async function editProfileHandler(job: Job<EditProfileJobData>): Promise<
         const avatarSrc = data.changes.avatarUrl;
         // Support local file paths
         const isUrl = /^https?:\/\//i.test(avatarSrc);
-        const localPath = isUrl ? null : avatarSrc.startsWith('file:///')
+        let localPath = isUrl ? null : avatarSrc.startsWith('file:///')
           ? avatarSrc.replace('file:///', '/')
           : avatarSrc;
+
+        if (localPath && localPath.startsWith('/uploads')) {
+          localPath = path.join('/app', localPath);
+        }
 
         if (localPath) {
           // Local file — verify it exists, no download needed
@@ -230,9 +240,13 @@ export async function editProfileHandler(job: Job<EditProfileJobData>): Promise<
     if (isLastAccount && data.changes.avatarUrl) {
       const isUrl = /^https?:\/\//i.test(data.changes.avatarUrl);
       if (!isUrl) {
-        const localAvatar = data.changes.avatarUrl.startsWith('file:///')
+        let localAvatar = data.changes.avatarUrl.startsWith('file:///')
           ? data.changes.avatarUrl.replace('file:///', '/')
           : data.changes.avatarUrl;
+          
+        if (localAvatar.startsWith('/uploads')) {
+          localAvatar = path.join('/app', localAvatar);
+        }
         
         // Wait briefly to ensure files aren't locked by lingering processes
         setTimeout(() => {
