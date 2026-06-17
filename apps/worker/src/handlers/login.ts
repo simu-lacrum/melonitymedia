@@ -1077,7 +1077,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
       await page.waitForURL(
         ctx.platform === 'TIKTOK'
           ? /tiktok\.com\/(foryou|@|en|ru|.*\/feed)/
-          : /youtube\.com\/(?:$|feed|watch|@|channel|c|shorts)|myaccount\.google\.com/,
+          : /youtube\.com\/(?:\?|$|#|feed|watch|@|channel|c|shorts)|myaccount\.google\.com/,
         { timeout: 30_000 },
       );
     } catch {
@@ -1184,7 +1184,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
             await page.waitForURL(
               ctx.platform === 'TIKTOK'
                 ? /tiktok\.com\/(foryou|@|en|ru|.*\/feed)/
-                : /youtube\.com\/(?:$|feed|watch|@|channel|c|shorts)|myaccount\.google\.com/,
+                : /youtube\.com\/(?:\?|$|#|feed|watch|@|channel|c|shorts)|myaccount\.google\.com/,
               { timeout: 15_000 },
             );
             // Success! Fall through to cookie extraction below.
@@ -1218,7 +1218,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
         emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
         throw new LoginError('CAPTCHA_FAILED', 'Captcha not resolved');
       }
-      else if (/suspended|заблокирован|disabled/i.test(bodyText)) {
+      else if (/(account.*(suspended|disabled))|(suspended.*account)|заблокирован|приостановлен|(аккаунт.*(отключен|удален))/i.test(bodyText)) {
         const errMsg = 'Аккаунт приостановлен платформой.';
         emitLoginEvent(logger, data.accountId, 'login:failed', {
           code: 'ACCOUNT_SUSPENDED',
