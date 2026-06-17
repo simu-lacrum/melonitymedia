@@ -53,6 +53,30 @@ const upload = multer({
   },
 });
 
+// ── Avatar Multer Setup ─────────────────────────────────────
+const avatarStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
+  filename: (_req, file, cb) => {
+    const hash = crypto.randomBytes(16).toString('hex');
+    const ext = path.extname(file.originalname);
+    cb(null, `avatar_${hash}${ext}`);
+  },
+});
+
+const avatarUpload = multer({
+  storage: avatarStorage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max per avatar
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowed.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Только форматы .jpg, .jpeg, .png, .webp, .gif'));
+    }
+  },
+});
+
 // ── Banner Multer Setup ─────────────────────────────────────
 const BANNER_DIR = process.env.BANNER_DIR || './banners';
 if (!fs.existsSync(BANNER_DIR)) {
@@ -292,6 +316,10 @@ router.post('/launch', async (req: Request, res: Response) => {
         // Inject platformIndex and totalAccountsInJob for UPLOAD jobs
         if (type === 'UPLOAD' && platformIndexMap) {
           extra.platformIndex = platformIndexMap.get(accountId) ?? index;
+          extra.totalAccountsInJob = targetAccountIds.length;
+        }
+        if (type === 'EDIT_PROFILE') {
+          extra.jobIndex = index;
           extra.totalAccountsInJob = targetAccountIds.length;
         }
         // Use pre-resolved banner path instead of per-account query
@@ -542,6 +570,21 @@ router.get('/cookies/export', authRateLimit, async (req: Request, res: Response)
   } catch (err) {
     console.error('[Workspace] Cookies export error:', err);
     res.status(500).json({ error: 'Ошибка при экспорте cookies' });
+  }
+});
+
+// ── POST /upload-avatar ─ upload an avatar file
+router.post('/upload-avatar', avatarUpload.single('avatar'), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ error: 'Файл аватара не загружен' });
+      return;
+    }
+    // Just return the absolute path to the saved file
+    res.status(201).json({ filepath: req.file.path });
+  } catch (err) {
+    console.error('[Workspace] Avatar upload error:', err);
+    res.status(500).json({ error: 'Ошибка загрузки аватара' });
   }
 });
 

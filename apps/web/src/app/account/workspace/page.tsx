@@ -115,6 +115,7 @@ export default function WorkspacePage() {
   const [uploading, setUploading] = React.useState(false)
   const [banners, setBanners] = React.useState<BannerFile[]>([])
   const [uploadingBanner, setUploadingBanner] = React.useState(false)
+  const [uploadingAvatar, setUploadingAvatar] = React.useState(false)
 
   React.useEffect(() => {
     api.get<{ presets: Preset[] }>("/api/workspace/presets")
@@ -304,6 +305,28 @@ export default function WorkspacePage() {
     }
   }
 
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadingAvatar(true)
+    try {
+      const formData = new FormData()
+      formData.append("avatar", file)
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"}/api/workspace/upload-avatar`,
+        { method: "POST", body: formData, credentials: "include" }
+      )
+      if (!res.ok) throw new Error("Avatar upload failed")
+      const data = await res.json()
+      setEditProfile({ ...editProfile, avatarUrl: data.filepath })
+      toast.success("Аватар загружен")
+    } catch {
+      toast.error("Ошибка загрузки аватара")
+    } finally {
+      setUploadingAvatar(false)
+    }
+  }
+
   const handleDeleteBanner = async (bannerId: string) => {
     try {
       await fetch(
@@ -440,11 +463,32 @@ export default function WorkspacePage() {
               />
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="edit-avatar">URL аватара</Label>
-              <Input id="edit-avatar" placeholder="https://example.com/avatar.jpg"
-                value={editProfile.avatarUrl}
-                onChange={e => setEditProfile({ ...editProfile, avatarUrl: e.target.value })}
-              />
+              <Label>Аватар</Label>
+              <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary/50 transition-colors">
+                {uploadingAvatar ? (
+                  <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                ) : (
+                  <Image className="size-4 text-muted-foreground" />
+                )}
+                <span className="text-xs text-muted-foreground">
+                  {uploadingAvatar ? "Загрузка..." : "Выберите файл (.jpg, .png)"}
+                </span>
+                <input type="file" accept=".jpg,.jpeg,.png,.webp,.gif" className="hidden"
+                  onChange={handleAvatarUpload} disabled={uploadingAvatar}
+                />
+              </label>
+
+              {editProfile.avatarUrl && (
+                <div className="flex items-center justify-between p-2 mt-1 border rounded-md bg-secondary/20">
+                  <span className="text-xs text-muted-foreground truncate max-w-[200px]" title={editProfile.avatarUrl}>
+                    {editProfile.avatarUrl.split(/[/\\]/).pop()}
+                  </span>
+                  <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-destructive"
+                    onClick={() => setEditProfile({ ...editProfile, avatarUrl: "" })}>
+                    <Trash2 className="size-3 mr-1" /> Удалить
+                  </Button>
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <Checkbox id="edit-headless"

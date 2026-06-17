@@ -40,6 +40,8 @@ interface EditProfileJobData {
     bio?: string;
     avatarUrl?: string;
   };
+  jobIndex?: number;
+  totalAccountsInJob?: number;
   // platform, fingerprint, proxyUrl are resolved from DB via loadAccountContext()
 }
 
@@ -159,10 +161,11 @@ export async function editProfileHandler(job: Job<EditProfileJobData>): Promise<
     if (data.changes.avatarUrl) {
       try {
         const avatarSrc = data.changes.avatarUrl;
-        // Support local file paths (e.g. /tmp/avatar.png or file:///tmp/avatar.png)
-        const localPath = avatarSrc.startsWith('file:///')
-          ? avatarSrc.replace('file://', '')
-          : avatarSrc.startsWith('/') ? avatarSrc : null;
+        // Support local file paths
+        const isUrl = /^https?:\/\//i.test(avatarSrc);
+        const localPath = isUrl ? null : avatarSrc.startsWith('file:///')
+          ? avatarSrc.replace('file:///', '/')
+          : avatarSrc;
 
         if (localPath) {
           // Local file — verify it exists, no download needed
@@ -220,6 +223,26 @@ export async function editProfileHandler(job: Job<EditProfileJobData>): Promise<
     // Cleanup temp avatar file (only downloaded ones, not user-provided local files)
     if (avatarTmpPath && avatarTmpPath.includes(`avatar_${data.accountId}_`)) {
       fsp.unlink(avatarTmpPath).catch(() => {});
+    }
+
+    // Cleanup user-provided local avatar file if this is the last account in the job
+    const isLastAccount = (data.jobIndex ?? 0) >= ((data.totalAccountsInJob ?? 1) - 1);
+    if (isLastAccount && data.changes.avatarUrl) {
+      const isUrl = /^https?:\/\//i.test(data.changes.avatarUrl);
+      if (!isUrl) {
+        const localAvatar = data.changes.avatarUrl.startsWith('file:///')
+          ? data.changes.avatarUrl.replace('file:///', '/')
+          : data.changes.avatarUrl;
+        
+        // Wait briefly to ensure files aren't locked by lingering processes
+        setTimeout(() => {
+          fsp.unlink(localAvatar).then(() => {
+            console.log(`[EditProfile] Cleaned up original avatar file: ${localAvatar}`);
+          }).catch((err) => {
+            console.error(`[EditProfile] Failed to clean up original avatar file: ${err.message}`);
+          });
+        }, 5000);
+      }
     }
 
     logger.disconnect();
