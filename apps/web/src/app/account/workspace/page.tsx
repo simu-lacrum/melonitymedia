@@ -529,18 +529,28 @@ export default function WorkspacePage() {
               </label>
 
               {videos.length > 0 && (
-                <Select value={upload.videoId} onValueChange={(v) => setUpload({ ...upload, videoId: v ?? "" })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="-- Выберите видео --" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {videos.map(v => (
-                      <SelectItem key={v.id} value={v.id}>
-                        {v.originalName} ({(v.size / 1024 / 1024).toFixed(1)} MB)
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 min-w-0">
+                    <Select value={upload.videoId} onValueChange={(v) => setUpload({ ...upload, videoId: v ?? "" })}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="-- Выберите видео --" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {videos.map(v => (
+                          <SelectItem key={v.id} value={v.id}>
+                            {v.originalName} ({(v.size / 1024 / 1024).toFixed(1)} MB)
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {upload.videoId && (
+                    <Button variant="ghost" size="icon" className="size-9 shrink-0 text-muted-foreground hover:text-destructive"
+                      onClick={() => setUpload({ ...upload, videoId: "" })}>
+                      <X className="size-4" />
+                    </Button>
+                  )}
+                </div>
               )}
             </div>
 
@@ -563,19 +573,29 @@ export default function WorkspacePage() {
 
               {banners.length > 0 && (
                 <div className="flex flex-col gap-1">
-                  <Select value={upload.bannerId} onValueChange={(v) => setUpload({ ...upload, bannerId: v ?? "" })}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="-- Без баннера --" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Без баннера</SelectItem>
-                      {banners.map(b => (
-                        <SelectItem key={b.id} value={b.id}>
-                          {b.originalName} ({(b.size / 1024 / 1024).toFixed(1)} MB)
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                      <Select value={upload.bannerId} onValueChange={(v) => setUpload({ ...upload, bannerId: v ?? "" })}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="-- Без баннера --" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Без баннера</SelectItem>
+                          {banners.map(b => (
+                            <SelectItem key={b.id} value={b.id}>
+                              {b.originalName} ({(b.size / 1024 / 1024).toFixed(1)} MB)
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {upload.bannerId && upload.bannerId !== "none" && (
+                      <Button variant="ghost" size="icon" className="size-9 shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => setUpload({ ...upload, bannerId: "" })}>
+                        <X className="size-4" />
+                      </Button>
+                    )}
+                  </div>
                   {upload.bannerId && upload.bannerId !== "none" && (
                     <Button variant="ghost" size="sm" className="self-end text-xs text-destructive"
                       onClick={() => handleDeleteBanner(upload.bannerId)}>
