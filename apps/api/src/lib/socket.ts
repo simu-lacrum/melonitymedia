@@ -90,6 +90,12 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
       socket.to(`user:${userId}`).emit('worker:error', data);
     });
 
+    // ── Worker log event relay ─────────────────────────
+    // Worker uses SocketLogger to emit 'log' events.
+    socket.on('log', (data: any) => {
+      socket.to(`user:${userId}`).emit('worker:log', data);
+    });
+
     // ── Account status change events ────────────────────
     // Worker emits when account status changes so frontend can update in real-time
     socket.on('account:status_changed', (data: any) => {
