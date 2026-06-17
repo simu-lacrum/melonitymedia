@@ -65,6 +65,7 @@ services:
         condition: service_healthy
     volumes:
       - uploads:/app/uploads
+      - banners:/app/banners
 
   # ── Web Frontend (Next.js 15) ────────────────────────────
   web:
@@ -98,6 +99,7 @@ services:
         condition: service_healthy
     volumes:
       - uploads:/app/uploads
+      - banners:/app/banners
       - cookies:/data/cookies
     # Chrome sandbox requires SYS_ADMIN capability
     cap_add:
@@ -120,4 +122,5 @@ volumes:
   pgdata:
   redisdata:
   uploads:
+  banners:
   cookies:

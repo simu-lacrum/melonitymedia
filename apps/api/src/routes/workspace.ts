@@ -173,7 +173,7 @@ router.post('/launch', async (req: Request, res: Response) => {
     }
 
     const { type, config, threads, delayMin, delayMax } = parsed.data;
-    const force = req.query.force === "true" && req.user!.role === "ADMIN";
+    const force = req.query.force === "true";
 
     let targetAccountIds = parsed.data.accountIds;
     if (parsed.data.applyToAll) {

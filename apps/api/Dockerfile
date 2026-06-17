@@ -68,7 +68,7 @@ COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 
 # Create uploads directory
-RUN mkdir -p /app/uploads && chmod 777 /app/uploads
+RUN mkdir -p /app/uploads /app/banners && chmod 777 /app/uploads /app/banners
 
 # Run as non-root for security
 RUN groupadd -r api && useradd -r -g api api \
