@@ -191,7 +191,7 @@ async function detect2FAType(page: any, platform: 'TIKTOK' | 'YOUTUBE'): Promise
     // ── Check 5: Google Prompt "type/match the number" challenge ──
     if (/type.*number|match.*number|введите.*число|выберите.*число|number.*shown|число.*которое.*видите|нажмите.*на.*число/i.test(bodyText) && isChallengePage) {
       // Extract the challenge number displayed on screen
-      const challengeNumber = _extractChallengeNumber(bodyText);
+      const challengeNumber = await _extractChallengeNumber(page);
       return { has2FA: true, type: 'number_match', challengeNumber, hint: challengeNumber ? `Google показывает число ${challengeNumber}. Выберите его на вашем телефоне.` : 'Google показывает число для подтверждения. Выберите его на телефоне.' };
     }
 
@@ -220,34 +220,35 @@ async function detect2FAType(page: any, platform: 'TIKTOK' | 'YOUTUBE'): Promise
 /**
  * Extract the challenge number from Google's "match the number" page.
  * Google shows a prominent 2-digit number that the user must tap on their phone.
- * The number is typically displayed in large text within the challenge page body.
  */
-function _extractChallengeNumber(bodyText: string): string | undefined {
-  // Google "match the number" page shows the number prominently.
-  // Common patterns:
-  // - Standalone 2-digit number in the challenge area
-  // - Number after "Нажмите на число" / "match the number" / "type the number"
-  // Strategy: find all 2-digit numbers in the page, the challenge number
-  // is typically one of the first standalone numbers.
+async function _extractChallengeNumber(page: any): Promise<string | undefined> {
+  try {
+    // Pattern 1: Google typically uses specific classes/tags for the big number
+    const numberElement = await page.$('.YZrg6, span[style*="font-size: 24px"], div[role="heading"] span');
+    if (numberElement) {
+      const text = await numberElement.innerText();
+      const match = text.match(/\b([1-9][0-9]?)\b/); // exactly 1-99
+      if (match) return match[1];
+    }
 
-  // Pattern 1: Number after instructional text
-  const afterInstruction = bodyText.match(
-    /(?:type|match|enter|tap|select|нажмите|выберите|введите|число.*которое.*видите)[^0-9]*(\d{1,3})/i
-  );
-  if (afterInstruction) return afterInstruction[1];
+    // Pattern 2: Look for <strong> tags containing only a 1-99 number
+    const strongTags = await page.$$('strong');
+    for (const tag of strongTags) {
+      const text = await tag.innerText();
+      const match = text.match(/^\s*([1-9][0-9]?)\s*$/);
+      if (match) return match[1];
+    }
 
-  // Pattern 2: Look for isolated 2-digit numbers (Google challenge numbers are 2-digit)
-  // Filter out common noise: years, timestamps, etc.
-  const allNumbers = bodyText.match(/\b(\d{2})\b/g);
-  if (allNumbers && allNumbers.length > 0) {
-    // Filter out obviously wrong numbers (00, years like 20, 24, etc.)
-    const candidates = allNumbers.filter(n => {
-      const num = parseInt(n, 10);
-      return num >= 10 && num <= 99 && num !== 20 && num !== 24;
-    });
-    if (candidates.length > 0) return candidates[0];
+    // Pattern 3: Fallback parsing body text but safely (no 0, no years)
+    const bodyText = await page.textContent('body').catch(() => '');
+    const afterInstruction = bodyText.match(
+      /(?:type|match|enter|tap|select|нажмите|выберите|введите|число.*которое.*видите)[^0-9]*([1-9][0-9]?)\b/i
+    );
+    if (afterInstruction) return afterInstruction[1];
+
+  } catch (e) {
+    // ignore
   }
-
   return undefined;
 }
 
@@ -338,7 +339,7 @@ async function _waitForDeviceConfirmationWithTransition(
 
     // Transition detection: phone_prompt → number_match
     if (currentType === 'phone_prompt' && /type.*number|match.*number|выберите.*число|число.*которое.*видите|нажмите.*на.*число/i.test(bodyText)) {
-      const challengeNumber = _extractChallengeNumber(bodyText);
+      const challengeNumber = await _extractChallengeNumber(page);
       currentType = 'number_match';
       logger.info(`🔄 Challenge изменился: phone_prompt → number_match (число: ${challengeNumber})`);
 
