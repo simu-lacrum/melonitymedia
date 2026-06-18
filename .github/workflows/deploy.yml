@@ -37,15 +37,14 @@ jobs:
             grep -q '^REDIS_PASSWORD=' .env || echo "REDIS_PASSWORD=${REDIS_PASS}" >> .env
             echo "  REDIS_URL=$(grep REDIS_URL .env | head -1)"
 
-            echo "══════ Stopping app containers gracefully ══════"
-            # Stop app services gracefully (respects stop_grace_period)
-            # DB and Redis keep running (they are NOT in this list)
-            docker compose stop api web worker 2>/dev/null || true
-            docker compose rm -f api web worker 2>/dev/null || true
+            echo "══════ Force-removing app containers ══════"
+            # Force-remove by container name to prevent "name already in use" conflicts.
+            # db and redis are NOT touched — they persist data.
+            docker rm -f melonitymedia-api-1 melonitymedia-worker-1 melonitymedia-web-1 2>/dev/null || true
 
             echo "══════ Building & starting app containers ══════"
             # Only rebuild app services — not DB/Redis (they persist data)
-            docker compose up -d --build --remove-orphans api web worker
+            docker compose up -d --build --remove-orphans --force-recreate api worker
 
             echo "══════ Ensuring infrastructure is running ══════"
             docker compose up -d db redis
