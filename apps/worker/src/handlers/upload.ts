@@ -664,48 +664,170 @@ async function _uploadToYouTube(
   await page.waitForTimeout(_randomDelay(2000, 4000));
   await job.updateProgress(75);
 
-  // "Made for kids?" radio — select "No, it's not made for kids" (resilient)
+  // ── YouTube Studio Wizard Navigation ──────────────────────
+  // YouTube Studio uses web components (polymer/lit) with complex DOM.
+  // page.evaluate() with direct DOM queries is more reliable than
+  // Playwright selectors for these custom elements.
+
+  // Step 1: "Made for kids?" — select "No, it's not made for kids"
+  logger.info('Шаг 1: Выбор "Not made for kids"...');
   try {
-    await humanClick(page, cursor,
-      'tp-yt-paper-radio-button[name="VIDEO_MADE_FOR_KIDS_NOT_MFK"], ' +
-      'tp-yt-paper-radio-button[name="VIDEO_MADE_FOR_KIDS_MFK"]:not([checked]), ' +
-      '#radioLabel:has-text("No, it\'s not"), ' +
-      'tp-yt-paper-radio-button:has-text("not made for kids")',
-      { postClickDelay: 800 },
-    );
+    await page.evaluate(() => {
+      // Try multiple selectors for the "Not made for kids" radio
+      const selectors = [
+        'tp-yt-paper-radio-button[name="VIDEO_MADE_FOR_KIDS_NOT_MFK"]',
+        '#radioLabel',
+      ];
+      for (const sel of selectors) {
+        const elements = document.querySelectorAll(sel);
+        for (const el of elements) {
+          const text = el.textContent || '';
+          if (/not made for kids|не для детей/i.test(text) || el.getAttribute('name') === 'VIDEO_MADE_FOR_KIDS_NOT_MFK') {
+            (el as HTMLElement).scrollIntoView({ block: 'center' });
+            (el as HTMLElement).click();
+            return true;
+          }
+        }
+      }
+      // Fallback: just click second radio button (usually "No")
+      const radios = document.querySelectorAll('tp-yt-paper-radio-button');
+      if (radios.length >= 2) {
+        (radios[1] as HTMLElement).click();
+        return true;
+      }
+      return false;
+    });
+    logger.info('"Not made for kids" выбрано ✓');
   } catch {
-    logger.warn('Не удалось выбрать "Not made for kids" — продолжаем');
+    logger.warn('"Not made for kids" не найден — продолжаем');
+  }
+  await page.waitForTimeout(_randomDelay(1000, 2000));
+
+  // Step 2: Click "Next" through wizard pages (Details → Elements → Checks → Visibility)
+  for (let step = 0; step < 3; step++) {
+    const stepNames = ['Elements', 'Checks', 'Visibility'];
+    logger.info(`Шаг 2.${step + 1}: Переход на "${stepNames[step]}"...`);
+    try {
+      // Wait for Next button to be clickable
+      const clicked = await page.evaluate(() => {
+        // YouTube Studio Next button variants
+        const btn = document.querySelector('#next-button') as HTMLElement
+          || document.querySelector('ytcp-button#next-button') as HTMLElement;
+        if (btn && !btn.hasAttribute('disabled')) {
+          btn.scrollIntoView({ block: 'center' });
+          btn.click();
+          return true;
+        }
+        // Try finding by aria-label
+        const ariaBtn = document.querySelector('button[aria-label="Next"]') as HTMLElement
+          || document.querySelector('button[aria-label="Далее"]') as HTMLElement;
+        if (ariaBtn && !ariaBtn.hasAttribute('disabled')) {
+          ariaBtn.click();
+          return true;
+        }
+        return false;
+      });
+
+      if (!clicked) {
+        logger.warn(`Next button step ${step} не кликабельна`);
+        // Try Playwright selector as fallback
+        try {
+          await page.click('#next-button', { timeout: 5000 });
+        } catch {
+          logger.warn(`Fallback click also failed for step ${step}`);
+        }
+      }
+    } catch {
+      logger.warn(`Next button step ${step} error — continuing`);
+    }
+    // Wait for page transition
+    await page.waitForTimeout(_randomDelay(2000, 3500));
+  }
+  await job.updateProgress(80);
+
+  // Step 3: Select "Public" visibility
+  logger.info('Шаг 3: Выбор видимости "Public"...');
+  try {
+    const publicSelected = await page.evaluate(() => {
+      // Look for Public radio button
+      const radios = document.querySelectorAll('tp-yt-paper-radio-button');
+      for (const radio of radios) {
+        const text = radio.textContent || '';
+        const name = radio.getAttribute('name') || '';
+        if (name === 'PUBLIC' || /^Public$/i.test(text.trim())) {
+          (radio as HTMLElement).scrollIntoView({ block: 'center' });
+          (radio as HTMLElement).click();
+          return 'clicked';
+        }
+      }
+      // Fallback: look by aria-label or ID
+      const pub = document.querySelector('#radioLabel') as HTMLElement;
+      if (pub) {
+        const labels = document.querySelectorAll('#radioLabel');
+        for (const label of labels) {
+          if (/public|публич/i.test(label.textContent || '')) {
+            (label as HTMLElement).click();
+            return 'clicked-label';
+          }
+        }
+      }
+      return null;
+    });
+    if (publicSelected) {
+      logger.info(`Видимость "Public" установлена (${publicSelected}) ✓`);
+    } else {
+      logger.warn('Radio "Public" не найден — возможно уже выбран по умолчанию');
+    }
+  } catch {
+    logger.warn('Ошибка при выборе Public — продолжаем');
+  }
+  await page.waitForTimeout(_randomDelay(1500, 3000));
+
+  // Step 4: Click "Publish" / "Done" button
+  logger.info('Шаг 4: Публикация видео...');
+  let published = false;
+  try {
+    published = await page.evaluate(() => {
+      // Primary: #done-button (YouTube Studio's publish button)
+      const doneBtn = document.querySelector('#done-button') as HTMLElement;
+      if (doneBtn && !doneBtn.hasAttribute('disabled')) {
+        doneBtn.scrollIntoView({ block: 'center' });
+        doneBtn.click();
+        return true;
+      }
+      // Fallback: look for Publish button by text
+      const buttons = document.querySelectorAll('ytcp-button, button');
+      for (const btn of buttons) {
+        const text = (btn.textContent || '').trim();
+        if (/^(Publish|Опубликовать|Done|Готово)$/i.test(text) && !btn.hasAttribute('disabled')) {
+          (btn as HTMLElement).click();
+          return true;
+        }
+      }
+      return false;
+    });
+  } catch {
+    published = false;
   }
 
-  // Click "Next" 3 times to skip through wizard (Elements, Checks, Visibility)
-  for (let step = 0; step < 3; step++) {
+  if (!published) {
+    // Last resort: try Playwright click
     try {
-      await humanClick(page, cursor, '#next-button:not([disabled])', { postClickDelay: 2500 });
+      await page.click('#done-button', { timeout: 10_000 });
+      published = true;
     } catch {
-      logger.warn(`Next button step ${step} not found, continuing`);
-      break;
+      // Try via keyboard shortcut
+      try {
+        await page.keyboard.press('Enter');
+        published = true;
+        logger.warn('Publish через Enter');
+      } catch {
+        throw new Error('Не найдена кнопка публикации Shorts');
+      }
     }
   }
 
-  // Public visibility (resilient)
-  try {
-    await humanClick(page, cursor,
-      'tp-yt-paper-radio-button[name="PUBLIC"], ' +
-      '#radioLabel:has-text("Public"), ' +
-      'tp-yt-paper-radio-button:has-text("Public")',
-      { postClickDelay: 500 },
-    );
-  } catch {
-    logger.warn('Не удалось выбрать Public');
-  }
-
-  // Publish
-  try {
-    await humanClick(page, cursor, '#done-button:not([disabled])', { postClickDelay: 2000 });
-    logger.info('Нажата кнопка публикации...');
-  } catch {
-    throw new Error('Не найдена кнопка публикации Shorts');
-  }
+  logger.info('Нажата кнопка публикации ✓');
 
   // Wait for "Video published" confirmation
   await page.waitForTimeout(_randomDelay(8000, 15000));
