@@ -22,7 +22,8 @@ router.use(authMiddleware);
 
 // ── Multer Setup ────────────────────────────────────────────
 // Videos saved to UPLOAD_DIR with random filename to avoid collisions
-const UPLOAD_DIR = process.env.UPLOAD_DIR || '/app/uploads';
+// IMPORTANT: must be absolute path to match Docker volume mount at /app/uploads
+const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || '/app/uploads');
 
 // Ensure upload directory exists
 if (!fs.existsSync(UPLOAD_DIR)) {
@@ -78,7 +79,7 @@ const avatarUpload = multer({
 });
 
 // ── Banner Multer Setup ─────────────────────────────────────
-const BANNER_DIR = process.env.BANNER_DIR || '/app/banners';
+const BANNER_DIR = path.resolve(process.env.BANNER_DIR || '/app/banners');
 if (!fs.existsSync(BANNER_DIR)) {
   fs.mkdirSync(BANNER_DIR, { recursive: true });
 }
