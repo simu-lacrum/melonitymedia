@@ -352,8 +352,24 @@ router.post('/launch', async (req: Request, res: Response) => {
         where: { id: task.id },
         data: { status: 'FAILED', error: 'All accounts failed pre-flight checks' },
       });
+
+      // Build a human-readable error message based on failure reasons
+      const BUSY_TASK_LABELS: Record<string, string> = {
+        upload: 'залив', warmup: 'прогрев', login: 'логин',
+        'edit-profile': 'редактирование профиля', cookies: 'сбор cookies',
+      };
+      const busyFailures = failures.filter(f => f.error?.startsWith('ACCOUNT_BUSY'));
+      let errorMsg: string;
+      if (busyFailures.length > 0) {
+        const runningTask = busyFailures[0].error?.split(':')[1] || 'задача';
+        const label = BUSY_TASK_LABELS[runningTask] || runningTask;
+        errorMsg = `Аккаунт(ы) заняты — сейчас выполняется: ${label}. Дождитесь завершения.`;
+      } else {
+        errorMsg = "Все аккаунты заблокированы pre-flight проверками";
+      }
+
       res.status(409).json({
-        error: "Все аккаунты заблокированы pre-flight проверками",
+        error: errorMsg,
         task,
         failures,
       });

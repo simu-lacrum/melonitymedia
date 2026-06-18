@@ -15,7 +15,22 @@
 
 import { prisma } from "./prisma.js";
 import { addJob } from "./bullmq.js";
+import { redis } from "./redis.js";
 import type { QueueName } from "./bullmq.js";
+
+const LOCK_PREFIX = 'account-browser-lock:';
+
+/**
+ * Check if an account has an active browser lock in Redis.
+ * Returns the job type holding the lock, or null if free.
+ */
+async function checkAccountLock(accountId: string): Promise<string | null> {
+  try {
+    return await redis.get(`${LOCK_PREFIX}${accountId}`);
+  } catch {
+    return null; // Redis error — allow job (best effort)
+  }
+}
 
 /**
  * Build a proxy URL with real credentials for worker use.
@@ -69,6 +84,19 @@ export async function dispatchAccountJob(args: {
   });
 
   if (!account) return { accountId: args.accountId, jobId: null, error: "NO_ACCOUNT" };
+
+  // ── Check if account is already running a task ────────────
+  // Uses the same Redis lock that workers acquire when they start a browser session.
+  // This prevents queuing a second task while one is active — the user sees an
+  // error immediately, and the running task is NOT interrupted.
+  const currentLockHolder = await checkAccountLock(account.id);
+  if (currentLockHolder) {
+    return {
+      accountId: account.id,
+      jobId: null,
+      error: `ACCOUNT_BUSY:${currentLockHolder}`,
+    };
+  }
 
   // M-7 FIX: Reject jobs for accounts in invalid states
   // Login queue is exempt — it's used to fix auth issues
