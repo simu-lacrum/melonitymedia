@@ -143,6 +143,10 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
   let lockAcquired = false;
 
   try {
+    // Ensure screenshots directory exists
+    const fs = require('fs');
+    fs.mkdirSync('/tmp/warmup-screenshots', { recursive: true });
+
     // Acquire per-account lock — prevent concurrent browser sessions
     const holder = await acquireAccountLock(data.accountId, 'warmup');
     if (holder) {
@@ -251,10 +255,12 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     await page.waitForTimeout(3000);
     const currentUrl = page.url();
     if (currentUrl.includes('accounts.google.com') || currentUrl.includes('/login')) {
+      await page.screenshot({ path: `/tmp/warmup-screenshots/${data.accountId}_auth_fail.png` }).catch(() => {});
       logger.error('❌ Cookies устарели — перенаправлен на страницу логина');
       throw new Error('Auth failed: redirected to login page. Re-import cookies.');
     }
     logger.info('✅ Авторизация подтверждена');
+    await page.screenshot({ path: `/tmp/warmup-screenshots/${data.accountId}_auth_ok.png` }).catch(() => {});
 
     await page.waitForTimeout(_randomDelay(3000, 5000));
 
@@ -541,6 +547,10 @@ async function _passiveWatching(
 
     // Watch each video for 15-60 seconds (like a real user watching full videos)
     const watchTime = _randomDelay(15000, 60000);
+    // Screenshot every 3rd video or first video
+    if (i === 0 || i % 3 === 0) {
+      await page.screenshot({ path: `/tmp/warmup-screenshots/${data.accountId}_watch_${i + 1}.png` }).catch(() => {});
+    }
     await page.waitForTimeout(watchTime);
 
     // Random mouse idle movement (humans move mouse while watching)
