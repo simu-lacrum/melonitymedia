@@ -92,6 +92,10 @@ services:
     # to finish before force-killing. Default 10s is way too short.
     stop_grace_period: 10m
     env_file: .env
+    environment:
+      - VNC_PASSWORD=${VNC_PASSWORD:-melonity}
+    ports:
+      - "6080:6080"
     depends_on:
       db:
         condition: service_healthy

@@ -32,6 +32,19 @@ fi
 
 echo "[Worker] Xvfb started. DISPLAY=$DISPLAY (PID=$XVFB_PID)"
 
+echo "[Worker] Starting fluxbox window manager..."
+fluxbox &
+
+echo "[Worker] Setting up VNC password..."
+mkdir -p ~/.vnc
+x11vnc -storepasswd "${VNC_PASSWORD:-melonity}" ~/.vnc/passwd
+
+echo "[Worker] Starting x11vnc..."
+x11vnc -display :99 -rfbauth ~/.vnc/passwd -forever -shared -bg
+
+echo "[Worker] Starting noVNC on port 6080..."
+websockify --web /usr/share/novnc 6080 localhost:5900 &
+
 echo "[Worker] Starting BullMQ worker process..."
 cd /app/apps/worker
 exec node dist/index.js

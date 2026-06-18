@@ -43,6 +43,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xvfb \
     x11-utils \
     ffmpeg \
+    fluxbox \
+    x11vnc \
+    novnc \
+    websockify \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Install google-chrome-stable ───────────────────────────
