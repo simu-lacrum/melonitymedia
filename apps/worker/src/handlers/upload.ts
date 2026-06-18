@@ -514,8 +514,11 @@ async function _uploadToYouTube(
   }
   logger.info(`Видео Shorts-валидно: ${meta.width}x${meta.height}, ${Math.round(meta.durationSec)}s`);
 
-  logger.info('Переход на YouTube Studio...');
-  await page.goto('https://studio.youtube.com/', { waitUntil: 'domcontentloaded', timeout: 60_000 });
+  // ── Navigate to YouTube Studio with upload dialog ──────────
+  // ?d=ud auto-opens the upload dialog. Studio redirects to login if cookies invalid.
+  // Single navigation instead of two saves ~10s on slow proxies.
+  logger.info('Переход на YouTube Studio (upload dialog)...');
+  await page.goto('https://studio.youtube.com/?d=ud', { waitUntil: 'domcontentloaded', timeout: 60_000 });
   await page.waitForTimeout(_randomDelay(3000, 5000));
 
   // Auth check — BUG-10 fix: URL-based instead of body text
@@ -537,29 +540,55 @@ async function _uploadToYouTube(
 
   await job.updateProgress(45);
 
-  // Click CREATE button → Upload video (resilient selectors)
-  try {
-    await humanClick(page, cursor,
-      '#upload-icon, #create-icon, ytcp-button#create-icon-button, ' +
-      'button[aria-label*="Create" i], button[aria-label*="Создать" i]',
-      { postClickDelay: 500 },
-    );
-    await page.waitForTimeout(_randomDelay(500, 1000));
-    await humanClick(page, cursor,
-      'tp-yt-paper-item[test-id="upload-beta"], a[test-id="upload-beta"], ' +
-      '#text-item-0, tp-yt-paper-item:has-text("Upload video"), ' +
-      'tp-yt-paper-item:has-text("Upload videos"), ' +
-      'tp-yt-paper-item:has-text("Загрузить видео")',
-      { postClickDelay: 1500 },
-    );
-  } catch {
-    // Fallback: direct navigation to upload URL
-    logger.warn('CREATE button not found, fallback to direct upload URL');
-    await page.goto('https://studio.youtube.com/channel/UC/videos/upload', { waitUntil: 'domcontentloaded', timeout: 60_000 });
+  // Upload dialog should already be open from ?d=ud parameter.
+  // If not, fall back to CREATE button.
+  logger.info('Ожидаю появление диалога загрузки...');
+  const fileInput = page.locator('input[type="file"]').first();
+
+  // First, check if ?d=ud opened the dialog
+  let dialogFound = await fileInput.count().then(c => c > 0).catch(() => false);
+
+  if (!dialogFound) {
+    // Fallback: try CREATE button
+    logger.warn('Upload dialog не открылся от ?d=ud, пробую CREATE кнопку...');
+    try {
+      await humanClick(page, cursor,
+        '#upload-icon, #create-icon, ytcp-button#create-icon-button, ' +
+        'button[aria-label*="Create" i], button[aria-label*="Создать" i]',
+        { postClickDelay: 500 },
+      );
+      await page.waitForTimeout(_randomDelay(500, 1000));
+      await humanClick(page, cursor,
+        'tp-yt-paper-item[test-id="upload-beta"], a[test-id="upload-beta"], ' +
+        '#text-item-0, tp-yt-paper-item:has-text("Upload video"), ' +
+        'tp-yt-paper-item:has-text("Upload videos"), ' +
+        'tp-yt-paper-item:has-text("Загрузить видео")',
+        { postClickDelay: 1500 },
+      );
+    } catch {
+      logger.warn('CREATE button не найдена');
+    }
   }
 
-  // File upload via hidden input
-  const fileInput = await page.locator('input[type="file"][name="Filedata"], input[type="file"]').first();
+  // Wait for the file input to appear (upload dialog)
+  try {
+    await fileInput.waitFor({ state: 'attached', timeout: 30_000 });
+  } catch {
+    // Last resort: try clicking the upload icon on the page itself
+    logger.warn('File input not found — trying to trigger upload dialog via page click...');
+    try {
+      await humanClick(page, cursor,
+        '#select-files-button, #upload-button, ' +
+        'ytcp-button:has-text("SELECT FILES"), ytcp-button:has-text("ВЫБРАТЬ ФАЙЛЫ"), ' +
+        '#upload-icon',
+        { postClickDelay: 2000 },
+      );
+      await fileInput.waitFor({ state: 'attached', timeout: 15_000 });
+    } catch {
+      throw new Error('YouTube Studio upload dialog не появился — не найден input для файла');
+    }
+  }
+
   await fileInput.setInputFiles(videoPath);
   logger.info('Файл загружен в Studio...');
 
