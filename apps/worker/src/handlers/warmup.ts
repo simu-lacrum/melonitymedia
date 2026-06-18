@@ -480,35 +480,35 @@ async function _navigateToYoutubeSearch(
     await humanPressEnter(page);
     await page.waitForTimeout(_randomDelay(3000, 5000));
 
-    // Randomly pick Shorts or regular video (50/50) — real users watch both
-    const preferShorts = Math.random() < 0.5;
+    // Extract video URLs from search results via DOM evaluation
+    const videoUrl = await page.evaluate(() => {
+      // Collect all Shorts links
+      const shortsLinks = Array.from(document.querySelectorAll('a[href*="/shorts/"]')) as HTMLAnchorElement[];
+      // Collect all regular video links
+      const videoLinks = Array.from(document.querySelectorAll('a#video-title, ytd-video-renderer a#thumbnail')) as HTMLAnchorElement[];
+      
+      const allLinks: string[] = [];
+      for (const a of shortsLinks) {
+        if (a.href && a.href.includes('/shorts/')) allLinks.push(a.href);
+      }
+      for (const a of videoLinks) {
+        if (a.href && a.href.includes('/watch?')) allLinks.push(a.href);
+      }
+      
+      // Pick a random one from top-5
+      const top = allLinks.slice(0, 5);
+      return top.length > 0 ? top[Math.floor(Math.random() * top.length)] : null;
+    });
 
-    if (preferShorts) {
-      // Try Shorts first, fallback to regular
-      try {
-        await humanClick(page, cursor, 'a[href*="/shorts/"]', { postClickDelay: 2000 });
-        logger.info(`  ▶ Открыто Shorts видео из поиска #${hashtag}`);
-      } catch {
-        try {
-          await humanClick(page, cursor, 'a#video-title, ytd-video-renderer a', { postClickDelay: 2000 });
-          logger.info(`  ▶ Открыто видео из поиска #${hashtag}`);
-        } catch {
-          logger.warn(`  ⚠️ Не удалось найти видео по #${hashtag} в YouTube`);
-        }
-      }
+    if (videoUrl) {
+      await page.goto(videoUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await page.waitForTimeout(_randomDelay(2000, 3000));
+      const isShort = videoUrl.includes('/shorts/');
+      logger.info(`  ▶ Открыто ${isShort ? 'Shorts' : ''} видео из поиска #${hashtag}`);
     } else {
-      // Try regular video first, fallback to Shorts
-      try {
-        await humanClick(page, cursor, 'a#video-title, ytd-video-renderer a', { postClickDelay: 2000 });
-        logger.info(`  ▶ Открыто видео из поиска #${hashtag}`);
-      } catch {
-        try {
-          await humanClick(page, cursor, 'a[href*="/shorts/"]', { postClickDelay: 2000 });
-          logger.info(`  ▶ Открыто Shorts видео из поиска #${hashtag}`);
-        } catch {
-          logger.warn(`  ⚠️ Не удалось найти видео по #${hashtag} в YouTube`);
-        }
-      }
+      // No results — fallback to Shorts feed  
+      logger.warn(`  ⚠️ Не удалось найти видео по #${hashtag} — переход на Shorts ленту`);
+      await page.goto('https://www.youtube.com/shorts', { waitUntil: 'domcontentloaded' });
     }
   } catch {
     // Fallback: go to Shorts feed
@@ -589,12 +589,26 @@ async function _passiveWatching(
     if (data.platform === 'YOUTUBE') {
       const url = page.url();
       if (url.includes('/shorts/')) {
+        // Shorts: ArrowDown switches to next Short — this works correctly
         await page.waitForTimeout(_randomDelay(200, 500));
         await page.keyboard.press('ArrowDown');
       } else {
-        // Humans often scroll up slightly before going back
+        // Regular video: go back to search, pick next unwatched video
         if (Math.random() < 0.3) await humanScroll(page, _randomDelay(50, 150), 'up');
         await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
+        await page.waitForTimeout(_randomDelay(1500, 3000));
+        // Click next video from search results
+        const nextUrl = await page.evaluate((idx: number) => {
+          const links = Array.from(document.querySelectorAll('a#video-title, a[href*="/shorts/"], ytd-video-renderer a#thumbnail')) as HTMLAnchorElement[];
+          const valid = links.filter(a => a.href && (a.href.includes('/watch?') || a.href.includes('/shorts/')));
+          // Pick video at offset idx to avoid re-watching the same one
+          const pick = valid[idx % valid.length];
+          return pick ? pick.href : null;
+        }, i + 1);
+        if (nextUrl) {
+          await page.goto(nextUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+          await page.waitForTimeout(_randomDelay(1000, 2000));
+        }
       }
     } else {
       await humanScroll(page, _randomDelay(300, 600));
