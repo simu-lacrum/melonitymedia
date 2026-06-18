@@ -18,7 +18,7 @@
 import { Job } from 'bullmq';
 import { launchStealthContext, closeBrowser } from '../core/browser/patchright-launcher.js';
 import { persistCookies } from '../core/auth/cookie-store.js';
-import { createPageCursor, humanClick, humanScroll, humanIdleMove } from '../core/humanity/biomouse.js';
+import { createPageCursor, humanClick, humanScroll, humanIdleMove, randomMouseWander } from '../core/humanity/biomouse.js';
 import { humanType, humanPressEnter } from '../core/humanity/typing-emulator.js';
 import { SocketLogger } from '../lib/socket-logger.js';
 import { emitWorkerError } from '../lib/error-classifier.js';
@@ -487,17 +487,20 @@ async function _navigateToYoutubeSearch(
       // Collect all regular video links
       const videoLinks = Array.from(document.querySelectorAll('a#video-title, ytd-video-renderer a#thumbnail')) as HTMLAnchorElement[];
       
-      const allLinks: string[] = [];
+      const shorts: string[] = [];
+      const regular: string[] = [];
       for (const a of shortsLinks) {
-        if (a.href && a.href.includes('/shorts/')) allLinks.push(a.href);
+        if (a.href && a.href.includes('/shorts/')) shorts.push(a.href);
       }
       for (const a of videoLinks) {
-        if (a.href && a.href.includes('/watch?')) allLinks.push(a.href);
+        if (a.href && a.href.includes('/watch?')) regular.push(a.href);
       }
       
-      // Pick a random one from top-5
-      const top = allLinks.slice(0, 5);
-      return top.length > 0 ? top[Math.floor(Math.random() * top.length)] : null;
+      // Mix: 70% chance Shorts, 30% chance regular video
+      // Real users watch both formats
+      const useRegular = regular.length > 0 && Math.random() < 0.3;
+      const pool = useRegular ? regular.slice(0, 5) : (shorts.length > 0 ? shorts.slice(0, 5) : regular.slice(0, 5));
+      return pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
     });
 
     if (videoUrl) {
@@ -559,10 +562,20 @@ async function _passiveWatching(
     if (Math.random() < 0.6) {
       await humanIdleMove(page, cursor);
     }
+    // Extended mouse wander for longer watches (>30s) — simulates reading comments, checking description
+    if (watchTime > 30000 && Math.random() < 0.4) {
+      await randomMouseWander(page, cursor, _randomDelay(1500, 3000));
+    }
     // Occasional micro-scroll while watching (reading comments, checking description)
     if (Math.random() < 0.25) {
       await humanScroll(page, _randomDelay(80, 200));
       await page.waitForTimeout(_randomDelay(500, 1500));
+    }
+    // Shorts-specific: occasional swipe-like scroll down then back up (checking comments section)
+    if (page.url().includes('/shorts/') && Math.random() < 0.2) {
+      await humanScroll(page, _randomDelay(150, 300), 'down');
+      await page.waitForTimeout(_randomDelay(1000, 3000));
+      await humanScroll(page, _randomDelay(100, 200), 'up');
     }
 
     // Very occasional like (1-2 per session max)
@@ -730,9 +743,19 @@ async function _lightEngagement(
     if (Math.random() < 0.5) {
       await humanIdleMove(page, cursor);
     }
+    // Extended mouse wander during longer watches
+    if (watchTime > 25000 && Math.random() < 0.4) {
+      await randomMouseWander(page, cursor, _randomDelay(1500, 3000));
+    }
     if (Math.random() < 0.2) {
       await humanScroll(page, _randomDelay(80, 200));
       await page.waitForTimeout(_randomDelay(400, 1000));
+    }
+    // Shorts-specific scroll gesture
+    if (page.url().includes('/shorts/') && Math.random() < 0.2) {
+      await humanScroll(page, _randomDelay(150, 300), 'down');
+      await page.waitForTimeout(_randomDelay(1000, 3000));
+      await humanScroll(page, _randomDelay(100, 200), 'up');
     }
 
     // Scroll to next (ArrowDown for YouTube Shorts, goBack for regular, scroll for TikTok)
@@ -746,6 +769,17 @@ async function _lightEngagement(
       } else {
         if (Math.random() < 0.3) await humanScroll(page, _randomDelay(50, 150), 'up');
         await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
+        await page.waitForTimeout(_randomDelay(1500, 3000));
+        const nextUrl = await page.evaluate((idx: number) => {
+          const links = Array.from(document.querySelectorAll('a#video-title, a[href*="/shorts/"], ytd-video-renderer a#thumbnail')) as HTMLAnchorElement[];
+          const valid = links.filter(a => a.href && (a.href.includes('/watch?') || a.href.includes('/shorts/')));
+          const pick = valid[idx % valid.length];
+          return pick ? pick.href : null;
+        }, i + 1);
+        if (nextUrl) {
+          await page.goto(nextUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+          await page.waitForTimeout(_randomDelay(1000, 2000));
+        }
       }
     } else {
       await humanScroll(page, _randomDelay(300, 600));
@@ -893,9 +927,19 @@ async function _activeEngagement(
     if (Math.random() < 0.5) {
       await humanIdleMove(page, cursor);
     }
+    // Extended mouse wander during longer watches
+    if (watchTime > 25000 && Math.random() < 0.4) {
+      await randomMouseWander(page, cursor, _randomDelay(1500, 3000));
+    }
     if (Math.random() < 0.2) {
       await humanScroll(page, _randomDelay(80, 200));
       await page.waitForTimeout(_randomDelay(400, 1000));
+    }
+    // Shorts-specific scroll gesture
+    if (page.url().includes('/shorts/') && Math.random() < 0.2) {
+      await humanScroll(page, _randomDelay(150, 300), 'down');
+      await page.waitForTimeout(_randomDelay(1000, 3000));
+      await humanScroll(page, _randomDelay(100, 200), 'up');
     }
 
     // Navigate to next video: depends on video type
@@ -908,9 +952,20 @@ async function _activeEngagement(
         await page.waitForTimeout(_randomDelay(200, 500));
         await page.keyboard.press('ArrowDown');
       } else {
-        // Regular YouTube video: scroll up slightly then go back
+        // Regular YouTube video: go back to search and pick next
         if (Math.random() < 0.3) await humanScroll(page, _randomDelay(50, 150), 'up');
         await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
+        await page.waitForTimeout(_randomDelay(1500, 3000));
+        const nextUrl = await page.evaluate((idx: number) => {
+          const links = Array.from(document.querySelectorAll('a#video-title, a[href*="/shorts/"], ytd-video-renderer a#thumbnail')) as HTMLAnchorElement[];
+          const valid = links.filter(a => a.href && (a.href.includes('/watch?') || a.href.includes('/shorts/')));
+          const pick = valid[idx % valid.length];
+          return pick ? pick.href : null;
+        }, i + 1);
+        if (nextUrl) {
+          await page.goto(nextUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+          await page.waitForTimeout(_randomDelay(1000, 2000));
+        }
       }
       await page.waitForTimeout(_randomDelay(1500, 3000));
     } else {
