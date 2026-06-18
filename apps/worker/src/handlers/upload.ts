@@ -515,7 +515,7 @@ async function _uploadToYouTube(
   logger.info(`Видео Shorts-валидно: ${meta.width}x${meta.height}, ${Math.round(meta.durationSec)}s`);
 
   logger.info('Переход на YouTube Studio...');
-  await page.goto('https://studio.youtube.com/', { waitUntil: 'networkidle' });
+  await page.goto('https://studio.youtube.com/', { waitUntil: 'domcontentloaded', timeout: 60_000 });
   await page.waitForTimeout(_randomDelay(3000, 5000));
 
   // Auth check — BUG-10 fix: URL-based instead of body text
@@ -555,7 +555,7 @@ async function _uploadToYouTube(
   } catch {
     // Fallback: direct navigation to upload URL
     logger.warn('CREATE button not found, fallback to direct upload URL');
-    await page.goto('https://studio.youtube.com/channel/UC/videos/upload', { waitUntil: 'networkidle' });
+    await page.goto('https://studio.youtube.com/channel/UC/videos/upload', { waitUntil: 'domcontentloaded', timeout: 60_000 });
   }
 
   // File upload via hidden input
