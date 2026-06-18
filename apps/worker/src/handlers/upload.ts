@@ -244,6 +244,9 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
     });
     browser = ctx.browser;
     const page = ctx.page;
+    if (ctx.vncUrl) {
+      logger.info(`VNC: Для просмотра браузера перейдите по ссылке: ${ctx.vncUrl}`);
+    }
     await job.updateProgress(35);
 
     const cursor = await createPageCursor(page);

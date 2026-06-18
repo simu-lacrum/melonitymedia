@@ -95,7 +95,7 @@ services:
     environment:
       - VNC_PASSWORD=${VNC_PASSWORD:-melonity}
     ports:
-      - "6080:6080"
+      - "6000-6020:6000-6020"
     depends_on:
       db:
         condition: service_healthy

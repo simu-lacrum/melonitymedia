@@ -23,6 +23,9 @@ import { loadCookiesFromEncryptedStore } from '../auth/cookie-store.js';
 import { applyFingerprint, inspectFingerprintConsistency, getSystemChromeMajor, type AccountFingerprint } from './fingerprint-manager.js';
 import { prisma } from '../../lib/prisma.js';
 import crypto from 'crypto';
+import { spawn, type ChildProcess } from 'child_process';
+import net from 'net';
+import fs from 'fs';
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -41,6 +44,43 @@ export interface StealthContext {
   browser: Browser;
   context: BrowserContext;
   page: Page;
+  vncPort?: number;
+  vncUrl?: string;
+}
+
+async function getFreePortAndDisplay(): Promise<{ display: number; vncPort: number; webPort: number }> {
+  for (let webPort = 6000; webPort <= 6020; webPort++) {
+    try {
+      // Check if webPort is free
+      await new Promise<void>((resolve, reject) => {
+        const server = net.createServer();
+        server.unref();
+        server.on('error', reject);
+        server.listen(webPort, () => server.close(() => resolve()));
+      });
+
+      const display = webPort - 5900; // e.g. webPort 6005 -> display 105
+      const vncPortCandidate = webPort - 100; // e.g. 5905
+      
+      // Check if vncPortCandidate is free
+      await new Promise<void>((resolve, reject) => {
+        const server = net.createServer();
+        server.unref();
+        server.on('error', reject);
+        server.listen(vncPortCandidate, () => server.close(() => resolve()));
+      });
+
+      // Check if display lock exists
+      if (fs.existsSync(`/tmp/.X11-unix/X${display}`) || fs.existsSync(`/tmp/.X${display}-lock`)) {
+        continue;
+      }
+
+      return { display, vncPort: vncPortCandidate, webPort };
+    } catch (e) {
+      continue;
+    }
+  }
+  throw new Error('No free ports/displays available for VNC');
 }
 
 // ── Default Chrome Args ─────────────────────────────────────
@@ -167,14 +207,65 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
     }
   }
 
+  // Setup dynamic GUI (Xvfb + VNC)
+  let displayConfig: { display: number; vncPort: number; webPort: number } | null = null;
+  const guiProcesses: ChildProcess[] = [];
+  try {
+    displayConfig = await getFreePortAndDisplay();
+    console.log(`[Patchright] Allocated Display :${displayConfig.display}, VNC port ${displayConfig.vncPort}, noVNC web port ${displayConfig.webPort}`);
+    
+    // Start Xvfb
+    const xvfb = spawn('Xvfb', [`:${displayConfig.display}`, '-screen', '0', '1920x1080x24', '-ac'], { stdio: 'ignore' });
+    guiProcesses.push(xvfb);
+    await new Promise(r => setTimeout(r, 1000)); // wait for Xvfb to init
+
+    // Start fluxbox
+    const fluxbox = spawn('fluxbox', ['-display', `:${displayConfig.display}`], { stdio: 'ignore' });
+    guiProcesses.push(fluxbox);
+
+    // Start x11vnc
+    const x11vncArgs = ['-display', `:${displayConfig.display}`, '-forever', '-shared', '-bg', '-rfbport', displayConfig.vncPort.toString()];
+    if (fs.existsSync(process.env.HOME + '/.vnc/passwd')) {
+      x11vncArgs.push('-rfbauth', process.env.HOME + '/.vnc/passwd');
+    } else {
+      x11vncArgs.push('-nopw');
+    }
+    const x11vnc = spawn('x11vnc', x11vncArgs, { stdio: 'ignore' });
+    guiProcesses.push(x11vnc);
+
+    // Start websockify
+    const websockify = spawn('websockify', ['--web', '/usr/share/novnc', displayConfig.webPort.toString(), `localhost:${displayConfig.vncPort}`], { stdio: 'ignore' });
+    guiProcesses.push(websockify);
+
+  } catch (e) {
+    console.warn(`[Patchright] Failed to start dynamic GUI:`, e);
+    // Cleanup if partially started
+    for (const p of guiProcesses) p.kill();
+    displayConfig = null;
+  }
+
+  const env = { ...process.env };
+  if (displayConfig) {
+    env.DISPLAY = `:${displayConfig.display}`;
+  }
+
   const browser = await chromium.launch({
     channel: 'chrome',        // CRITICAL: use system Chrome, not bundled Chromium
     headless: false,           // CRITICAL: TikTok detects headless even patched
+    env,
     args: [
       ...STEALTH_ARGS,
       `--user-agent=${fingerprint.userAgent}`,
     ],
     proxy: proxyConfig,
+  });
+
+  // Cleanup GUI processes when browser closes
+  browser.on('disconnected', () => {
+    console.log(`[Patchright] Browser disconnected, cleaning up GUI processes for display :${displayConfig?.display}`);
+    for (const p of guiProcesses) {
+      try { p.kill(); } catch (e) {}
+    }
   });
 
   const isMobileDevice = fingerprint.deviceClass === 'mobile';
@@ -211,7 +302,13 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
   // Apply fingerprint overrides via CDP (canvas, WebGL, hardware, etc.)
   await applyFingerprint(page, fingerprint);
 
-  return { browser, context, page };
+  return { 
+    browser, 
+    context, 
+    page,
+    vncPort: displayConfig?.webPort,
+    vncUrl: displayConfig ? `http://cluster-cheats.shop:${displayConfig.webPort}/vnc.html` : undefined
+  };
 }
 
 
