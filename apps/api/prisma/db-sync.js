@@ -76,6 +76,25 @@ async function main() {
       CREATE INDEX IF NOT EXISTS "DailySnapshot_userId_date_idx" ON "DailySnapshot"("userId", "date");
     `);
 
+    // Create Banner table for video overlay banners
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "Banner" (
+        "id" TEXT NOT NULL DEFAULT gen_random_uuid()::text,
+        "userId" TEXT NOT NULL,
+        "filename" TEXT NOT NULL,
+        "originalName" TEXT NOT NULL,
+        "filepath" TEXT NOT NULL,
+        "mimeType" TEXT NOT NULL,
+        "size" INTEGER NOT NULL,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "Banner_pkey" PRIMARY KEY ("id"),
+        CONSTRAINT "Banner_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE
+      );
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE INDEX IF NOT EXISTS "Banner_userId_idx" ON "Banner"("userId");
+    `);
+
     console.log('[db-sync] Schema synced OK');
   } catch (err) {
     // Non-fatal: log but don't crash the server
