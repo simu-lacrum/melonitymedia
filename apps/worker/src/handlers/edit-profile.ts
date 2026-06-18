@@ -274,7 +274,7 @@ async function _editTikTokProfile(
   logger: SocketLogger,
 ): Promise<void> {
   logger.info('Переход на настройки TikTok...');
-  await page.goto('https://www.tiktok.com/setting', { waitUntil: 'networkidle' });
+  await page.goto('https://www.tiktok.com/setting', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.waitForTimeout(_randomDelay(3000, 5000));
 
   // Update name if provided
@@ -599,7 +599,7 @@ async function _editYouTubeProfile(
           '#name-container #textbox, ' +
           'div[id="textbox"][contenteditable="true"], ' +
           'div[id="textbox"][contenteditable="plaintext-only"], ' +
-          '#textbox';
+          '#channel-name-container #textbox, .name-input #textbox';
         await page.waitForSelector(nameSelector, { timeout: 20_000 });
         await page.waitForTimeout(_randomDelay(1000, 2000));
         const nameInput = page.locator(nameSelector).first();
@@ -681,7 +681,14 @@ async function _saveTikTokProfile(page: any, cursor: any, logger: SocketLogger):
         const count = await page.locator(sel).count();
         if (count > 0) {
           await humanClick(page, cursor, sel, { postClickDelay: 2000 });
-          logger.info('Профиль TikTok сохранён ✓');
+          await page.waitForTimeout(3000);
+          // Check for success indication
+          const bodyText = await page.textContent('body').catch(() => '');
+          if (/saved|success|сохранен/i.test(bodyText || '')) {
+            logger.info('Изменения профиля TikTok сохранены ✓');
+          } else {
+            logger.warn('Не удалось подтвердить сохранение профиля TikTok');
+          }
           return;
         }
       } catch { continue; }

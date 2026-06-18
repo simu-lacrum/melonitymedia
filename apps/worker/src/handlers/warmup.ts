@@ -150,13 +150,30 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
       throw new Error(`Account ${data.accountId} is busy: ${holder}`);
     }
     lockAcquired = true;
+
+    // Check account status — skip BANNED/PAUSED accounts
+    const accStatus = await prisma.socialAccount.findUnique({
+      where: { id: data.accountId },
+      select: { status: true },
+    });
+    if (accStatus && ['BANNED', 'SHADOWBANNED', 'PAUSED'].includes(accStatus.status)) {
+      logger.warn(`⏭️ Пропускаю прогрев — аккаунт ${accStatus.status}`);
+      throw new Error(`Account ${data.accountId} is ${accStatus.status}`);
+    }
+
     const ctxAcc = await loadAccountContext(data.accountId);
 
     if (!ctxAcc.warmupStartedAt) {
-      throw new Error(
-        `Account ${data.accountId} warmup never started. ` +
-        `Call POST /api/accounts/warmup first.`,
-      );
+      // Auto-initialize warmup — don't require a separate API call
+      logger.info('Warmup не был инициализирован — автоматическая инициализация...');
+      await prisma.socialAccount.update({
+        where: { id: data.accountId },
+        data: {
+          warmupStartedAt: new Date(),
+          warmupDays: ctxAcc.warmupDays || 10,
+          status: 'WARMING_UP',
+        },
+      });
     }
 
     const totalDays = ctxAcc.warmupDays;
@@ -229,6 +246,16 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
         await page.goto('https://www.youtube.com/shorts', { waitUntil: 'domcontentloaded' });
       }
     }
+
+    // Auth check — verify we're not redirected to login
+    await page.waitForTimeout(3000);
+    const currentUrl = page.url();
+    if (currentUrl.includes('accounts.google.com') || currentUrl.includes('/login')) {
+      logger.error('❌ Cookies устарели — перенаправлен на страницу логина');
+      throw new Error('Auth failed: redirected to login page. Re-import cookies.');
+    }
+    logger.info('✅ Авторизация подтверждена');
+
     await page.waitForTimeout(_randomDelay(3000, 5000));
 
     if (warmupDay <= passiveEnd) {
@@ -537,7 +564,7 @@ async function _passiveWatching(
             logger.info(`  ❤️ Лайк видео ${i + 1} (${likes}/${maxLikes})`);
           }
         } else {
-          await humanClick(page, cursor, likeSel, { postClickDelay: 500 });
+          await _resilientClick(page, cursor, likeSel, logger, 'tiktok-like');
           likes++;
           logger.info(`  ❤️ Лайк видео ${i + 1} (${likes}/${maxLikes})`);
         }
@@ -623,7 +650,7 @@ async function _lightEngagement(
             logger.info(`  ❤️ Лайк видео ${i + 1}`);
           }
         } else {
-          await humanClick(page, cursor, likeSel, { postClickDelay: 500 });
+          await _resilientClick(page, cursor, likeSel, logger, 'tiktok-like');
           liked++;
           logger.info(`  ❤️ Лайк видео ${i + 1}`);
         }
@@ -761,7 +788,7 @@ async function _activeEngagement(
             logger.info(`  ❤️ Лайк видео ${i + 1} (всего: ${liked})`);
           }
         } else {
-          await humanClick(page, cursor, likeSel, { postClickDelay: 500 });
+          await _resilientClick(page, cursor, likeSel, logger, 'tiktok-like');
           liked++;
           logger.info(`  ❤️ Лайк видео ${i + 1} (всего: ${liked})`);
         }
