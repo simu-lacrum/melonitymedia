@@ -58,6 +58,7 @@ const STEALTH_ARGS = [
   '--disable-infobars',
   '--window-size=1920,1080',
   '--start-maximized',
+  '--autoplay-policy=no-user-gesture-required',
 ];
 
 // ── Launcher ────────────────────────────────────────────────

@@ -20,14 +20,37 @@ import { validateCookies } from '../core/auth/session-validator.js';
 import { persistCookies, type BrowserCookie } from '../core/auth/cookie-store.js';
 import { uniquifyVideo, cleanupUniquifiedVideo } from '../core/video/uniquifier.js';
 import { applyBannerOverlay, cleanupBanneredVideo } from '../core/video/banner-overlay.js';
-import { createPageCursor, humanClick, humanScroll } from '../core/humanity/biomouse.js';
+import { createPageCursor, humanClick, humanScroll, humanIdleMove, randomMouseWander } from '../core/humanity/biomouse.js';
 import { humanType } from '../core/humanity/typing-emulator.js';
 import { SocketLogger } from '../lib/socket-logger.js';
 import { emitWorkerError } from '../lib/error-classifier.js';
 import { loadAccountContext } from '../lib/account-context.js';
 import { acquireAccountLock, releaseAccountLock } from '../lib/account-lock.js';
 import { prisma } from '../lib/prisma.js';
-import type { Browser } from 'patchright';
+import type { Page, Browser } from 'patchright';
+
+/**
+ * Finds the first visible element matching the selectors, assigns it a unique ID,
+ * and returns the ID selector (e.g., "#melonity-target-123").
+ * This ensures that ghost-cursor and Playwright both target the exactly correct visible element,
+ * even when there are hidden old dialogs in the DOM.
+ */
+async function _getVisibleSelector(page: Page, selectors: string, prefix: string): Promise<string | null> {
+  const locator = page.locator(selectors);
+  const count = await locator.count();
+  for (let i = 0; i < count; i++) {
+    const el = locator.nth(i);
+    if (await el.isVisible().catch(() => false)) {
+      const id = `${prefix}-${Date.now()}-${i}`;
+      await el.evaluate((node, assignedId) => {
+        if (!node.id) node.id = assignedId;
+      }, id);
+      const actualId = await el.getAttribute('id');
+      return `#${actualId}`;
+    }
+  }
+  return null;
+}
 
 
 // ── Types ───────────────────────────────────────────────────
@@ -69,7 +92,7 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
       throw new Error(`Account ${data.accountId} is busy: ${holder}`);
     }
     lockAcquired = true;
-    await prisma.video.update({ where: { id: data.videoId }, data: { status: 'PROCESSING' } });
+    await prisma.video.updateMany({ where: { id: data.videoId }, data: { status: 'PROCESSING' } });
 
     const ctxAcc = await loadAccountContext(data.accountId);
     const { platform, fingerprint, proxyUrl } = ctxAcc;
@@ -234,7 +257,7 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
     }
 
     // ── Mark this upload as done for this account ───────────
-    await prisma.video.update({
+    await prisma.video.updateMany({
       where: { id: data.videoId },
       data: {
         isUploaded: true,
@@ -267,7 +290,7 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
               logger.info(`🗑️ Оригинал удалён: ${video.filepath}`);
             }
             // Clear filepath in DB so we don't try to delete again
-            await prisma.video.update({
+            await prisma.video.updateMany({
               where: { id: data.videoId },
               data: { filepath: '' },
             });
@@ -514,6 +537,27 @@ async function _uploadToYouTube(
   }
   logger.info(`Видео Shorts-валидно: ${meta.width}x${meta.height}, ${Math.round(meta.durationSec)}s`);
 
+  // ── Mini-warmup (Phantom mouse & scrolls) ──────────────────
+  logger.info('Выполняю мини-прогрев перед загрузкой (Phantom mouse/scrolls)...');
+  try {
+    await page.goto('https://www.youtube.com/shorts', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForTimeout(_randomDelay(2000, 4000));
+    
+    // Phantom mouse wander reading the first Short
+    await randomMouseWander(page, cursor, _randomDelay(2000, 3000));
+    
+    // Scroll down to check comments/description
+    await humanScroll(page, _randomDelay(150, 300), 'down');
+    await page.waitForTimeout(_randomDelay(2000, 5000));
+    
+    // Move to next Short using ArrowDown
+    await page.keyboard.press('ArrowDown', { delay: Math.random() * 50 + 50 });
+    await humanIdleMove(page, cursor);
+    await page.waitForTimeout(_randomDelay(3000, 6000));
+  } catch (err) {
+    logger.warn('Мини-прогрев не удался, продолжаю загрузку: ' + (err as Error).message);
+  }
+
   // ── Navigate to YouTube Studio with upload dialog ──────────
   // ?d=ud auto-opens the upload dialog. Studio redirects to login if cookies invalid.
   // Single navigation instead of two saves ~10s on slow proxies.
@@ -522,17 +566,50 @@ async function _uploadToYouTube(
   await page.waitForTimeout(_randomDelay(3000, 5000));
 
   // Auth check — BUG-10 fix: URL-based instead of body text
-  const currentUrl = page.url();
+  let currentUrl = page.url();
   if (/accounts\.google\.com\/ServiceLogin|accounts\.google\.com\/signin/i.test(currentUrl)) {
     throw new Error('Не удалось войти в YouTube Studio — cookies невалидны (перенаправлен на login)');
   }
   logger.info('Авторизация YouTube успешна');
 
+  // CHANNEL CREATION LOGIC:
+  // If we get redirected to www.youtube.com instead of studio, it usually means the channel is not created.
+  if (!currentUrl.includes('studio.youtube.com')) {
+    logger.info('Перенаправлены на основной YouTube. Возможно, канал еще не создан. Пробую создать...');
+    try {
+      // Navigate to standard YouTube upload URL which triggers the channel creation flow if missing
+      await page.goto('https://www.youtube.com/upload', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      await page.waitForTimeout(_randomDelay(2000, 4000));
+      
+      // Look for the "Create channel" button in the dialog
+      const createChannelSelectors = [
+        'button:has-text("Create channel")',
+        'button:has-text("Создать канал")',
+        '#create-channel-button',
+        'ytd-button-renderer#create-channel-button button'
+      ].join(', ');
+      
+      const createChannelBtn = page.locator(createChannelSelectors).first();
+      if (await createChannelBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await humanClick(page, cursor, createChannelSelectors, { postClickDelay: 500 });
+        logger.info('Нажата кнопка "Создать канал"');
+        await page.waitForTimeout(_randomDelay(8000, 12000)); // Wait for channel creation processing
+      }
+      
+      // Go back to studio
+      await page.goto('https://studio.youtube.com/?d=ud', { waitUntil: 'domcontentloaded', timeout: 60_000 });
+      await page.waitForTimeout(_randomDelay(3000, 5000));
+    } catch (createErr) {
+      logger.warn('Попытка автоматического создания канала не удалась: ' + (createErr as Error).message);
+    }
+  }
+
   // BUG-11 fix: Dismiss "Welcome to YouTube Studio" popup that appears on first visit
   try {
-    const welcomeBtn = page.locator('button:has-text("Continue"), button:has-text("Продолжить")').first();
+    const welcomeSelectors = 'button:has-text("Continue"), button:has-text("Продолжить")';
+    const welcomeBtn = page.locator(welcomeSelectors).first();
     if (await welcomeBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await welcomeBtn.click();
+      await humanClick(page, cursor, welcomeSelectors, { postClickDelay: 500 });
       logger.info('Dismissed Welcome to YouTube Studio popup');
       await page.waitForTimeout(_randomDelay(1500, 2500));
     }
@@ -624,44 +701,89 @@ async function _uploadToYouTube(
   // Fill title with #Shorts appended
   const titleWithShorts = /#shorts/i.test(data.title) ? data.title : `${data.title} #Shorts`;
   try {
-    const titleInput = page.locator('#textbox[aria-label*="title" i], #textbox[contenteditable="true"]').first();
-    await titleInput.click();
-    await page.keyboard.press('Control+A');
-    await page.keyboard.press('Delete');
-    await humanType(page, '#textbox[aria-label*="title" i], #textbox[contenteditable="true"]', titleWithShorts);
-    logger.info(`Заголовок (с #Shorts): "${titleWithShorts.slice(0, 60)}..."`);
-
-    // BUG-12 fix: Dismiss hashtag suggestions dropdown that appears after typing #Shorts.
-    // Without this, the dropdown intercepts clicks on the description field below.
-    await page.waitForTimeout(800);
-    await page.keyboard.press('Escape');
+    // BUG-14 fix: Dismiss any potential "What's new" or "Reuse details" modals covering the screen
+    logger.info('Dismissing potential overlays before filling details...');
+    await page.keyboard.press('Escape').catch(() => {});
+    await page.waitForTimeout(300);
+    await page.keyboard.press('Escape').catch(() => {});
     await page.waitForTimeout(500);
-  } catch {
-    logger.warn('Не удалось заполнить заголовок');
+
+    const titleSelectors = '#textbox[aria-label*="title" i], #textbox[contenteditable="true"]';
+    const visibleTitleSel = await _getVisibleSelector(page, titleSelectors, 'melonity-title');
+    
+    if (visibleTitleSel) {
+      await humanClick(page, cursor, visibleTitleSel, { postClickDelay: 300 });
+      await page.keyboard.press('Control+A', { delay: Math.random() * 50 + 50 });
+      await page.keyboard.press('Backspace', { delay: Math.random() * 50 + 50 });
+      await humanType(page, visibleTitleSel, titleWithShorts);
+      
+      // BUG-15 fix: Guarantee title is set via evaluate in case focus was intercepted by overlay
+      await page.evaluate((data) => {
+        const el = document.querySelector(data.sel) as HTMLElement;
+        if (el && !el.innerText.includes(data.text)) {
+          el.innerText = data.text;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }, { sel: visibleTitleSel, text: titleWithShorts });
+      
+      logger.info(`Заголовок (с #Shorts): "${titleWithShorts.slice(0, 60)}..."`);
+
+      // BUG-12 fix: Dismiss hashtag suggestions dropdown that appears after typing #Shorts.
+      // Without this, the dropdown intercepts clicks on the description field below.
+      await page.waitForTimeout(800);
+      await page.keyboard.press('Escape', { delay: Math.random() * 50 + 50 });
+      await page.waitForTimeout(500);
+    } else {
+      logger.warn('Не удалось найти видимое поле заголовка');
+      await page.screenshot({ path: `/app/screenshots/title_missing_${Date.now()}.png`, fullPage: true }).catch(() => {});
+    }
+  } catch (err) {
+    logger.warn(`Не удалось заполнить заголовок: ${(err as Error).message}`);
+    await page.screenshot({ path: `/app/screenshots/title_error_${Date.now()}.png`, fullPage: true }).catch(() => {});
   }
 
   // Fill description + hashtags
   try {
     const descSelectors = '#textbox[aria-label*="description" i], div[aria-label*="Tell viewers"]';
-    const descInput = page.locator(descSelectors).first();
-    if (await descInput.count() > 0) {
-      // BUG-13 fix: Use force:true to bypass any remaining suggestion overlays
-      await descInput.click({ force: true });
+    const visibleDescSel = await _getVisibleSelector(page, descSelectors, 'melonity-desc');
+    
+    if (visibleDescSel) {
+      await humanClick(page, cursor, visibleDescSel, { postClickDelay: 300 });
       await page.waitForTimeout(500);
       const hashtagStr = data.hashtags?.length
         ? '\n\n' + data.hashtags.map(h => `#${h}`).join(' ')
         : '';
       const fullDesc = `${data.description}${hashtagStr}`;
       if (fullDesc.trim()) {
-        await humanType(page, descSelectors, fullDesc, { clearBefore: true });
+        await humanType(page, visibleDescSel, fullDesc, { clearBefore: true });
+        
+        // BUG-15 fix: Guarantee desc is set via evaluate
+        await page.evaluate((data) => {
+          const el = document.querySelector(data.sel) as HTMLElement;
+          if (el && !el.innerText.includes(data.text)) {
+            el.innerText = data.text;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        }, { sel: visibleDescSel, text: fullDesc });
+
         logger.info(`Описание: "${data.description.slice(0, 40)}..." + ${data.hashtags?.length || 0} хештегов`);
       }
+    } else {
+      logger.warn('Не удалось найти видимое поле описания');
     }
   } catch (descErr) {
     logger.warn(`Description skipped: ${(descErr as Error).message?.slice(0, 60)}`);
   }
 
   await page.waitForTimeout(_randomDelay(2000, 4000));
+
+  // ── Fill YouTube Tags (hidden behind "Show more" button) ──
+  // Skipped for Shorts: Tags are practically useless for Shorts and cause 
+  // shadow-DOM timeout warnings. We rely entirely on hashtags in description.
+
+
   await job.updateProgress(75);
 
   // ── YouTube Studio Wizard Navigation ──────────────────────
@@ -785,6 +907,11 @@ async function _uploadToYouTube(
 
   // Step 4: Click "Publish" / "Done" button
   logger.info('Шаг 4: Публикация видео...');
+  
+  // TAKE SCREENSHOT BEFORE PUBLISH
+  const ts = Date.now();
+  await page.screenshot({ path: `/app/screenshots/1_pre_publish_${ts}.png`, fullPage: true }).catch(() => {});
+
   let published = false;
   try {
     published = await page.evaluate(() => {
@@ -829,15 +956,39 @@ async function _uploadToYouTube(
 
   logger.info('Нажата кнопка публикации ✓');
 
+  // TAKE SCREENSHOT AFTER PUBLISH CLICK
+  await page.screenshot({ path: `/app/screenshots/2_post_click_${ts}.png`, fullPage: true }).catch(() => {});
+
   // Wait for "Video published" confirmation
   await page.waitForTimeout(_randomDelay(8000, 15000));
   await job.updateProgress(90);
 
+  // TAKE SCREENSHOT AFTER WAITING
+  await page.screenshot({ path: `/app/screenshots/3_after_wait_${ts}.png`, fullPage: true }).catch(() => {});
+
   // Verify success — look for share dialog or "Video published" text
-  const afterText = await page.textContent('body');
-  const success = /published|опубликовано|video uploaded/i.test(afterText ?? '');
+  const success = await page.evaluate(() => {
+    const text = document.body?.textContent || '';
+    if (/published|опубликовано|video uploaded/i.test(text)) return true;
+    
+    // Check specific dialog
+    const dialog = document.querySelector('ytcp-video-share-dialog, ytcp-dialog');
+    if (dialog && /published|опубликовано/i.test(dialog.textContent || '')) return true;
+
+    // Check specific elements that often appear
+    const titleElements = document.querySelectorAll('h1, h2, h3, h4');
+    for (const el of titleElements) {
+      if (/published|опубликовано|video uploaded/i.test(el.textContent || '')) return true;
+    }
+    
+    return false;
+  });
+
   if (!success) {
     logger.warn('Не удалось подтвердить публикацию (нет confirmation text), но дошли до конца flow');
+    await page.screenshot({ path: `/app/screenshots/4_failed_confirm_${ts}.png`, fullPage: true }).catch(() => {});
+  } else {
+    logger.info('Успешная публикация подтверждена (найден текст published/опубликовано)');
   }
 
   logger.info('✅ Видео имеет валидные параметры Shorts и было успешно опубликовано.');

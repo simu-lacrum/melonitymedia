@@ -72,8 +72,8 @@ export async function humanType(
 ): Promise<void> {
   const { clearBefore = true, speedMultiplier = 1.0 } = options;
 
-  // Focus the element
-  await page.click(selector);
+  // Focus the element safely avoiding strict mode violations
+  await page.locator(selector).first().click({ force: true }).catch(() => {});
   await page.waitForTimeout(gaussianDelay(100, 50));
 
   // Clear existing text if needed

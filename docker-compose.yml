@@ -101,6 +101,7 @@ services:
       - uploads:/app/uploads
       - banners:/app/banners
       - cookies:/data/cookies
+      - ./screenshots:/app/screenshots
     # Chrome sandbox requires SYS_ADMIN capability
     cap_add:
       - SYS_ADMIN

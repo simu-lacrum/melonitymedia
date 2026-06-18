@@ -253,14 +253,27 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
       }
     }
 
-    // Auth check — verify we're not redirected to login
+    // Auth check — verify we're not redirected to login and actually logged in
     await page.waitForTimeout(3000);
     const currentUrl = page.url();
-    if (currentUrl.includes('accounts.google.com') || currentUrl.includes('/login')) {
-      await page.screenshot({ path: `/tmp/warmup-screenshots/${data.accountId}_auth_fail.png` }).catch(() => {});
-      logger.error('❌ Cookies устарели — перенаправлен на страницу логина');
-      throw new Error('Auth failed: redirected to login page. Re-import cookies.');
+    
+    let isGuest = false;
+    if (ctxAcc.platform === 'YOUTUBE') {
+      isGuest = await page.evaluate(() => {
+        return !!document.querySelector('a[href*="ServiceLogin"], a[aria-label*="Sign in" i], a[aria-label*="Войти" i]');
+      });
+    } else {
+      isGuest = await page.evaluate(() => {
+        return !!document.querySelector('button[data-e2e="top-login-button"]') || window.location.href.includes('/login');
+      });
     }
+
+    if (isGuest) {
+      await page.screenshot({ path: `/tmp/warmup-screenshots/${data.accountId}_auth_fail.png` }).catch(() => {});
+      logger.error('❌ Cookies устарели или невалидны — аккаунт не авторизован');
+      throw new Error(`Auth failed: Not logged in to ${ctxAcc.platform}. Re-import cookies.`);
+    }
+    
     logger.info('✅ Авторизация подтверждена');
     await page.screenshot({ path: `/tmp/warmup-screenshots/${data.accountId}_auth_ok.png` }).catch(() => {});
 
