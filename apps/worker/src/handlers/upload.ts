@@ -149,7 +149,9 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
       throw new Error(`Less than 2h since previous upload on ${data.accountId}. Wait.`);
     }
 
-    // ── Gate 6: cookies valid ───────────────────────────────
+    // ── Gate 6: cookies pre-check (WARNING ONLY) ──────────────
+    // Pre-flight is advisory — the real browser session will verify auth.
+    // We only hard-block on BANNED status (confirmed by platform response).
     logger.info('Pre-flight проверка cookies...');
     const cookieStatus = await validateCookies(
       data.accountId,
@@ -166,11 +168,9 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
       throw new Error('Аккаунт забанен. Отмена загрузки.');
     }
     if (cookieStatus === 'expired') {
-      await prisma.socialAccount.update({
-        where: { id: data.accountId },
-        data: { status: 'EXPIRED_COOKIES' },
-      });
-      throw new Error('Cookies истекли. Импортируйте новые cookies через UI.');
+      // WARNING ONLY — don't block the upload, let browser handle it.
+      // Cookies may still work in a full browser context even if curl check fails.
+      logger.warn('⚠️ Pre-flight: cookies могут быть устаревшими — продолжаю с браузерной проверкой...');
     }
 
     await job.updateProgress(10);

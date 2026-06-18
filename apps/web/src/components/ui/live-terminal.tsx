@@ -2,57 +2,39 @@
 
 import * as React from "react"
 import { motion } from "framer-motion"
-import { connectSocket, disconnectSocket } from "@/lib/socket"
-import { Terminal, Maximize2, Minimize2, X, Play } from "lucide-react"
+import { ensureConnected, getSnapshot, subscribe, clearLogs, type LogLine } from "@/lib/log-store"
+import { Terminal, Maximize2, Minimize2, X, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
-interface LogLine {
-  id: string
-  timestamp: string
-  level: "info" | "error" | "success" | "warning"
-  message: string
-}
-
 export function LiveTerminal({ taskId }: { taskId?: string }) {
-  const [logs, setLogs] = React.useState<LogLine[]>([])
+  // Subscribe to global log store (survives navigation)
+  const [state, setState] = React.useState(getSnapshot)
   const [expanded, setExpanded] = React.useState(false)
-  const [connected, setConnected] = React.useState(false)
   const bottomRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => {
-    // Scroll to bottom when logs change
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [logs])
+    // Ensure socket is connected on mount (idempotent)
+    ensureConnected()
+
+    // Subscribe to store updates
+    const unsub = subscribe(() => {
+      setState(getSnapshot())
+    })
+
+    return unsub
+    // NOTE: we do NOT disconnect on unmount — socket stays alive globally
+  }, [])
 
   React.useEffect(() => {
-    const socket = connectSocket()
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [state.logs])
 
-    socket.on("connect", () => {
-      setConnected(true)
-      setLogs((prev) => [
-        ...prev,
-        { id: Date.now().toString(), timestamp: new Date().toLocaleTimeString(), level: "success", message: "WebSocket Connected: Streaming worker logs..." }
-      ])
-    })
+  const { logs, connected } = state
 
-    socket.on("disconnect", () => {
-      setConnected(false)
-      setLogs((prev) => [
-        ...prev,
-        { id: Date.now().toString(), timestamp: new Date().toLocaleTimeString(), level: "error", message: "WebSocket Disconnected." }
-      ])
-    })
-
-    socket.on("worker:log", (data: LogLine) => {
-      if (!taskId || data.message.includes(taskId)) {
-        setLogs((prev) => [...prev.slice(-100), data])
-      }
-    })
-
-    return () => {
-      disconnectSocket()
-    }
-  }, [taskId])
+  // Filter logs by taskId if provided
+  const filteredLogs = taskId
+    ? logs.filter((log) => log.message.includes(taskId) || log.level === "success" || log.level === "error")
+    : logs
 
   const renderLog = (log: LogLine) => {
     let color = "text-text-muted"
@@ -90,6 +72,9 @@ export function LiveTerminal({ taskId }: { taskId?: string }) {
           </div>
         </div>
         <div className="flex items-center space-x-2">
+          <Button variant="ghost" size="icon" onClick={() => clearLogs()} className="w-8 h-8 hover:bg-white/10" title="Очистить логи">
+            <Trash2 className="w-4 h-4" />
+          </Button>
           <Button variant="ghost" size="icon" onClick={() => setExpanded(!expanded)} className="w-8 h-8 hover:bg-white/10">
             {expanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
           </Button>
@@ -102,12 +87,12 @@ export function LiveTerminal({ taskId }: { taskId?: string }) {
       </div>
       
       <div className="flex-1 overflow-auto p-4 space-y-1 bg-[#0A0A0A]/50">
-        {logs.length === 0 ? (
+        {filteredLogs.length === 0 ? (
           <div className="h-full flex items-center justify-center text-text-muted font-mono text-sm">
             Ожидание логов воркера...
           </div>
         ) : (
-          logs.map(renderLog)
+          filteredLogs.map(renderLog)
         )}
         <div ref={bottomRef} />
       </div>
