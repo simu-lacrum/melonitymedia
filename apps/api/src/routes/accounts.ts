@@ -974,7 +974,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
 // ── POST /warmup — start warmup for accounts ────────────────
 router.post('/warmup', async (req: Request, res: Response) => {
   try {
-    const { ids, warmupDays } = req.body;
+    const { ids, warmupDays, hashtags: rawHashtags } = req.body;
     if (!Array.isArray(ids) || ids.length === 0) {
       res.status(400).json({ error: 'Выберите хотя бы один аккаунт' });
       return;
@@ -982,6 +982,10 @@ router.post('/warmup', async (req: Request, res: Response) => {
 
     // Validate warmupDays if provided (3-21 days, default 10)
     const days = warmupDays ? Math.max(3, Math.min(21, Math.floor(Number(warmupDays)))) : 10;
+    // Validate hashtags if provided
+    const hashtags: string[] = Array.isArray(rawHashtags)
+      ? rawHashtags.map((h: string) => String(h).replace(/^#/, '').trim()).filter(Boolean)
+      : [];
 
     // Mark accounts as WARMING_UP and set warmupStartedAt
     await prisma.socialAccount.updateMany({
@@ -1003,7 +1007,7 @@ router.post('/warmup', async (req: Request, res: Response) => {
       data: {
         userId: req.user!.id,
         type: 'WARMUP',
-        config: { accountIds: ids, threads: 3, warmupDays: days },
+        config: { accountIds: ids, threads: 3, warmupDays: days, hashtags },
         accountId,
       },
     });
@@ -1015,7 +1019,7 @@ router.post('/warmup', async (req: Request, res: Response) => {
           queueName: 'warmup',
           userId: req.user!.id,
           accountId,
-          extra: { taskId: task.id, warmupDays: days },
+          extra: { taskId: task.id, warmupDays: days, hashtags },
           delay: index * 5000, // stagger 5s between accounts
         }),
       ),
