@@ -44,7 +44,8 @@ jobs:
 
             echo "══════ Building & starting app containers ══════"
             # Only rebuild app services — not DB/Redis (they persist data)
-            docker compose up -d --build --remove-orphans --force-recreate api worker
+            # web MUST be included — nginx depends on upstream "web:3000"
+            docker compose up -d --build --remove-orphans --force-recreate api worker web
 
             echo "══════ Ensuring infrastructure is running ══════"
             docker compose up -d db redis
