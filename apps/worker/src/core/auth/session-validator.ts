@@ -98,10 +98,19 @@ export async function validateCookies(
       return 'expired';
     }
 
+    // Transient server errors (429, 5xx) — NOT expired, just a hiccup
+    if (resp.status === 429 || resp.status >= 500) {
+      console.warn(`[SessionValidator] Transient HTTP ${resp.status} for ${accountId} — assuming alive`);
+      return 'alive';
+    }
+
     return 'expired';
   } catch (err) {
-    console.warn(`[SessionValidator] Failed to validate cookies for ${accountId}:`, err);
-    return 'expired';
+    // Network errors (proxy timeout, DNS, connection refused) should NOT
+    // mark cookies as expired — the problem is connectivity, not auth.
+    // Let the real browser session handle auth checking.
+    console.warn(`[SessionValidator] Network error for ${accountId} — assuming alive:`, (err as Error).message);
+    return 'alive';
   }
 }
 
