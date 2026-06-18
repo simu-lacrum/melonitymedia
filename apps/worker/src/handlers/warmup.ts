@@ -44,6 +44,7 @@ interface WarmupJobData {
 
 /** Inline context shim passed to phase helpers (replaces WarmupJobData). */
 interface WarmupPhaseContext {
+  accountId: string;
   warmupDay: number;
   warmupDays: number;
   platform: 'TIKTOK' | 'YOUTUBE';
@@ -223,6 +224,7 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
       : [];  // No hashtags = pure FYP browsing, which is also valid
 
     const phaseCtx: WarmupPhaseContext = {
+      accountId: data.accountId,
       warmupDay,
       warmupDays: totalDays,
       platform: ctxAcc.platform,
