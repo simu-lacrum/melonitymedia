@@ -271,6 +271,11 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
               where: { id: data.videoId },
               data: { filepath: '' },
             });
+            // Also clean up banner file (no longer needed after all accounts done)
+            if (data.bannerPath && fs.existsSync(data.bannerPath)) {
+              fs.unlinkSync(data.bannerPath);
+              logger.info(`🗑️ Баннер удалён: ${data.bannerPath}`);
+            }
           }
         }
       } catch (cleanupErr) {
@@ -313,25 +318,10 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
       await cleanupBanneredVideo(banneredPath);
     }
 
-    // After the LAST account in the job — clean up original files from VPS
-    // (video file + banner file are no longer needed)
-    const isLastAccount = (data.platformIndex ?? 0) >= ((data.totalAccountsInJob ?? 1) - 1);
-    if (isLastAccount) {
-      try {
-        // Delete original video file
-        if (data.videoPath && fs.existsSync(data.videoPath)) {
-          fs.unlinkSync(data.videoPath);
-          console.log(`[Upload] Cleaned up original video: ${data.videoPath}`);
-        }
-        // Delete banner file
-        if (data.bannerPath && fs.existsSync(data.bannerPath)) {
-          fs.unlinkSync(data.bannerPath);
-          console.log(`[Upload] Cleaned up banner: ${data.bannerPath}`);
-        }
-      } catch (cleanupErr) {
-        console.warn('[Upload] Non-critical cleanup error:', cleanupErr);
-      }
-    }
+    // NOTE: Original video and banner files are cleaned up ONLY on successful upload
+    // (see lines 250-275 above). We must NOT delete them here in finally{} because
+    // this block runs on errors too (expired cookies, proxy failures, etc.)
+    // and deleting originals on error makes retries impossible.
 
     logger.disconnect();
   }
