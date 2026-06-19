@@ -12,6 +12,7 @@
 - **Login**: Поддержка Google device 2FA.
 
 ### Fixed / Changed
+- **Warmup Comments Control**: комментарии прогрева теперь задаются пользователем в Workspace; пустой список отключает комментарии, hardcoded comment pool удалён из worker.
 - **Warmup Enhancements**: Human-like mouse movements во всех фазах, поддержка нескольких сессий в день (multi-session), sleep scheduling, умная навигация по Shorts/обычным видео.
 - **YouTube Upload**: Переход на `?d=ud` для прямого открытия upload диалога.
 - **YouTube Avatar**: Использование Google Account iframe flow.

@@ -407,12 +407,13 @@ interface WarmupJobPayload {
   accountId: string;
   warmupDays: number;       // 3-21, from account.warmupDays (default 10)
   hashtags?: string[];      // user-provided hashtags for FYP niche targeting
+  comments?: string[];      // user-provided comment pool; empty/missing = no comments
 
   // Worker internally calculates warmupDay from account.lastWarmupDay + 1.
   // Phase boundaries scale proportionally to warmupDays:
   //   Phase 1 (passive): first 30% of total — scroll FYP, watch videos, no interactions
-  //   Phase 2 (light):   next 30% — like 3-5 videos, leave 1 comment per session
-  //   Phase 3 (active):  remaining 40% — like 5-10, comment 2-3, save 1, follow 1
+  //   Phase 2 (light):   next 30% — like 3-5 videos, leave 1 configured comment per session
+  //   Phase 3 (active):  remaining 40% — like 5-10, comment 2-3 from configured list, save 1, follow 1
   //   Day N+1+: Ready for upload
   //
   // SELF-RESCHEDULING (v3.3):
@@ -424,7 +425,7 @@ interface WarmupJobPayload {
   // All actions use:
   // - Patchright with per-account fingerprint
   // - ghost-cursor for mouse movement
-  // - typing emulator for comments
+  // - typing emulator for user-provided comments
   // - randomized session durations (5-15 min)
 }
 ```

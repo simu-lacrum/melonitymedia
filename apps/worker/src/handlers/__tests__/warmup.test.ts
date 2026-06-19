@@ -54,4 +54,21 @@ describe('warmup handler source verification', () => {
       expect(WARMUP_SRC).toContain('totalDays * 0.6');
     });
   });
+
+  describe('user-controlled warmup comments', () => {
+    it('does not contain a hardcoded comment pool', () => {
+      expect(WARMUP_SRC).not.toContain('COMMENT_POOL');
+    });
+
+    it('uses user-provided comments for comment actions', () => {
+      expect(WARMUP_SRC).toContain('comments?: string[]');
+      expect(WARMUP_SRC).toContain('_pickWarmupComment(data.comments)');
+      expect(WARMUP_SRC).toContain('data.comments.length > 0');
+    });
+
+    it('preserves comments across self-rescheduled sessions', () => {
+      expect(WARMUP_SRC).toContain('comments: data.comments');
+      expect(WARMUP_SRC).toContain('taskId: data.taskId');
+    });
+  });
 });

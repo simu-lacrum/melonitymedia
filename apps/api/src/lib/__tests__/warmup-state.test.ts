@@ -3,6 +3,9 @@ import {
   DEFAULT_WARMUP_DAYS,
   DEFAULT_WARMUP_HOURS,
   hasCompletedWarmupMismatch,
+  MAX_WARMUP_COMMENT_LENGTH,
+  MAX_WARMUP_COMMENTS,
+  normalizeWarmupComments,
   normalizeWarmupDays,
   normalizeWarmupHours,
   normalizeWarmupMode,
@@ -25,6 +28,26 @@ describe('warmup-state', () => {
     expect(normalizeWarmupMode('HOURS')).toBe('HOURS');
     expect(normalizeWarmupMode('DAYS')).toBe('DAYS');
     expect(normalizeWarmupMode('anything')).toBe('DAYS');
+  });
+
+  it('normalizes user-provided warmup comments', () => {
+    expect(normalizeWarmupComments(undefined)).toEqual([]);
+    expect(normalizeWarmupComments('nice')).toEqual([]);
+    expect(normalizeWarmupComments([
+      '  good clip  ',
+      'good   clip',
+      '',
+      null,
+      'another one',
+    ])).toEqual(['good clip', 'another one']);
+  });
+
+  it('limits warmup comments to safe counts and lengths', () => {
+    const long = 'x'.repeat(MAX_WARMUP_COMMENT_LENGTH + 20);
+    const many = Array.from({ length: MAX_WARMUP_COMMENTS + 10 }, (_, index) => `comment ${index}`);
+
+    expect(normalizeWarmupComments([long])[0]).toHaveLength(MAX_WARMUP_COMMENT_LENGTH);
+    expect(normalizeWarmupComments(many)).toHaveLength(MAX_WARMUP_COMMENTS);
   });
 
   it('detects completed warmup rows stuck in WARMING_UP', () => {

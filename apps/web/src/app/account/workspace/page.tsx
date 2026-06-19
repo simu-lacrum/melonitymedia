@@ -36,6 +36,7 @@ interface WarmupConfig {
   useRotation: boolean
   headless: boolean
   hashtags: string[]
+  comments: string[]
 }
 
 interface CookiesConfig {
@@ -68,7 +69,7 @@ interface UploadConfig {
 const DEFAULT_CONFIGS = {
   WARMUP: {
     mode: "WARMUP", warmupMode: "DAYS", concurrency: 3, warmupDays: 10, warmupHours: 2, useRotation: true,
-    headless: false, hashtags: [],
+    headless: false, hashtags: [], comments: [],
   } as WarmupConfig,
   COOKIES: {
     mode: "COOKIES", concurrency: 5, headless: false,
@@ -86,6 +87,22 @@ const DEFAULT_CONFIGS = {
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? (
   process.env.NODE_ENV === "production" ? "" : "http://localhost:4000"
 )
+
+const parseWarmupComments = (value: string): string[] => {
+  const seen = new Set<string>()
+  const comments: string[] = []
+
+  for (const line of value.split(/\r?\n/)) {
+    const comment = line.replace(/\s+/g, " ").trim().slice(0, 240)
+    if (!comment || seen.has(comment)) continue
+
+    seen.add(comment)
+    comments.push(comment)
+    if (comments.length >= 50) break
+  }
+
+  return comments
+}
 
 interface VideoFile {
   id: string
@@ -161,6 +178,7 @@ export default function WorkspacePage() {
   const [upload, setUpload] = React.useState<UploadConfig>({ ...DEFAULT_CONFIGS.UPLOAD })
 
   const [hashtagInput, setHashtagInput] = React.useState("")
+  const [warmupCommentText, setWarmupCommentText] = React.useState("")
   const [videos, setVideos] = React.useState<VideoFile[]>([])
   const [uploading, setUploading] = React.useState(false)
   const [banners, setBanners] = React.useState<BannerFile[]>([])
@@ -294,7 +312,12 @@ export default function WorkspacePage() {
       const m = cfg.mode || mode
       setMode(m)
       switch (m) {
-        case "WARMUP": setWarmup({ ...DEFAULT_CONFIGS.WARMUP, ...cfg }); break
+        case "WARMUP": {
+          const comments = parseWarmupComments(Array.isArray(cfg.comments) ? cfg.comments.join("\n") : "")
+          setWarmup({ ...DEFAULT_CONFIGS.WARMUP, ...cfg, comments })
+          setWarmupCommentText(comments.join("\n"))
+          break
+        }
         case "COOKIES": setCookies({ ...DEFAULT_CONFIGS.COOKIES, ...cfg }); break
         case "EDIT_PROFILE": setEditProfile({ ...DEFAULT_CONFIGS.EDIT_PROFILE, ...cfg }); break
         case "UPLOAD": setUpload({ ...DEFAULT_CONFIGS.UPLOAD, ...cfg }); break
@@ -380,6 +403,14 @@ export default function WorkspacePage() {
     } else {
       setUpload({ ...upload, hashtags: upload.hashtags.filter(h => h !== tag) })
     }
+  }
+
+  const handleWarmupCommentsChange = (value: string) => {
+    setWarmupCommentText(value)
+    setWarmup((current) => ({
+      ...current,
+      comments: parseWarmupComments(value),
+    }))
   }
 
   const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -548,6 +579,19 @@ export default function WorkspacePage() {
               </div>
             </div>
             {renderHashtags(warmup.hashtags, "warmup")}
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="warmup-comments">Комментарии</Label>
+              <Textarea
+                id="warmup-comments"
+                rows={5}
+                placeholder={"Отличный ролик\nОчень живой монтаж\nСохранил себе"}
+                value={warmupCommentText}
+                onChange={(e) => handleWarmupCommentsChange(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                По одному комментарию на строку. Если поле пустое, прогрев не будет оставлять комментарии.
+              </p>
+            </div>
           </div>
         )
 

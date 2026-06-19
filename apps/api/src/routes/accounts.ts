@@ -24,7 +24,7 @@ import crypto from 'crypto';
 import { generateFingerprint, generateMobileFingerprint } from '../lib/fingerprint.js';
 import { publishVerificationCode, publishResendCommand } from '../lib/redis-pubsub.js';
 import { dispatchAccountJob } from '../lib/job-dispatch.js';
-import { hasCompletedWarmupMismatch, normalizeWarmupDays } from '../lib/warmup-state.js';
+import { hasCompletedWarmupMismatch, normalizeWarmupComments, normalizeWarmupDays } from '../lib/warmup-state.js';
 
 const router = Router();
 router.use(authMiddleware);
@@ -1027,7 +1027,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
 // ── POST /warmup — start warmup for accounts ────────────────
 router.post('/warmup', async (req: Request, res: Response) => {
   try {
-    const { ids, warmupDays, hashtags: rawHashtags } = req.body;
+    const { ids, warmupDays, hashtags: rawHashtags, comments: rawComments } = req.body;
     if (!Array.isArray(ids) || ids.length === 0) {
       res.status(400).json({ error: 'Выберите хотя бы один аккаунт' });
       return;
@@ -1039,6 +1039,7 @@ router.post('/warmup', async (req: Request, res: Response) => {
     const hashtags: string[] = Array.isArray(rawHashtags)
       ? rawHashtags.map((h: string) => String(h).replace(/^#/, '').trim()).filter(Boolean)
       : [];
+    const comments = normalizeWarmupComments(rawComments);
 
     // Create task for BullMQ
     const accountId = ids.length === 1 ? ids[0] : null;
@@ -1046,7 +1047,7 @@ router.post('/warmup', async (req: Request, res: Response) => {
       data: {
         userId: req.user!.id,
         type: 'WARMUP',
-        config: { accountIds: ids, threads: 3, warmupDays: days, hashtags },
+        config: { accountIds: ids, threads: 3, warmupDays: days, hashtags, comments },
         accountId,
       },
     });
@@ -1058,7 +1059,7 @@ router.post('/warmup', async (req: Request, res: Response) => {
           queueName: 'warmup',
           userId: req.user!.id,
           accountId,
-          extra: { taskId: task.id, warmupDays: days, hashtags },
+          extra: { taskId: task.id, warmupDays: days, hashtags, comments },
           delay: 1000 + index * 5000, // give DB state a moment to persist before worker starts
         }),
       ),
@@ -1085,7 +1086,7 @@ router.post('/warmup', async (req: Request, res: Response) => {
       data: {
         bullmqJobId: results.find(r => r.jobId)?.jobId ?? null,
         status: dispatched > 0 ? 'PENDING' : 'FAILED',
-        config: { accountIds: ids, threads: 3, warmupDays: days, hashtags, dispatchedJobs: results } as any,
+        config: { accountIds: ids, threads: 3, warmupDays: days, hashtags, comments, dispatchedJobs: results } as any,
       },
     });
 

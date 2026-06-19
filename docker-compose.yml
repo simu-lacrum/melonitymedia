@@ -71,7 +71,7 @@ services:
       - uploads:/app/uploads
       - banners:/app/banners
 
-  # ── Web Frontend (Next.js 15) ────────────────────────────
+  # ── Web Frontend (Next.js 16) ────────────────────────────
   web:
     build:
       context: .

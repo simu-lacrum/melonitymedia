@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 // ─────────────────────────────────────────────────────────────
-// Next.js Middleware — Route Protection
+// Next.js Proxy — Route Protection
 //
 // Runs on the edge before every page render.
 // Checks for melonity_token cookie and redirects accordingly.
@@ -20,7 +20,7 @@ const PUBLIC_PATHS = [
   '/auth/register',
 ];
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const token = request.cookies.get('melonity_token')?.value;
 

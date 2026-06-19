@@ -6,7 +6,7 @@
 MelonityMedia/
 ├── apps/                          # Все приложения
 │   ├── api/                       # Express.js Backend
-│   ├── web/                       # Next.js 15 Frontend
+│   ├── web/                       # Next.js 16 Frontend
 │   └── worker/                    # BullMQ Worker Pool
 ├── scripts/                       # Утилитарные скрипты
 │   └── rotate-master-key.mjs      # Ротация AES-256-GCM ключа шифрования
@@ -47,7 +47,7 @@ MelonityMedia/
 
 ---
 
-## `apps/web/` — Frontend (Next.js 15 App Router)
+## `apps/web/` — Frontend (Next.js 16 App Router)
 
 | Путь | Описание |
 |------|----------|

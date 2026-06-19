@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────
 # MelonityMedia Web Frontend — Production Dockerfile
 #
-# Multi-stage build for Next.js 15 standalone output:
+# Multi-stage build for Next.js 16 standalone output:
 # 1. Install dependencies
 # 2. Build Next.js (standalone mode)
 # 3. Minimal production image

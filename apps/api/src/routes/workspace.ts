@@ -28,7 +28,12 @@ import { authMiddleware } from '../middleware/auth.js';
 import { authRateLimit } from '../middleware/rate-limit.js';
 import { buildNoVncClientUrl, getOwnedVncSession, proxyNoVncHttp } from '../lib/vnc-proxy.js';
 import { buildTaskMonitorUrl, sanitizeTaskConfig } from '../lib/task-sanitize.js';
-import { normalizeWarmupDays, normalizeWarmupHours, normalizeWarmupMode } from '../lib/warmup-state.js';
+import {
+  normalizeWarmupComments,
+  normalizeWarmupDays,
+  normalizeWarmupHours,
+  normalizeWarmupMode,
+} from '../lib/warmup-state.js';
 
 const router = Router();
 router.use(authMiddleware);
@@ -319,6 +324,7 @@ router.post('/launch', async (req: Request, res: Response) => {
           warmupMode: normalizeWarmupMode(asRecord(config).warmupMode),
           warmupDays: normalizeWarmupDays(asRecord(config).warmupDays),
           warmupHours: normalizeWarmupHours(asRecord(config).warmupHours),
+          comments: normalizeWarmupComments(asRecord(config).comments),
         }
       : config;
     const force = req.query.force === "true";
@@ -393,6 +399,7 @@ router.post('/launch', async (req: Request, res: Response) => {
         return {
           taskId: task.id,
           hashtags: Array.isArray(cfg.hashtags) ? cfg.hashtags : [],
+          comments: normalizeWarmupComments(cfg.comments),
           warmupMode: cfg.warmupMode ?? 'DAYS',
           warmupDays: cfg.warmupDays ?? 10,
           warmupHours: cfg.warmupHours ?? 2,

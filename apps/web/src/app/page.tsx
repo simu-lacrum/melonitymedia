@@ -282,7 +282,7 @@ export default function LandingPage() {
                 </div>
                 <div className="divide-y divide-pure-white/[0.05]">
                   {[
-                    { label: 'Frontend', tech: 'Next.js 15, React 19, Tailwind v4' },
+                    { label: 'Frontend', tech: 'Next.js 16, React 19, Tailwind v4' },
                     { label: 'API Layer', tech: 'Express.js, Prisma, Socket.io' },
                     { label: 'Queue System', tech: 'BullMQ, Redis 7' },
                     { label: 'Worker Engine', tech: 'Patchright, FFmpeg, curl-impersonate' },

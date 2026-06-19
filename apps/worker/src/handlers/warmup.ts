@@ -7,7 +7,7 @@
 // 2. Reduced like/follow ratios to avoid bot detection
 // 3. Follow cap (max 2-3 per session) with probability 5%
 // 4. Longer session durations (20-30 min like real users)
-// 5. Better comment pool (3-5 word phrases, not emoji spam)
+// 5. User-controlled comments (empty list disables commenting)
 // 6. Resilient selectors: aria-label/text fallbacks for all data-e2e
 // 7. YouTube Shorts warmup support
 // 8. Passive phase allows 1-2 likes to look human
@@ -42,6 +42,8 @@ interface WarmupJobData {
   warmupHours?: number;
   /** Hashtags to use for warmup (e.g. ['dota2', 'gaming']) */
   hashtags?: string[];
+  /** User-provided comments. Empty or missing list means "do not comment". */
+  comments?: string[];
   /** Which session within the current day (0-based). Used for multi-session scheduling. */
   sessionInDay?: number;
 }
@@ -53,6 +55,7 @@ interface WarmupPhaseContext {
   warmupDays: number;
   platform: 'TIKTOK' | 'YOUTUBE';
   hashtags: string[];
+  comments: string[];
 }
 
 function _normalizeWarmupDays(value: unknown, fallback: number): number {
@@ -61,19 +64,31 @@ function _normalizeWarmupDays(value: unknown, fallback: number): number {
   return Math.max(1, Math.min(21, Math.floor(parsed)));
 }
 
-// ── Warmup Comments Pool ────────────────────────────────────
-// Human-like comments (3-5 words minimum). Single emoji = spam flag!
+// User-controlled warmup comments. Empty list means no comment actions.
 
-const COMMENT_POOL = [
-  'this is so good 🔥', 'love this vibe ❤️', 'wait this is actually fire',
-  'okay this is amazing wow', 'need more of this 🙌', 'bro this is perfect',
-  'how is this so good lol', 'this made my day honestly', 'underrated content fr',
-  'the editing tho 👏', 'I keep coming back to this', 'saving this for later',
-  'no way this is real 😍', 'literally obsessed with this', "chef's kiss 💯",
-  'this deserves way more views', "can't stop watching this lmao",
-  'the talent here is insane', 'why is nobody talking about this',
-  'this just made my whole week', 'the effort in this is crazy',
-];
+function _normalizeWarmupComments(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+
+  const seen = new Set<string>();
+  const comments: string[] = [];
+
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const comment = String(item).replace(/\s+/g, ' ').trim().slice(0, 240);
+    if (!comment || seen.has(comment)) continue;
+
+    seen.add(comment);
+    comments.push(comment);
+    if (comments.length >= 50) break;
+  }
+
+  return comments;
+}
+
+function _pickWarmupComment(comments: string[]): string | null {
+  if (comments.length === 0) return null;
+  return comments[Math.floor(Math.random() * comments.length)];
+}
 
 // ── Resilient Selectors ────────────────────────────────────
 // TikTok rotates data-e2e attributes. We use fallback chains.
@@ -237,6 +252,7 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     const mergedHashtags = Array.isArray(data.hashtags) && data.hashtags.length > 0
       ? [...new Set(data.hashtags)]
       : [];  // No hashtags = pure FYP browsing, which is also valid
+    const mergedComments = _normalizeWarmupComments(data.comments);
 
     const phaseCtx: WarmupPhaseContext = {
       accountId: data.accountId,
@@ -244,7 +260,11 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
       warmupDays: totalDays,
       platform: ctxAcc.platform,
       hashtags: mergedHashtags,
+      comments: mergedComments,
     };
+    if (mergedComments.length === 0) {
+      logger.info('Комментарии отключены: список комментариев пуст.');
+    }
 
     // ── Navigate to initial niche content ──────────────────
     // If hashtags provided, start by searching for them (trains TikTok algo)
@@ -366,9 +386,14 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
 
       await addJob('warmup' as any, {
         userId: data.userId,
+        taskId: data.taskId,
         accountId: data.accountId,
         hashtags: data.hashtags,
+        comments: data.comments,
         cookiesDir: data.cookiesDir,
+        warmupMode: data.warmupMode,
+        warmupDays: totalDays,
+        warmupHours: data.warmupHours,
         sessionInDay: 0, // reset to first session of new day
       }, {
         delay: sleepDelay,
@@ -385,9 +410,14 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
       // Don't increment warmupDay yet — still same day
       await addJob('warmup' as any, {
         userId: data.userId,
+        taskId: data.taskId,
         accountId: data.accountId,
         hashtags: data.hashtags,
+        comments: data.comments,
         cookiesDir: data.cookiesDir,
+        warmupMode: data.warmupMode,
+        warmupDays: totalDays,
+        warmupHours: data.warmupHours,
         warmupDay: warmupDay, // keep same day
         sessionInDay: nextSession,
       }, {
@@ -777,9 +807,10 @@ async function _lightEngagement(
       } catch { /* element not found */ }
     }
 
-    // One comment per session (meaningful, not emoji spam)
-    if (!commented && i === commentAtIndex) {
-      const comment = COMMENT_POOL[Math.floor(Math.random() * COMMENT_POOL.length)];
+    // One user-configured comment per session. Empty list disables comments.
+    if (!commented && i === commentAtIndex && data.comments.length > 0) {
+      const comment = _pickWarmupComment(data.comments);
+      if (!comment) continue;
       try {
         if (data.platform === 'TIKTOK') {
           await humanClick(page, cursor, SEL.TIKTOK.COMMENT_BTN, { postClickDelay: 1500 });
@@ -938,9 +969,10 @@ async function _activeEngagement(
       }
     }
 
-    // Comments (up to maxComments per session, 25% chance per video)
-    if (comments < maxComments && Math.random() < 0.25) {
-      const comment = COMMENT_POOL[Math.floor(Math.random() * COMMENT_POOL.length)];
+    // User-configured comments (up to maxComments per session, 25% chance per video).
+    if (comments < maxComments && data.comments.length > 0 && Math.random() < 0.25) {
+      const comment = _pickWarmupComment(data.comments);
+      if (!comment) continue;
       try {
         if (data.platform === 'TIKTOK') {
           await humanClick(page, cursor, SEL.TIKTOK.COMMENT_BTN, { postClickDelay: 1500 });
