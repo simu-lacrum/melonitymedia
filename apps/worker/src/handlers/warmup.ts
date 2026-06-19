@@ -37,6 +37,7 @@ interface WarmupJobData {
   cookiesDir?: string;
   /** Optional override of warmupDay for replays; normally derived from warmupStartedAt */
   warmupDay?: number;
+  warmupDays?: number;
   warmupMode?: 'DAYS' | 'HOURS';
   warmupHours?: number;
   /** Hashtags to use for warmup (e.g. ['dota2', 'gaming']) */
@@ -52,6 +53,12 @@ interface WarmupPhaseContext {
   warmupDays: number;
   platform: 'TIKTOK' | 'YOUTUBE';
   hashtags: string[];
+}
+
+function _normalizeWarmupDays(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(1, Math.min(21, Math.floor(parsed)));
 }
 
 // ── Warmup Comments Pool ────────────────────────────────────
@@ -170,6 +177,7 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     }
 
     const ctxAcc = await loadAccountContext(data.accountId);
+    const totalDays = _normalizeWarmupDays(data.warmupDays, ctxAcc.warmupDays || 10);
 
     if (!ctxAcc.warmupStartedAt) {
       // Auto-initialize warmup — don't require a separate API call
@@ -178,13 +186,14 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
         where: { id: data.accountId },
         data: {
           warmupStartedAt: new Date(),
-          warmupDays: ctxAcc.warmupDays || 10,
+          warmupCompletedAt: null,
+          lastWarmupDay: null,
+          warmupDays: totalDays,
           status: 'WARMING_UP',
+          lastError: null,
         },
       });
     }
-
-    const totalDays = ctxAcc.warmupDays;
 
     // BUG-M7 fix: use sequential day progression instead of calendar-based.
     let warmupDay: number;
@@ -391,7 +400,31 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     await job.updateProgress(100);
 
   } catch (err: unknown) {
-    emitWorkerError(logger, data.accountId, 'warmup', err);
+    const classified = emitWorkerError(logger, data.accountId, 'warmup', err);
+    await prisma.socialAccount.findUnique({
+      where: { id: data.accountId },
+      select: { status: true, warmupCompletedAt: true },
+    }).then((account) => {
+      if (!account) return null;
+      const updateData: Record<string, unknown> = {
+        lastError: classified.message,
+      };
+
+      if (account.status === 'WARMING_UP' && account.warmupCompletedAt) {
+        updateData.status = 'ALIVE';
+      } else if (classified.code === 'COOKIES_EXPIRED') {
+        updateData.status = 'EXPIRED_COOKIES';
+      } else if (classified.code === 'AUTH_NEEDED') {
+        updateData.status = 'AUTH_NEEDED';
+      } else if (classified.code === 'ACCOUNT_BANNED' || classified.code === 'ACCOUNT_SUSPENDED') {
+        updateData.status = 'BANNED';
+      }
+
+      return prisma.socialAccount.update({
+        where: { id: data.accountId },
+        data: updateData,
+      });
+    }).catch(() => {});
     throw err;
   } finally {
     if (lockAcquired) await releaseAccountLock(data.accountId, 'warmup');

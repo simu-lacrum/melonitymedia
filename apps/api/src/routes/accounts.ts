@@ -24,6 +24,7 @@ import crypto from 'crypto';
 import { generateFingerprint, generateMobileFingerprint } from '../lib/fingerprint.js';
 import { publishVerificationCode, publishResendCommand } from '../lib/redis-pubsub.js';
 import { dispatchAccountJob } from '../lib/job-dispatch.js';
+import { hasCompletedWarmupMismatch, normalizeWarmupDays } from '../lib/warmup-state.js';
 
 const router = Router();
 router.use(authMiddleware);
@@ -125,6 +126,18 @@ function encryptCookies(jsonStr: string): { encrypted: Buffer; iv: Buffer; authT
 // ── GET / — list all accounts for current user ──────────────
 router.get('/', async (req: Request, res: Response) => {
   try {
+    await prisma.socialAccount.updateMany({
+      where: {
+        userId: req.user!.id,
+        status: 'WARMING_UP',
+        warmupCompletedAt: { not: null },
+      },
+      data: {
+        status: 'ALIVE',
+        lastError: null,
+      },
+    });
+
     // Optional pagination (backwards-compatible: frontend can omit these)
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const limit = Math.min(200, Math.max(1, parseInt(req.query.limit as string) || 200));
@@ -159,6 +172,7 @@ router.get('/', async (req: Request, res: Response) => {
 
       return {
         ...a,
+        status: hasCompletedWarmupMismatch(a) ? 'ALIVE' : a.status,
         login: a.username ?? a.nickname ?? null,
         videos: a._count.videoPublications,
         platform: a.platform,
@@ -1017,25 +1031,11 @@ router.post('/warmup', async (req: Request, res: Response) => {
     }
 
     // Validate warmupDays if provided (3-21 days, default 10)
-    const days = warmupDays ? Math.max(3, Math.min(21, Math.floor(Number(warmupDays)))) : 10;
+    const days = normalizeWarmupDays(warmupDays);
     // Validate hashtags if provided
     const hashtags: string[] = Array.isArray(rawHashtags)
       ? rawHashtags.map((h: string) => String(h).replace(/^#/, '').trim()).filter(Boolean)
       : [];
-
-    // Mark accounts as WARMING_UP and set warmupStartedAt
-    await prisma.socialAccount.updateMany({
-      where: {
-        id: { in: ids },
-        userId: req.user!.id,
-        warmupStartedAt: null, // don't restart already warming accounts
-      },
-      data: {
-        status: 'WARMING_UP',
-        warmupDays: days,
-        warmupStartedAt: new Date(),
-      },
-    });
 
     // Create task for BullMQ
     const accountId = ids.length === 1 ? ids[0] : null;
@@ -1056,12 +1056,27 @@ router.post('/warmup', async (req: Request, res: Response) => {
           userId: req.user!.id,
           accountId,
           extra: { taskId: task.id, warmupDays: days, hashtags },
-          delay: index * 5000, // stagger 5s between accounts
+          delay: 1000 + index * 5000, // give DB state a moment to persist before worker starts
         }),
       ),
     );
 
     const dispatched = results.filter(r => r.jobId).length;
+    const dispatchedAccountIds = results.filter(r => r.jobId).map(r => r.accountId);
+    if (dispatchedAccountIds.length > 0) {
+      await prisma.socialAccount.updateMany({
+        where: { id: { in: dispatchedAccountIds }, userId: req.user!.id },
+        data: {
+          status: 'WARMING_UP',
+          warmupDays: days,
+          warmupStartedAt: new Date(),
+          warmupCompletedAt: null,
+          lastWarmupDay: null,
+          lastError: null,
+        },
+      });
+    }
+
     await prisma.task.update({
       where: { id: task.id },
       data: {

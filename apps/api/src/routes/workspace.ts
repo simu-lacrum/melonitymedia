@@ -28,6 +28,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { authRateLimit } from '../middleware/rate-limit.js';
 import { buildNoVncClientUrl, getOwnedVncSession, proxyNoVncHttp } from '../lib/vnc-proxy.js';
 import { buildTaskMonitorUrl, sanitizeTaskConfig } from '../lib/task-sanitize.js';
+import { normalizeWarmupDays, normalizeWarmupHours, normalizeWarmupMode } from '../lib/warmup-state.js';
 
 const router = Router();
 router.use(authMiddleware);
@@ -67,6 +68,63 @@ function collectTaskJobIds(task: {
   }
 
   return [...jobIds];
+}
+
+async function reconcileTaskStatuses(userId: string) {
+  const staleTasks = await prisma.task.findMany({
+    where: {
+      userId,
+      status: { in: ['PENDING', 'RUNNING'] },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 100,
+    select: {
+      id: true,
+      type: true,
+      status: true,
+      config: true,
+      bullmqJobId: true,
+      error: true,
+    },
+  });
+
+  await Promise.all(staleTasks.map(async (task) => {
+    const queue = taskQueues[task.type as keyof typeof taskQueues];
+    if (!queue) return;
+
+    const jobIds = collectTaskJobIds(task);
+    if (jobIds.length === 0) return;
+
+    const states = await Promise.all(jobIds.map(async (jobId) => {
+      const job = await queue.getJob(jobId);
+      if (!job) return { state: 'missing', failedReason: null as string | null };
+      return {
+        state: await job.getState(),
+        failedReason: typeof job.failedReason === 'string' ? job.failedReason : null,
+      };
+    }));
+
+    const hasInFlight = states.some(({ state }) =>
+      ['active', 'waiting', 'waiting-children', 'delayed', 'prioritized', 'paused'].includes(state),
+    );
+    if (hasInFlight) return;
+
+    const hasFailed = states.some(({ state }) => state === 'failed');
+    const allCompleted = states.every(({ state }) => state === 'completed');
+    if (!hasFailed && !allCompleted) return;
+
+    await prisma.task.update({
+      where: { id: task.id },
+      data: {
+        status: hasFailed ? 'FAILED' : 'COMPLETED',
+        progress: hasFailed ? undefined : 100,
+        error: hasFailed
+          ? states.find(({ failedReason }) => failedReason)?.failedReason ?? task.error ?? 'One or more jobs failed'
+          : null,
+        completedAt: new Date(),
+      },
+    });
+  }));
 }
 
 function escapeHtml(value: string): string {
@@ -241,6 +299,14 @@ router.post('/launch', async (req: Request, res: Response) => {
     }
 
     const { type, config, threads, delayMin, delayMax } = parsed.data;
+    const normalizedConfig = type === 'WARMUP'
+      ? {
+          ...asRecord(config),
+          warmupMode: normalizeWarmupMode(asRecord(config).warmupMode),
+          warmupDays: normalizeWarmupDays(asRecord(config).warmupDays),
+          warmupHours: normalizeWarmupHours(asRecord(config).warmupHours),
+        }
+      : config;
     const force = req.query.force === "true";
 
     let targetAccountIds = parsed.data.accountIds;
@@ -277,7 +343,7 @@ router.post('/launch', async (req: Request, res: Response) => {
       data: {
         userId: req.user!.id,
         type,
-        config: { ...config, accountIds: targetAccountIds, threads },
+        config: { ...normalizedConfig, accountIds: targetAccountIds, threads },
         accountId,
       },
     });
@@ -296,7 +362,7 @@ router.post('/launch', async (req: Request, res: Response) => {
     const buildExtra = async () => {
       // ── EDIT_PROFILE: worker expects { changes: { name, bio, avatarUrl } }
       if (type === 'EDIT_PROFILE') {
-        const cfg = config as Record<string, unknown>;
+        const cfg = normalizedConfig as Record<string, unknown>;
         return {
           taskId: task.id,
           changes: {
@@ -309,7 +375,7 @@ router.post('/launch', async (req: Request, res: Response) => {
 
       // ── WARMUP: flatten hashtags to top-level for worker
       if (type === 'WARMUP') {
-        const cfg = config as Record<string, unknown>;
+        const cfg = normalizedConfig as Record<string, unknown>;
         return {
           taskId: task.id,
           hashtags: Array.isArray(cfg.hashtags) ? cfg.hashtags : [],
@@ -321,7 +387,7 @@ router.post('/launch', async (req: Request, res: Response) => {
 
       // ── UPLOAD: resolve video details from DB
       if (type === 'UPLOAD') {
-        const cfg = config as Record<string, unknown>;
+        const cfg = normalizedConfig as Record<string, unknown>;
         const videoId = cfg.videoId as string | undefined;
         if (!videoId) throw new Error("UPLOAD requires config.videoId");
 
@@ -342,7 +408,7 @@ router.post('/launch', async (req: Request, res: Response) => {
       }
 
       // ── Default (COOKIES, LOGIN): pass config as-is
-      return { taskId: task.id, config };
+      return { taskId: task.id, config: normalizedConfig };
     };
 
     // Pre-resolve banner path ONCE before iterating accounts (fixes N+1 query)
@@ -397,7 +463,7 @@ router.post('/launch', async (req: Request, res: Response) => {
           data: {
             status: 'COMPLETED',
             completedAt: new Date(),
-            config: { ...config, accountIds: targetAccountIds, threads, dispatchedJobs: [] },
+            config: { ...normalizedConfig, accountIds: targetAccountIds, threads, dispatchedJobs: [] },
           },
         });
         res.status(200).json({
@@ -430,6 +496,9 @@ router.post('/launch', async (req: Request, res: Response) => {
         // Calculate per-account delay: each subsequent account gets additional delay
         const perAccountDelay = delayMin + Math.floor(Math.random() * (delayMax - delayMin + 1));
         const totalDelay = index * perAccountDelay;
+        const safeDelay = type === 'WARMUP'
+          ? Math.max(1000, totalDelay)
+          : totalDelay;
 
         return dispatchAccountJob({
           queueName,
@@ -437,13 +506,14 @@ router.post('/launch', async (req: Request, res: Response) => {
           accountId,
           extra,
           forceSkipWarmup: force,
-          delay: totalDelay > 0 ? totalDelay : undefined,
+          delay: safeDelay > 0 ? safeDelay : undefined,
         });
       }),
     );
 
     const successCount = results.filter(r => r.jobId).length;
     const failures = results.filter(r => !r.jobId);
+    const successfulAccountIds = results.filter(r => r.jobId).map(r => r.accountId);
 
     // If everything failed pre-flight, no point in keeping the task record.
     if (successCount === 0) {
@@ -476,12 +546,27 @@ router.post('/launch', async (req: Request, res: Response) => {
     }
 
     // Persist BullMQ job ids on the task (use first as primary, full list in config)
+    if (type === 'WARMUP' && successfulAccountIds.length > 0) {
+      const cfg = normalizedConfig as Record<string, unknown>;
+      await prisma.socialAccount.updateMany({
+        where: { id: { in: successfulAccountIds }, userId: req.user!.id },
+        data: {
+          status: 'WARMING_UP',
+          warmupDays: normalizeWarmupDays(cfg.warmupDays),
+          warmupStartedAt: new Date(),
+          warmupCompletedAt: null,
+          lastWarmupDay: null,
+          lastError: null,
+        },
+      });
+    }
+
     await prisma.task.update({
       where: { id: task.id },
       data: {
         bullmqJobId: results.find(r => r.jobId)!.jobId,
         status: 'PENDING',
-        config: { ...config, accountIds: targetAccountIds, threads, dispatchedJobs: results },
+        config: { ...normalizedConfig, accountIds: targetAccountIds, threads, dispatchedJobs: results },
       },
     });
 
@@ -568,6 +653,8 @@ router.use('/jobs/:taskId/vnc/:jobId', async (req: Request, res: Response) => {
 // GET /jobs - list recent tasks for the current user
 router.get('/jobs', async (req: Request, res: Response) => {
   try {
+    await reconcileTaskStatuses(req.user!.id);
+
     const rawTasks = await prisma.task.findMany({
       where: { userId: req.user!.id },
       orderBy: { createdAt: 'desc' },
