@@ -796,16 +796,18 @@ router.patch('/bulk/proxy', async (req: Request, res: Response) => {
     }
 
     const blockers = plans.filter(p => p.violation);
-    if (blockers.length > 0 && !force) {
+    const hardBlockers = blockers.filter(p => !p.violation!.overrideAllowed);
+    if (blockers.length > 0 && (!force || hardBlockers.length > 0)) {
+      const firstBlocker = hardBlockers[0] ?? blockers[0];
       res.status(409).json({
         success: false,
-        code: blockers[0].violation!.code,
-        error: `${blockers.length} аккаунт(ов) заблокированы Carrier Stability Rule. ` +
-               `Используйте force=true (только ADMIN) для override.`,
+        code: firstBlocker.violation!.code,
+        error: firstBlocker.violation!.message,
         blockedAccountIds: blockers.map(b => b.accountId),
         violations: blockers.map(b => ({
           accountId: b.accountId,
           code: b.violation!.code,
+          overrideAllowed: b.violation!.overrideAllowed,
           message: b.violation!.message,
           details: {
             daysRemaining: b.violation!.daysRemaining,
@@ -822,7 +824,7 @@ router.patch('/bulk/proxy', async (req: Request, res: Response) => {
     await prisma.$transaction(async (tx: any) => {
       const now = new Date();
       for (const plan of plans) {
-        if (plan.violation && force) {
+        if (plan.violation && force && plan.violation.overrideAllowed) {
           await tx.auditLog.create({
             data: {
               userId: req.user!.id,
@@ -943,11 +945,12 @@ router.patch('/:id', async (req: Request, res: Response) => {
 
       const violation = validatePinChange({ account: existing, oldProxy, newProxy });
 
-      if (violation && !force) {
+      if (violation && (!force || !violation.overrideAllowed)) {
         res.status(409).json({
           success: false,
           error: violation.message,
           code: violation.code,
+          overrideAllowed: violation.overrideAllowed,
           details: {
             daysRemaining: violation.daysRemaining,
             oldCarrier: violation.oldCarrier,
@@ -959,7 +962,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
         return;
       }
 
-      if (violation && force) {
+      if (violation && force && violation.overrideAllowed) {
         await prisma.auditLog.create({
           data: {
             userId: req.user!.id,

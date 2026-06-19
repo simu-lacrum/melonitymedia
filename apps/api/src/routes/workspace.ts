@@ -612,6 +612,8 @@ router.post('/launch', async (req: Request, res: Response) => {
         const runningTask = busyFailures[0].error?.split(':')[1] || 'задача';
         const label = BUSY_TASK_LABELS[runningTask] || runningTask;
         errorMsg = `Аккаунт(ы) заняты — сейчас выполняется: ${label}. Дождитесь завершения.`;
+      } else if (failures.some(f => f.error === 'PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT')) {
+        errorMsg = 'Аккаунтам младше 30 дней нужен LTE_MOBILE прокси. Привяжите мобильный прокси той же страны и повторите запуск.';
       } else {
         errorMsg = "Все аккаунты заблокированы pre-flight проверками";
       }

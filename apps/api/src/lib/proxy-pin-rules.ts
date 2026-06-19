@@ -25,8 +25,9 @@ export interface PinViolation {
     | "PIN_WINDOW_ACTIVE"
     | "CARRIER_CHANGE_BLOCKED"
     | "COUNTRY_CHANGE_BLOCKED"
-    | "PROXY_NOT_LTE_FOR_TIKTOK";
+    | "PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT";
   message: string;
+  overrideAllowed: boolean;
   daysRemaining?: number;
   oldCarrier?: string | null;
   newCarrier?: string | null;
@@ -39,13 +40,13 @@ export interface PinViolation {
  *
  * Returns `null` if the change is safe, or a `PinViolation` describing why it must be blocked.
  *
- * Rules enforced (TikTok 2026 antifraud):
+ * Rules enforced:
  *  1. Within 14 days of pinning a proxy, you cannot reassign to a different proxy
  *     of the SAME carrier without explicit `force` — frequent rotations are themselves a signal.
  *  2. Carrier change at any point within the 14-day window is a hard block —
  *     correlation window resets, account hits shadowban for 14-21 days.
- *  3. Country change at any point is a hard block — TikTok geo-correlates with carrier.
- *  4. TikTok accounts younger than 30 days must use LTE_MOBILE proxy. Residential is rejected.
+ *  3. Country change is never allowed once an account has session history.
+ *  4. Accounts younger than 30 days must use LTE_MOBILE proxy. Residential is rejected.
  */
 export function validatePinChange(args: {
   account: AccountFields;
@@ -56,17 +57,14 @@ export function validatePinChange(args: {
   const { account, oldProxy, newProxy } = args;
   const now = args.now ?? new Date();
 
-  // Rule 4: TikTok + young account => must be LTE_MOBILE.
+  // Rule 4: young accounts must be LTE_MOBILE to pass BGP path scoring.
   const ageDays = (now.getTime() - account.createdAt.getTime()) / 86_400_000;
-  if (
-    account.platform === "TIKTOK" &&
-    ageDays < 30 &&
-    newProxy.type !== "LTE_MOBILE"
-  ) {
+  if (ageDays < 30 && newProxy.type !== "LTE_MOBILE") {
     return {
-      code: "PROXY_NOT_LTE_FOR_TIKTOK",
+      code: "PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT",
+      overrideAllowed: false,
       message:
-        `TikTok accounts younger than 30 days require LTE_MOBILE proxy (got ${newProxy.type}). ` +
+        `Accounts younger than 30 days require LTE_MOBILE proxy (got ${newProxy.type}). ` +
         `Datacenter and residential proxies trigger BGP path scoring on new accounts.`,
     };
   }
@@ -89,10 +87,11 @@ export function validatePinChange(args: {
   if (oldProxy.country !== newProxy.country) {
     return {
       code: "COUNTRY_CHANGE_BLOCKED",
+      overrideAllowed: false,
       message:
         `Cannot switch proxy country (${oldProxy.country} -> ${newProxy.country}) ` +
-        `for an account that already has session history. TikTok geo-correlates with carrier; ` +
-        `country change forces full re-warming. Use force=true if you accept the risk.`,
+        `for an account that already has session history. Country of operations is immutable; ` +
+        `create a separate account flow for another country instead.`,
       daysRemaining: Math.max(daysRemaining, 0),
       oldCountry: oldProxy.country,
       newCountry: newProxy.country,
@@ -106,6 +105,7 @@ export function validatePinChange(args: {
   ) {
     return {
       code: "CARRIER_CHANGE_BLOCKED",
+      overrideAllowed: true,
       message:
         `Carrier change (${oldProxy.carrier ?? "unknown"} -> ${newProxy.carrier ?? "unknown"}) ` +
         `resets the 14-day TikTok correlation window. Expected shadowban 14-21 days. ` +
@@ -120,6 +120,7 @@ export function validatePinChange(args: {
   if (pinAgeDays < PROXY_PIN_WINDOW_DAYS) {
     return {
       code: "PIN_WINDOW_ACTIVE",
+      overrideAllowed: true,
       message:
         `Account is pinned to current proxy for ${daysRemaining} more day(s). ` +
         `Swapping within the 14-day window is permitted only with force=true.`,

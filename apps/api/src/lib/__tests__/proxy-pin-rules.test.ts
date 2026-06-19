@@ -30,14 +30,18 @@ describe('validatePinChange', () => {
     expect(result).toBeNull();
   });
 
-  it('blocks young TikTok accounts from non-LTE proxies', () => {
+  it('blocks young accounts from non-LTE proxies across platforms', () => {
     const result = validatePinChange({
-      account: mkAccount({ createdAt: new Date(Date.now() - 5 * DAY_MS) }),
+      account: mkAccount({
+        platform: 'YOUTUBE',
+        createdAt: new Date(Date.now() - 5 * DAY_MS),
+      }),
       oldProxy: null,
       newProxy: mkProxy({ type: 'STATIC_RESIDENTIAL' }),
     });
     expect(result).not.toBeNull();
-    expect(result!.code).toBe('PROXY_NOT_LTE_FOR_TIKTOK');
+    expect(result!.code).toBe('PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT');
+    expect(result!.overrideAllowed).toBe(false);
   });
 
   it('blocks country change within pin window', () => {
@@ -53,6 +57,23 @@ describe('validatePinChange', () => {
     });
     expect(result).not.toBeNull();
     expect(result!.code).toBe('COUNTRY_CHANGE_BLOCKED');
+    expect(result!.overrideAllowed).toBe(false);
+  });
+
+  it('blocks country change even after the pin window expires', () => {
+    const now = new Date();
+    const result = validatePinChange({
+      account: mkAccount({
+        pinnedProxyId: 'proxy-1',
+        proxyPinnedAt: new Date(now.getTime() - 60 * DAY_MS),
+      }),
+      oldProxy: mkProxy({ id: 'proxy-1', country: 'US' }),
+      newProxy: mkProxy({ id: 'proxy-2', country: 'DE' }),
+      now,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.code).toBe('COUNTRY_CHANGE_BLOCKED');
+    expect(result!.overrideAllowed).toBe(false);
   });
 
   it('blocks carrier change for TikTok', () => {
@@ -68,6 +89,7 @@ describe('validatePinChange', () => {
     });
     expect(result).not.toBeNull();
     expect(result!.code).toBe('CARRIER_CHANGE_BLOCKED');
+    expect(result!.overrideAllowed).toBe(true);
   });
 
   it('blocks same-carrier swap within 14-day window', () => {
@@ -83,6 +105,7 @@ describe('validatePinChange', () => {
     });
     expect(result).not.toBeNull();
     expect(result!.code).toBe('PIN_WINDOW_ACTIVE');
+    expect(result!.overrideAllowed).toBe(true);
     expect(result!.daysRemaining).toBe(PROXY_PIN_WINDOW_DAYS - 5);
   });
 

@@ -38,8 +38,8 @@ model Proxy {
 
 | Код | Тип | Условие | Последствие |
 |-----|-----|---------|-------------|
-| `PROXY_NOT_LTE_FOR_TIKTOK` | Hard block | TikTok-аккаунт < 30 дней + прокси НЕ `LTE_MOBILE` | BGP path scoring на свежих аккаунтах |
-| `COUNTRY_CHANGE_BLOCKED` | Hard block | Смена страны прокси у аккаунта с историей сессий | Geo-корреляция ломается, нужен полный re-warm |
+| `PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT` | Hard block, no override | Аккаунт < 30 дней + прокси НЕ `LTE_MOBILE` | BGP path scoring на свежих аккаунтах |
+| `COUNTRY_CHANGE_BLOCKED` | Hard block, no override | Смена страны прокси у аккаунта с историей сессий | Страна операций immutable |
 | `CARRIER_CHANGE_BLOCKED` | Hard block (TikTok only) | Смена carrier (напр. T-Mobile → Verizon) | Сброс 14-дневного окна, shadowban 14-21 день |
 | `PIN_WINDOW_ACTIVE` | Soft warn | Любая смена прокси в рамках 14 дней с последнего pin | Частые ротации сами по себе — сигнал |
 
@@ -50,8 +50,8 @@ model Proxy {
       oldProxy (carrier, country, type),
       newProxy (carrier, country, type)
 
-1. IF account.platform === TIKTOK AND account.age < 30 дней:
-   IF newProxy.type !== LTE_MOBILE → return PROXY_NOT_LTE_FOR_TIKTOK
+1. IF account.age < 30 дней:
+   IF newProxy.type !== LTE_MOBILE → return PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT
 
 2. IF oldProxy === null OR proxyPinnedAt === null → return null (первая привязка)
 
@@ -75,7 +75,7 @@ model Proxy {
 - API принимает query-параметр `?force=true`
 - Доступен ТОЛЬКО для роли `ADMIN`
 - При каждом override создаётся запись в `AuditLog` с кодом нарушения
-- Ответ 409 Conflict при блокировке, 200 OK при force-override
+- Ответ 409 Conflict при блокировке, 200 OK при force-override только для `overrideAllowed=true`
 
 ---
 
@@ -459,7 +459,7 @@ Glassmorphism (`backdrop-filter`) запрещён вне Header — это со
 | Смена страны | COUNTRY_CHANGE_BLOCKED (приоритет) |
 | Тот же carrier в окне 14д | PIN_WINDOW_ACTIVE |
 | Тот же carrier после 14д | null (разрешено) |
-| Datacenter для молодого TikTok | PROXY_NOT_LTE_FOR_TIKTOK |
+| Datacenter/residential для молодого аккаунта | PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT |
 | Residential для старого TikTok | null (разрешено) |
 | YouTube + смена carrier | PIN_WINDOW_ACTIVE (не CARRIER, т.к. YouTube) |
 

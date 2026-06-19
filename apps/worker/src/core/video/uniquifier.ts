@@ -11,7 +11,7 @@
 // with deterministic transforms seeded by accountId.
 //
 // Transforms applied:
-// - Pixel shift (crop + pad by 2-4px)
+// - Pixel shift (crop + pad by 1-3px)
 // - Brightness/contrast adjustment (±2-5%)
 // - Audio pitch shift (±2%)
 // - Trim first/last 0.1-0.5s
@@ -110,9 +110,8 @@ export async function uniquifyVideo(opts: UniquifyOptions): Promise<UniquifyResu
   const filters: string[] = [];
   const audioFilters: string[] = [];
 
-  // 1. Pixel shift — crop by an even 2-4px from random edges, pad back.
-  // yuv420p/libx264 need even dimensions; odd crop values can shrink output.
-  const cropPx = seededInt(rng, 1, 2) * 2;
+  // 1. Pixel shift: crop by 1-3px from random edges, then pad back to original size.
+  const cropPx = seededInt(rng, 1, 3);
   const cropSide = seededInt(rng, 0, 3); // 0=top, 1=right, 2=bottom, 3=left
   const cropMap = [
     `crop=iw:ih-${cropPx}:0:${cropPx},pad=iw:ih+${cropPx}:0:0`,       // top

@@ -32,6 +32,27 @@ describe('Dockerfile source verification', () => {
   });
 });
 
+describe('automation dependency policy', () => {
+  it('does not import forbidden browser automation stacks', () => {
+    const forbiddenImport = /\b(?:import|require)\s*(?:\(|[^'"]*from\s*)['"](puppeteer|selenium-webdriver|undetected-chromedriver(?:-js)?)['"]/;
+    const stack = [path.join(WORKER_ROOT, 'src')];
+    const files: string[] = [];
+
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+        const fullPath = path.join(current, entry.name);
+        if (entry.isDirectory()) stack.push(fullPath);
+        if (entry.isFile() && /\.(ts|tsx|js|mjs|cjs)$/.test(entry.name)) files.push(fullPath);
+      }
+    }
+
+    for (const file of files) {
+      expect(fs.readFileSync(file, 'utf-8')).not.toMatch(forbiddenImport);
+    }
+  });
+});
+
 describe('dynamic GUI source verification', () => {
   it('keeps entrypoint focused on the worker process', () => {
     expect(ENTRYPOINT).not.toContain('Xvfb :99');
@@ -57,6 +78,12 @@ describe('dynamic GUI source verification', () => {
     expect(PATCHRIGHT_LAUNCHER).toContain('prisma.vncSession.upsert');
     expect(PATCHRIGHT_LAUNCHER).toContain('taskId_jobId');
     expect(PATCHRIGHT_LAUNCHER).toContain('/api/workspace/jobs/');
+  });
+
+  it('refuses to launch non-login browser jobs with an empty cookie jar', () => {
+    expect(PATCHRIGHT_LAUNCHER).toContain("const requireCookies = opts.jobType !== 'login'");
+    expect(PATCHRIGHT_LAUNCHER).toContain('empty cookie jar after disk cache and DB fallback');
+    expect(PATCHRIGHT_LAUNCHER).not.toContain('Continue without cookies');
   });
 });
 

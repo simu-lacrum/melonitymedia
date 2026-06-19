@@ -212,6 +212,8 @@ const STEALTH_ARGS = [
  */
 export async function launchStealthContext(opts: LaunchOptions): Promise<StealthContext> {
   const { fingerprint } = opts;
+  const requireCookies = opts.jobType !== 'login';
+  let cookiesForContext: Awaited<ReturnType<typeof loadCookiesFromEncryptedStore>> = [];
 
   // Soft validation: fatal issues block, stale issues warn and continue
   const issues = inspectFingerprintConsistency(fingerprint, getSystemChromeMajor());
@@ -238,8 +240,31 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
       console.warn(`[Patchright] Failed to persist fingerprintStale for ${opts.accountId}:`, err);
     });
   }
-  // Build proxy config for Patchright — parse URL to separate server from auth
-  // Playwright prefers { server, username, password } over credentials-in-URL
+  // Preload cookies before launching Chrome so non-login jobs never start empty.
+  try {
+    cookiesForContext = await loadCookiesFromEncryptedStore(
+      opts.accountId,
+      opts.cookiesPath,
+    );
+  } catch (err) {
+    if (requireCookies) {
+      throw new Error(
+        `[Patchright] Refusing to launch ${opts.jobType ?? 'browser'} for ${opts.accountId}: ` +
+        `cookie cache/DB load failed (${err instanceof Error ? err.message : String(err)})`,
+      );
+    }
+    console.warn(`[Patchright] Optional cookies unavailable for login job ${opts.accountId}:`, err);
+  }
+
+  if (requireCookies && cookiesForContext.length === 0) {
+    throw new Error(
+      `[Patchright] Refusing to launch ${opts.jobType ?? 'browser'} for ${opts.accountId}: ` +
+      `empty cookie jar after disk cache and DB fallback.`,
+    );
+  }
+
+  // Build proxy config for Patchright: parse URL to separate server from auth.
+  // Playwright prefers { server, username, password } over credentials-in-URL.
   let proxyConfig: { server: string; username?: string; password?: string } | undefined;
   if (opts.proxyUrl) {
     try {
@@ -411,19 +436,9 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
     geolocation: undefined,
   });
 
-  // Load cookies — the ONLY auth method
-  // Never use log:pass on login forms — instant ban signal
-  try {
-    const cookies = await loadCookiesFromEncryptedStore(
-      opts.accountId,
-      opts.cookiesPath,
-    );
-    if (cookies.length > 0) {
-      await context.addCookies(cookies);
-    }
-  } catch (err) {
-    console.warn(`[Patchright] Failed to load cookies for ${opts.accountId}:`, err);
-    // Continue without cookies — session-validator should have caught this
+  // Load cookies: the only auth method for non-login automation.
+  if (cookiesForContext.length > 0) {
+    await context.addCookies(cookiesForContext);
   }
 
   const page = await context.newPage();

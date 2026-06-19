@@ -33,8 +33,14 @@ describe('upload banner and uniquification source verification', () => {
     expect(UNIQUIFIER_SRC).not.toContain("'-preset', 'ultrafast'");
   });
 
-  it('keeps pixel-shift dimensions even for yuv420p encodes', () => {
-    expect(UNIQUIFIER_SRC).toContain('const cropPx = seededInt(rng, 1, 2) * 2');
-    expect(UNIQUIFIER_SRC).toContain('odd crop values can shrink output');
+  it('applies the required 1-3px deterministic pixel shift', () => {
+    expect(UNIQUIFIER_SRC).toContain('const cropPx = seededInt(rng, 1, 3)');
+    expect(UNIQUIFIER_SRC).toContain('Pixel shift (crop + pad by 1-3px)');
+  });
+
+  it('keeps the required FFmpeg uniqueness transforms', () => {
+    expect(UNIQUIFIER_SRC).toContain('asetrate=44100*${pitchShift.toFixed(4)},aresample=44100');
+    expect(UNIQUIFIER_SRC).toContain("'-map_metadata', '-1'");
+    expect(UNIQUIFIER_SRC).toContain('metadata: stripped');
   });
 });
