@@ -80,4 +80,4 @@ WORKDIR /app/apps/api
 
 EXPOSE 4000
 
-CMD ["sh", "-c", "npx prisma migrate deploy && node prisma/db-sync.js && exec node dist/index.js"]
+CMD ["sh", "-c", "set -e; set +e; migrate_output=$(npx prisma migrate deploy 2>&1); migrate_code=$?; set -e; printf '%s\n' \"$migrate_output\"; if [ \"$migrate_code\" -ne 0 ]; then echo \"$migrate_output\" | grep -q 'P3005' || exit \"$migrate_code\"; node prisma/baseline-legacy-migrations.js; npx prisma migrate deploy; fi; node prisma/db-sync.js && exec node dist/index.js"]
