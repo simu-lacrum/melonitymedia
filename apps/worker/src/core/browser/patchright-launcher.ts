@@ -307,7 +307,7 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
     context, 
     page,
     vncPort: displayConfig?.webPort,
-    vncUrl: displayConfig ? `http://cluster-cheats.shop:${displayConfig.webPort}/vnc.html` : undefined
+    vncUrl: displayConfig ? `http://melonitymedia.site:${displayConfig.webPort}/vnc.html` : undefined
   };
 }
 
