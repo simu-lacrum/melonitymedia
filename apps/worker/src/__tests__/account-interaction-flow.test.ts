@@ -29,6 +29,8 @@ describe('account interaction flow safety', () => {
 
   it('requires positive platform confirmation before upload success is accepted', () => {
     expect(UPLOAD_SRC).toContain('_waitForTikTokPublishConfirmation');
+    expect(UPLOAD_SRC).toContain('_ensureTikTokPublicVisibility');
+    expect(UPLOAD_SRC).toContain('Public/Everyone');
     expect(UPLOAD_SRC).toContain('TikTok не подтвердил публикацию видео');
     expect(UPLOAD_SRC).toContain('YouTube Studio не подтвердил публикацию Shorts');
     expect(UPLOAD_SRC).not.toContain('но дошли до конца flow');
@@ -41,9 +43,10 @@ describe('account interaction flow safety', () => {
     expect(UPLOAD_SRC).toContain('Не удалось заполнить заголовок YouTube Studio');
   });
 
-  it('does not treat hourly fast warmup as full upload readiness', () => {
-    expect(WARMUP_SRC).toContain("status: 'PAUSED'");
-    expect(WARMUP_SRC).toContain('warmupCompletedAt: null');
-    expect(WARMUP_SRC).toContain('быстрый режим не открывает upload-gate');
+  it('honors user-selected hourly warmup as upload readiness', () => {
+    expect(WARMUP_SRC).toContain("status: 'ALIVE'");
+    expect(WARMUP_SRC).toContain('warmupCompletedAt: new Date()');
+    expect(WARMUP_SRC).toContain('lastError: null');
+    expect(WARMUP_SRC).toContain('Ускоренный прогрев');
   });
 });

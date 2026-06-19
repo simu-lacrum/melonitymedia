@@ -1,4 +1,4 @@
-export const MIN_WARMUP_DAYS = 3;
+export const MIN_WARMUP_DAYS = 1;
 export const MAX_WARMUP_DAYS = 21;
 export const DEFAULT_WARMUP_DAYS = 10;
 export const MIN_WARMUP_HOURS = 1;

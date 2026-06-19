@@ -873,7 +873,7 @@ const patchAccountSchema = z.object({
     'WARMING_UP', 'SHADOWBAN_SUSPECTED', 'AUTH_NEEDED', 'VERIFYING',
   ]).optional(),
   secUid: z.string().optional(),
-  warmupDays: z.number().int().min(3).max(21).optional(),
+  warmupDays: z.number().int().min(1).max(21).optional(),
 }).strict();
 
 router.patch('/:id', async (req: Request, res: Response) => {
@@ -896,9 +896,9 @@ router.patch('/:id', async (req: Request, res: Response) => {
     // Build update data from validated fields
     const updateData: Record<string, unknown> = { ...parsed.data };
 
-    // Clamp warmupDays to valid range (3-21)
+    // Clamp warmupDays to valid range (1-21)
     if (updateData.warmupDays !== undefined) {
-      updateData.warmupDays = Math.max(3, Math.min(21, Math.floor(Number(updateData.warmupDays))));
+      updateData.warmupDays = Math.max(1, Math.min(21, Math.floor(Number(updateData.warmupDays))));
     }
 
     // BUG-H5 fix: Guard dangerous status transitions
@@ -1080,7 +1080,7 @@ router.post('/warmup', async (req: Request, res: Response) => {
       return;
     }
 
-    // Validate warmupDays if provided (3-21 days, default 10)
+    // Validate warmupDays if provided (1-21 days, default 10)
     const days = normalizeWarmupDays(warmupDays);
     // Validate hashtags if provided
     const hashtags: string[] = Array.isArray(rawHashtags)

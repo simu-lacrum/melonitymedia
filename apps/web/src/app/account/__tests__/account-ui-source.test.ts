@@ -19,9 +19,9 @@ describe('account UI safety copy', () => {
     expect(ACCOUNTS_PAGE_SRC).toContain('Прогрев');
   });
 
-  it('warns that hourly fast warmup is not upload readiness', () => {
-    expect(WORKSPACE_PAGE_SRC).toContain('Быстрый тест (часы)');
-    expect(WORKSPACE_PAGE_SRC).toContain('Он не открывает заливы');
-    expect(WORKSPACE_PAGE_SRC).toContain('admin force');
+  it('warns that hourly warmup is faster but riskier upload readiness', () => {
+    expect(WORKSPACE_PAGE_SRC).toContain('Ускоренный (часы)');
+    expect(WORKSPACE_PAGE_SRC).toContain('откроет заливы');
+    expect(WORKSPACE_PAGE_SRC).toContain('рискованнее');
   });
 });

@@ -96,7 +96,7 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
     isApproved: boolean;        // true if admin has approved this account (v0.4.0)
     hasCookies: boolean;        // true if cookiesEncrypted is set
     warmupDay: number | null;   // 1-(warmupDays+1), null if warmup not started
-    warmupDays: number;         // user-configurable (3-21, default 10)
+    warmupDays: number;         // user-configurable (1-21, default 10)
     defaultDescription: string | null; // default description for video uploads
     lastError: string | null;   // last error message (shown for AUTH_NEEDED status)
     proxy: { id, address, label, type } | null;
@@ -164,7 +164,7 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
   bannerUrl?: string;
   pinnedProxyId?: string;  // auto-sets proxyPinnedAt if changed;
                            // subject to Carrier Stability Rule (see §Proxy Contract)
-  warmupDays?: number;     // 3-21, clamped server-side
+  warmupDays?: number;     // 1-21, clamped server-side
   status?: string;
   secUid?: string;
 }
@@ -219,7 +219,7 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
 
 #### `POST /api/accounts/warmup`
 ```typescript
-// Request — start warmup curriculum (3-21 days, default 10)
+// Request — start warmup curriculum (1-21 days, default 10)
 { ids: string[], warmupDays?: number }
 // warmupDays clamped to [3, 21], default 10 if omitted.
 // Sets status = WARMING_UP, warmupDays = days, warmupStartedAt = now()
@@ -405,9 +405,9 @@ interface UploadJobPayload {
 ```typescript
 interface WarmupJobPayload {
   accountId: string;
-  warmupDays: number;       // 3-21, from account.warmupDays (default 10)
+  warmupDays: number;       // 1-21, from account.warmupDays (default 10)
   warmupMode?: "DAYS" | "HOURS";
-  warmupHours?: number;     // 1-24; diagnostic fast mode only, not upload readiness
+  warmupHours?: number;     // 1-24; expedited user-selected warmup
   hashtags?: string[];      // user-provided hashtags for FYP niche targeting
   comments?: string[];      // user-provided comment pool; empty/missing = no comments
 
@@ -425,10 +425,10 @@ interface WarmupJobPayload {
   //   On the final day: status → ALIVE, warmupCompletedAt → now().
   //
   // FAST HOURS MODE:
-  //   warmupMode="HOURS" runs a short active session loop for diagnostics and
-  //   session touch only. It finishes with status → PAUSED and
-  //   warmupCompletedAt stays null, so upload remains blocked unless an admin
-  //   explicitly launches with force.
+  //   warmupMode="HOURS" runs an expedited active session loop for the selected
+  //   number of hours. It is user-controlled and riskier than day-based warmup,
+  //   but completion is accepted as readiness: status → ALIVE,
+  //   warmupCompletedAt → now().
 
   // All actions use:
   // - Patchright with per-account fingerprint

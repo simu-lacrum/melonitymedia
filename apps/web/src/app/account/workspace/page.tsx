@@ -540,7 +540,7 @@ export default function WorkspacePage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="DAYS">Полноценный (Дни)</SelectItem>
-                    <SelectItem value="HOURS">Быстрый тест (часы)</SelectItem>
+                    <SelectItem value="HOURS">Ускоренный (часы)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -554,7 +554,7 @@ export default function WorkspacePage() {
               {warmup.warmupMode === "DAYS" ? (
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="warmup-days">Дней прогрева</Label>
-                  <Input id="warmup-days" type="number" min={3} max={21}
+                  <Input id="warmup-days" type="number" min={1} max={21}
                     value={warmup.warmupDays}
                     onChange={e => setWarmup({ ...warmup, warmupDays: parseInt(e.target.value) || 10 })}
                   />
@@ -573,7 +573,7 @@ export default function WorkspacePage() {
               <Alert>
                 <AlertCircle className="size-4" />
                 <AlertDescription>
-                  Быстрый режим нужен для короткой активности и проверки сессии. Он не открывает заливы: после завершения аккаунт останется на паузе, пока вы не запустите полноценный прогрев по дням или admin force.
+                  Ускоренный режим засчитает прогрев после выбранного количества часов и откроет заливы. Это быстрее, но рискованнее для свежих аккаунтов, чем режим по дням.
                 </AlertDescription>
               </Alert>
             )}

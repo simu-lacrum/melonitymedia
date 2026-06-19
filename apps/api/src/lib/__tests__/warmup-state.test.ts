@@ -14,7 +14,7 @@ import {
 describe('warmup-state', () => {
   it('normalizes warmup duration inputs', () => {
     expect(normalizeWarmupDays(undefined)).toBe(DEFAULT_WARMUP_DAYS);
-    expect(normalizeWarmupDays(1)).toBe(3);
+    expect(normalizeWarmupDays(1)).toBe(1);
     expect(normalizeWarmupDays(99)).toBe(21);
     expect(normalizeWarmupDays('7')).toBe(7);
 

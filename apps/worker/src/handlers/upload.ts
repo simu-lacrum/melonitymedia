@@ -470,6 +470,7 @@ async function _uploadToTikTok(
   await job.updateProgress(45);
 
   // Upload file via hidden input
+  await page.waitForSelector('input[type="file"]', { timeout: 30_000 });
   const fileInput = await page.locator('input[type="file"]').first();
   await fileInput.setInputFiles(videoPath);
   logger.info('Файл загружен, ожидаю обработку...');
@@ -502,6 +503,7 @@ async function _uploadToTikTok(
   }
 
   await page.waitForTimeout(_randomDelay(2000, 3000));
+  await _ensureTikTokPublicVisibility(page, logger);
   await job.updateProgress(75);
 
   // ── Captcha handling before POST ─────────────────────────
@@ -647,6 +649,44 @@ async function _waitForTikTokPublishConfirmation(page: Page): Promise<boolean> {
 
     return false;
   }, { timeout: 90_000, polling: 2000 }).then(() => true).catch(() => false);
+}
+
+async function _ensureTikTokPublicVisibility(page: Page, logger: SocketLogger): Promise<void> {
+  const selected = await page.evaluate(() => {
+    const visibilityText = /^(public|everyone|публично|публичный|все)$/i;
+    const isVisible = (el: Element): boolean => {
+      const rect = (el as HTMLElement).getBoundingClientRect?.();
+      return !!rect && rect.width > 0 && rect.height > 0;
+    };
+
+    const radios = Array.from(document.querySelectorAll('input[type="radio"], [role="radio"]'));
+    for (const radio of radios) {
+      const host = radio.closest('label, [role="group"], div') || radio.parentElement;
+      const text = (host?.textContent || '').replace(/\s+/g, ' ').trim();
+      if (visibilityText.test(text) || /\b(public|everyone)\b/i.test(text) || /публич|все/i.test(text)) {
+        (radio as HTMLElement).click();
+        return text || 'radio';
+      }
+    }
+
+    const clickTargets = Array.from(document.querySelectorAll('label, button, [role="button"], span, div'));
+    for (const target of clickTargets) {
+      if (!isVisible(target)) continue;
+      const text = (target.textContent || '').replace(/\s+/g, ' ').trim();
+      if (visibilityText.test(text)) {
+        (target as HTMLElement).click();
+        return text;
+      }
+    }
+
+    return null;
+  }).catch(() => null);
+
+  if (selected) {
+    logger.info(`TikTok visibility выставлена в Public/Everyone (${selected})`);
+  } else {
+    logger.warn('TikTok visibility Public не найдена — продолжаю с настройкой по умолчанию');
+  }
 }
 
 // ── YouTube Shorts Upload ───────────────────────────────────
