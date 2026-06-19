@@ -93,6 +93,7 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
     username: string | null;
     nickname: string | null;
     status: "ALIVE" | "AUTH_NEEDED" | "BANNED" | "EXPIRED_COOKIES" | "SHADOWBAN_SUSPECTED" | "WARMING_UP";
+    isApproved: boolean;        // true if admin has approved this account (v0.4.0)
     hasCookies: boolean;        // true if cookiesEncrypted is set
     warmupDay: number | null;   // 1-(warmupDays+1), null if warmup not started
     warmupDays: number;         // user-configurable (3-21, default 10)
@@ -436,6 +437,7 @@ interface EditProfileJobPayload {
     name?: string;        // new display name / nickname
     bio?: string;         // new bio text
     avatarUrl?: string;   // URL or local file path to avatar image
+    bannerUrl?: string;   // URL or local file path to banner image (v0.4.0)
   };
 
   // Worker flow (v3.3):
@@ -456,7 +458,7 @@ interface EditProfileJobPayload {
   // 9. Human-like delays (500-2000ms) between each action
   //
   // === Common ===
-  // 10. If changes.avatarUrl: downloads image → temp file → clicks avatar →
+  // 10. If changes.avatarUrl or changes.bannerUrl: downloads image → temp file → clicks corresponding area →
   //     uploads via file input → confirms crop dialog
   //     Supports: HTTP URLs, local paths (/tmp/...), file:// URIs
   // 11. Clicks save button
@@ -474,8 +476,8 @@ interface AnalyticsJobPayload {
   // 1. Fetches /api/user/detail/?secUid=... with Chrome TLS fingerprint
   // 2. Parses JSON response (~200ms per profile)
   // 3. Persists followers/views to SocialAccount in DB via prisma.socialAccount.update()
-  //    (v3.3 fix: previously only emitted via Socket.io without DB persistence)
-  // 4. Emits Socket.io event for real-time dashboard updates
+  // 4. (v0.4.0) Creates a DailySnapshot record to track historical metrics over time (real analytics model).
+  // 5. Emits Socket.io event for real-time dashboard updates
 }
 
 // Cron scheduling (registered by apps/api/src/lib/cron-scheduler.ts):

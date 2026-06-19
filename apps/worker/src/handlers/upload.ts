@@ -568,12 +568,23 @@ async function _uploadToYouTube(
   await page.goto('https://studio.youtube.com/?d=ud', { waitUntil: 'domcontentloaded', timeout: 60_000 });
   await page.waitForTimeout(_randomDelay(3000, 5000));
 
-  // Auth check — BUG-10 fix: URL-based instead of body text
+  // Auth check & Identity Verification (Confirm it's you)
   let currentUrl = page.url();
-  if (/accounts\.google\.com\/ServiceLogin|accounts\.google\.com\/signin/i.test(currentUrl)) {
-    throw new Error('Не удалось войти в YouTube Studio — cookies невалидны (перенаправлен на login)');
+  if (/accounts\.google\.com/i.test(currentUrl)) {
+    logger.warn('Google просит подтверждение личности (или залогиниться).');
+    logger.info('⚠️ VNC: У вас есть 3 минуты на прохождение проверки! Откройте VNC ссылку (была отправлена выше).');
+    try {
+      await page.waitForFunction(() => {
+        return window.location.hostname.includes('youtube.com');
+      }, { timeout: 180_000, polling: 2000 });
+      logger.info('Успешный вход после ручного подтверждения ✓');
+      currentUrl = page.url();
+    } catch {
+      throw new Error('Таймаут (3 минуты истекли) — не удалось войти в YouTube Studio (cookies устарели или капча не пройдена)');
+    }
+  } else {
+    logger.info('Авторизация YouTube успешна');
   }
-  logger.info('Авторизация YouTube успешна');
 
   // CHANNEL CREATION LOGIC:
   // If we get redirected to www.youtube.com instead of studio, it usually means the channel is not created.
@@ -970,28 +981,30 @@ async function _uploadToYouTube(
   await page.screenshot({ path: `/app/screenshots/3_after_wait_${ts}.png`, fullPage: true }).catch(() => {});
 
   // Verify success — look for share dialog or "Video published" text
-  const success = await page.evaluate(() => {
-    const text = document.body?.textContent || '';
-    if (/published|опубликовано|video uploaded/i.test(text)) return true;
-    
-    // Check specific dialog
-    const dialog = document.querySelector('ytcp-video-share-dialog, ytcp-dialog');
-    if (dialog && /published|опубликовано/i.test(dialog.textContent || '')) return true;
+  let success = false;
+  try {
+    success = await page.waitForFunction(() => {
+      const text = document.body?.textContent || '';
+      if (/published|опубликовано|video uploaded|share a link/i.test(text)) return true;
+      
+      const dialog = document.querySelector('ytcp-video-share-dialog, ytcp-dialog');
+      if (dialog && /published|опубликовано|share/i.test(dialog.textContent || '')) return true;
 
-    // Check specific elements that often appear
-    const titleElements = document.querySelectorAll('h1, h2, h3, h4');
-    for (const el of titleElements) {
-      if (/published|опубликовано|video uploaded/i.test(el.textContent || '')) return true;
-    }
-    
-    return false;
-  });
+      const titleElements = document.querySelectorAll('h1, h2, h3, h4');
+      for (const el of titleElements) {
+        if (/published|опубликовано|video uploaded/i.test(el.textContent || '')) return true;
+      }
+      return false;
+    }, { timeout: 30_000 }).then(() => true).catch(() => false);
+  } catch {
+    success = false;
+  }
 
   if (!success) {
     logger.warn('Не удалось подтвердить публикацию (нет confirmation text), но дошли до конца flow');
     await page.screenshot({ path: `/app/screenshots/4_failed_confirm_${ts}.png`, fullPage: true }).catch(() => {});
   } else {
-    logger.info('Успешная публикация подтверждена (найден текст published/опубликовано)');
+    logger.info('Успешная публикация подтверждена (найден текст published/опубликовано/share)');
   }
 
   logger.info('✅ Видео имеет валидные параметры Shorts и было успешно опубликовано.');

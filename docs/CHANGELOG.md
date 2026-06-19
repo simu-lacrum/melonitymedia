@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.4.0] - 2026-06-19
+
+### Added
+- **Manual Bypass**: VNC & noVNC isolation для ручного обхода верификаций.
+- **Banner Overlay**: Полная интеграция баннеров (API, UI, Worker Pipeline).
+- **Analytics**: Переход на browser-based scraping + модель DailySnapshot (real data).
+- **Infrastructure**: Zero-downtime deployments (10 min stop grace period).
+- **Admin**: Система подтверждения регистраций (`isApproved` flag).
+- **Edit Profile**: Поддержка загрузки аватара и баннера прямо с фронтенда.
+- **Login**: Поддержка Google device 2FA.
+
+### Fixed / Changed
+- **Warmup Enhancements**: Human-like mouse movements во всех фазах, поддержка нескольких сессий в день (multi-session), sleep scheduling, умная навигация по Shorts/обычным видео.
+- **YouTube Upload**: Переход на `?d=ud` для прямого открытия upload диалога.
+- **YouTube Avatar**: Использование Google Account iframe flow.
+- **Web Components**: Использование `page.evaluate` для взаимодействия с shadow DOM (YouTube Studio).
+- **Smart Uniquification**: Пропуск FFmpeg-обработки для первого аккаунта (ускорение публикации), использование `ultrafast` пресета.
+- **Job Isolation**: Автоматическое отклонение новых задач для аккаунтов, которые уже заняты в другом процессе (browser lock).
+- **UI**: Исправлено бесконечное состояние загрузки дашборда и состояния гонки, добавлена кнопка Clear для селектов видео и баннеров.
+- **Docker**: Пути теперь указывают на абсолютный `/app/uploads`.
+
 ## [0.3.3] - 2026-06-12
 
 ### Added (YouTube Platform Support)
