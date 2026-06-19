@@ -746,8 +746,6 @@ gitGraph
 
 <div align="center">
 
-Разработано с 💜 для арбитражников вертикального видео
-
 **MelonityMedia** · [GitHub](https://github.com/simu-lacrum/melonitymedia)
 
 </div>
