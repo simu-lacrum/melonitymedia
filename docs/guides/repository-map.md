@@ -75,11 +75,11 @@ MelonityMedia/
 > ⚠️ **Запрещены**: puppeteer, selenium-webdriver, undetected-chromedriver-js, cheerio.
 > ESLint `no-restricted-imports` блокирует их на уровне сборки.
 
-### Core — Ядро антидетект-системы
+### Core — Ядро browser-profile системы
 
 | Путь | Описание |
 |------|----------|
-| `src/core/browser/patchright-launcher.ts` | Stealth-браузер на Patchright (patched Playwright CDP) с per-account fingerprint |
+| `src/core/browser/patchright-launcher.ts` | Browser session на Patchright (patched Playwright CDP) с per-account fingerprint |
 | `src/core/browser/fingerprint-manager.ts` | Deterministic `AccountFingerprint` — UA, screen, WebGL, canvas, locale, fonts + **7 consistency rules** + Chrome version pinning |
 | `src/core/auth/cookie-store.ts` | AES-256-GCM шифрование/дешифрование cookies (MASTER_KEY) |
 | `src/core/auth/session-validator.ts` | Pre-flight cookie validation через curl-impersonate |

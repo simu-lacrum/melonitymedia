@@ -32,6 +32,19 @@ const timezoneByCountry: Record<string, string> = {
   AU: 'Australia/Sydney',
 };
 
+export function getExpectedChromeMajor(): number {
+  const raw = process.env.EXPECTED_CHROME_MAJOR;
+  const parsed = Number.parseInt(raw ?? '', 10);
+
+  if (!raw || !Number.isFinite(parsed) || parsed < 100) {
+    throw new Error(
+      '[fingerprint] EXPECTED_CHROME_MAJOR must be set to the Worker Chrome major version before importing accounts.',
+    );
+  }
+
+  return parsed;
+}
+
 export function generateFingerprint(accountId: string, geo?: { country?: string; city?: string }) {
   const hash = crypto.createHash('sha256').update(accountId).digest();
 
@@ -101,8 +114,8 @@ export function generateFingerprint(accountId: string, geo?: { country?: string;
     );
   }
 
-  // --- UA (Chrome version from env, with sane default) ---
-  const chromeMajor = parseInt(process.env.EXPECTED_CHROME_MAJOR ?? '148', 10);
+  // --- UA (Chrome version from env; must match the Worker Chrome major) ---
+  const chromeMajor = getExpectedChromeMajor();
   const osTokens: Record<string, string> = {
     Win32: 'Windows NT 10.0; Win64; x64',
     MacIntel: 'Macintosh; Intel Mac OS X 10_15_7',
@@ -185,7 +198,7 @@ export function generateMobileFingerprint(accountId: string, geo?: { country?: s
   const locale = localeByCountry[geo?.country ?? 'US'] ?? 'en-US';
   const timezone = timezoneByCountry[geo?.country ?? 'US'] ?? 'America/New_York';
 
-  const chromeMajor = parseInt(process.env.EXPECTED_CHROME_MAJOR ?? '148', 10);
+  const chromeMajor = getExpectedChromeMajor();
   const iosUA =
     `Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) ` +
     `AppleWebKit/605.1.15 (KHTML, like Gecko) ` +

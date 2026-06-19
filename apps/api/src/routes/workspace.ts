@@ -75,6 +75,25 @@ function collectTaskJobIds(task: {
   return [...jobIds];
 }
 
+function collectTaskAccountIds(task: {
+  accountId?: string | null;
+  config: unknown;
+}): string[] {
+  const accountIds = new Set<string>();
+  if (task.accountId) accountIds.add(task.accountId);
+
+  const configuredIds = asRecord(task.config).accountIds;
+  if (Array.isArray(configuredIds)) {
+    for (const id of configuredIds) {
+      if (typeof id === 'string' && id.length > 0) {
+        accountIds.add(id);
+      }
+    }
+  }
+
+  return [...accountIds];
+}
+
 async function reconcileTaskStatuses(userId: string) {
   const staleTasks = await prisma.task.findMany({
     where: {
@@ -91,6 +110,7 @@ async function reconcileTaskStatuses(userId: string) {
       bullmqJobId: true,
       error: true,
       createdAt: true,
+      accountId: true,
     },
   });
 
@@ -131,6 +151,28 @@ async function reconcileTaskStatuses(userId: string) {
     const hasFailed = states.some(({ state }) => state === 'failed');
     const allCompleted = states.every(({ state }) => state === 'completed');
     if (!hasFailed && !allCompleted) return;
+
+    if (!hasFailed && task.type === 'WARMUP') {
+      const accountIds = collectTaskAccountIds(task);
+      const warmingAccounts = accountIds.length === 0
+        ? 0
+        : await prisma.socialAccount.count({
+            where: {
+              userId,
+              id: { in: accountIds },
+              status: 'WARMING_UP',
+              warmupCompletedAt: null,
+            },
+          });
+
+      if (warmingAccounts > 0) {
+        await prisma.task.update({
+          where: { id: task.id },
+          data: { status: 'RUNNING' },
+        });
+        return;
+      }
+    }
 
     await prisma.task.update({
       where: { id: task.id },
@@ -817,6 +859,26 @@ router.delete('/jobs/:id', async (req: Request, res: Response) => {
           error: 'Cancelled by user',
         },
       });
+    }
+
+    if (task.type === 'WARMUP') {
+      const accountIds = collectTaskAccountIds(task);
+      if (accountIds.length > 0) {
+        await prisma.socialAccount.updateMany({
+          where: {
+            userId: req.user!.id,
+            id: { in: accountIds },
+            status: 'WARMING_UP',
+            warmupCompletedAt: null,
+          },
+          data: {
+            status: 'ALIVE',
+            warmupStartedAt: null,
+            lastWarmupDay: null,
+            lastError: null,
+          },
+        });
+      }
     }
 
     const cancelled = await prisma.task.update({

@@ -77,7 +77,7 @@ export default function LandingPage() {
                 </h1>
 
                 <p className="animate-enter delay-2 text-base md:text-lg text-muted-gray mb-10 leading-relaxed font-medium">
-                  Корпоративная платформа для масштабирования вертикального видео. Антидетект-среда, управление фермами и точная аналитика в едином терминале.
+                  Корпоративная платформа для масштабирования вертикального видео. Изолированные browser-профили, управление задачами и точная аналитика в едином терминале.
                 </p>
 
                 {/* CTA */}
@@ -102,7 +102,7 @@ export default function LandingPage() {
                   {[
                     { value: '6', label: 'Очередей' },
                     { value: '24/7', label: 'Работа' },
-                    { value: '0', label: 'Фрод-рейтинг' },
+                    { value: '100%', label: 'Контроль' },
                   ].map((m, i) => (
                     <div key={i}>
                       <div className="text-2xl font-bold text-pure-white mb-1">{m.value}</div>
@@ -166,8 +166,8 @@ export default function LandingPage() {
               {[
                 {
                   icon: Shield,
-                  title: 'Антидетект Patchright',
-                  desc: 'Собственная сборка Patchright + ghost-cursor. Динамические отпечатки и нулевой фрод-рейтинг. Изолированная публикация через Xvfb.',
+                  title: 'Patchright Profiles',
+                  desc: 'Patchright + ghost-cursor, per-account fingerprint и изолированные Xvfb-сессии с VNC-мониторингом.',
                 },
                 {
                   icon: Upload,

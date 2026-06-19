@@ -2,7 +2,7 @@
 // Upload Handler v2 — Patchright + Cookie-only + Uniquification
 //
 // MAJOR CHANGES from v1:
-// 1. Selenium/UC → Patchright (CDP-based, undetectable)
+// 1. Selenium/UC → Patchright (patched Playwright CDP)
 // 2. Cookies loaded from encrypted store (no JSON in job payload)
 // 3. Video uniquification per-account (FFmpeg pipeline)
 // 4. Human behavior layer (ghost-cursor, typing emulator)
@@ -216,6 +216,10 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
       // WARNING ONLY — don't block the upload, let browser handle it.
       // Cookies may still work in a full browser context even if curl check fails.
       logger.warn('⚠️ Pre-flight: cookies могут быть устаревшими — продолжаю с браузерной проверкой...');
+    }
+
+    if (cookieStatus === 'unknown') {
+      logger.warn('Pre-flight: cookie status is unknown (network/proxy/platform hiccup) — continuing with browser verification...');
     }
 
     await job.updateProgress(10);

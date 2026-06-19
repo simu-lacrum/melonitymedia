@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { generateFingerprint, generateMobileFingerprint } from '../../lib/fingerprint.js';
+import { afterAll, beforeEach, describe, it, expect } from 'vitest';
+import { generateFingerprint, generateMobileFingerprint, getExpectedChromeMajor } from '../../lib/fingerprint.js';
 
 /**
  * Behavioral tests for generateFingerprint / generateMobileFingerprint.
@@ -9,6 +9,21 @@ import { generateFingerprint, generateMobileFingerprint } from '../../lib/finger
  * generator was moved to lib/fingerprint.ts. These tests call the actual
  * functions and validate output structure.
  */
+
+const previousExpectedChromeMajor = process.env.EXPECTED_CHROME_MAJOR;
+process.env.EXPECTED_CHROME_MAJOR = '149';
+
+beforeEach(() => {
+  process.env.EXPECTED_CHROME_MAJOR = '149';
+});
+
+afterAll(() => {
+  if (previousExpectedChromeMajor === undefined) {
+    delete process.env.EXPECTED_CHROME_MAJOR;
+  } else {
+    process.env.EXPECTED_CHROME_MAJOR = previousExpectedChromeMajor;
+  }
+});
 
 describe('generateFingerprint — desktop', () => {
   const fp = generateFingerprint('test-account-001');
@@ -22,7 +37,8 @@ describe('generateFingerprint — desktop', () => {
   it('produces chromeMajor field', () => {
     expect(fp.chromeMajor).toBeDefined();
     expect(typeof fp.chromeMajor).toBe('number');
-    expect(fp.chromeMajor).toBeGreaterThanOrEqual(100);
+    expect(fp.chromeMajor).toBe(149);
+    expect(fp.userAgent).toContain('Chrome/149.0.0.0');
   });
 
   it('has OS-coherent platform selection', () => {
@@ -103,11 +119,24 @@ describe('generateMobileFingerprint', () => {
   it('has correct UA for the platform', () => {
     if (fp.platform === 'iPhone') {
       expect(fp.userAgent).toContain('iPhone');
-      expect(fp.userAgent).toContain('CriOS');
+      expect(fp.userAgent).toContain('CriOS/149.0.0.0');
     } else {
       expect(fp.userAgent).toContain('Android');
-      expect(fp.userAgent).toContain('Chrome');
+      expect(fp.userAgent).toContain('Chrome/149.0.0.0');
     }
+  });
+});
+
+describe('getExpectedChromeMajor', () => {
+  it('requires EXPECTED_CHROME_MAJOR instead of silently guessing', () => {
+    delete process.env.EXPECTED_CHROME_MAJOR;
+    expect(() => getExpectedChromeMajor()).toThrow(/EXPECTED_CHROME_MAJOR/);
+    expect(() => generateFingerprint('missing-env')).toThrow(/EXPECTED_CHROME_MAJOR/);
+  });
+
+  it('rejects malformed EXPECTED_CHROME_MAJOR values', () => {
+    process.env.EXPECTED_CHROME_MAJOR = 'not-a-version';
+    expect(() => getExpectedChromeMajor()).toThrow(/EXPECTED_CHROME_MAJOR/);
   });
 });
 

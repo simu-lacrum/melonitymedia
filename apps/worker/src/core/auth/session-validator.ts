@@ -11,13 +11,13 @@
 import { impersonatedFetch } from '../tls/curl-impersonate-client.js';
 import { loadCookiesFromEncryptedStore, type BrowserCookie } from './cookie-store.js';
 
-export type CookieStatus = 'alive' | 'expired' | 'banned';
+export type CookieStatus = 'alive' | 'expired' | 'banned' | 'unknown';
 
 /**
  * Validate account cookies without launching a browser.
  * Uses curl-impersonate for TLS-level Chrome impersonation.
  *
- * @returns 'alive' | 'expired' | 'banned'
+ * @returns 'alive' | 'expired' | 'banned' | 'unknown'
  */
 export async function validateCookies(
   accountId: string,
@@ -98,19 +98,21 @@ export async function validateCookies(
       return 'expired';
     }
 
-    // Transient server errors (429, 5xx) — NOT expired, just a hiccup
+    // Transient server errors (429, 5xx) are inconclusive.
+    // Upload pre-flight treats this as advisory; login/import must not mark
+    // an account ALIVE without a positive platform response.
     if (resp.status === 429 || resp.status >= 500) {
-      console.warn(`[SessionValidator] Transient HTTP ${resp.status} for ${accountId} — assuming alive`);
-      return 'alive';
+      console.warn(`[SessionValidator] Transient HTTP ${resp.status} for ${accountId} — cookie status unknown`);
+      return 'unknown';
     }
 
     return 'expired';
   } catch (err) {
     // Network errors (proxy timeout, DNS, connection refused) should NOT
     // mark cookies as expired — the problem is connectivity, not auth.
-    // Let the real browser session handle auth checking.
-    console.warn(`[SessionValidator] Network error for ${accountId} — assuming alive:`, (err as Error).message);
-    return 'alive';
+    // Return unknown so strict callers do not accept the account as verified.
+    console.warn(`[SessionValidator] Network error for ${accountId} — cookie status unknown:`, (err as Error).message);
+    return 'unknown';
   }
 }
 

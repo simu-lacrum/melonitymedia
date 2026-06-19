@@ -3,11 +3,11 @@
 #
 # This container runs BullMQ workers with:
 # 1. Google Chrome (real, not Chromium) + Xvfb (virtual display)
-# 2. Patchright (CDP-based anti-detection, patched Playwright)
+# 2. Patchright (patched Playwright CDP)
 # 3. curl-impersonate (TLS fingerprint impersonation)
 # 4. ffmpeg (video uniquification pipeline)
 #
-# headless:false + Xvfb = undetectable browser sessions.
+# headless:false + Xvfb = monitorable Chrome sessions with isolated profiles.
 # NEVER install puppeteer, selenium, or chromedriver in this image.
 # ─────────────────────────────────────────────────────────────
 

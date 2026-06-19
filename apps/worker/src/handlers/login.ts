@@ -429,11 +429,24 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
         throw new LoginError('ACCOUNT_BANNED', 'Platform detected account ban');
       }
 
+      if (status === 'unknown') {
+        const errMsg = 'Не удалось подтвердить cookies из-за сети, прокси или временной ошибки платформы. Проверьте прокси и повторите проверку.';
+        await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED', lastError: errMsg });
+        emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
+        emitLoginEvent(logger, data.accountId, 'login:failed', {
+          code: 'NETWORK_ERROR',
+          message: errMsg,
+        });
+        throw new LoginError('NETWORK_ERROR', errMsg);
+      }
+
       // expired
-      await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED' });
+      const expiredMsg = 'Cookies недействительны или истекли. Попробуйте импортировать свежие cookies или войти через login:password.';
+      await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED', lastError: expiredMsg });
+      emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', expiredMsg);
       emitLoginEvent(logger, data.accountId, 'login:failed', {
         code: 'COOKIES_EXPIRED',
-        message: 'Cookies недействительны или истекли. Попробуйте импортировать свежие cookies или войти через login:password.',
+        message: expiredMsg,
       });
       throw new LoginError('COOKIES_EXPIRED', 'Cookies are expired or invalid');
     }
@@ -483,9 +496,9 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
       : 'https://accounts.google.com/signin/v2/identifier?service=youtube';
 
     logger.info(`🌐 Открываю страницу входа...`);
-    // Google login never reaches networkidle (constant XHR), use 'load' for YouTube
-    const waitStrategy = ctx.platform === 'YOUTUBE' ? 'load' as const : 'networkidle' as const;
-    await page.goto(loginUrl, { waitUntil: waitStrategy });
+    // Auth pages are SPAs with background XHR; do not wait for networkidle.
+    const waitStrategy = ctx.platform === 'YOUTUBE' ? 'load' as const : 'domcontentloaded' as const;
+    await page.goto(loginUrl, { waitUntil: waitStrategy, timeout: 45_000 });
     await page.waitForTimeout(2000 + Math.random() * 2000);
     await job.updateProgress(25);
 
@@ -1274,7 +1287,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
     try {
       if (ctx.platform === 'TIKTOK') {
         // Navigate to profile to get username
-        await page.goto('https://www.tiktok.com/@me', { waitUntil: 'networkidle', timeout: 15000 });
+        await page.goto('https://www.tiktok.com/@me', { waitUntil: 'domcontentloaded', timeout: 15000 });
         const currentUrl = page.url();
         const match = currentUrl.match(/@([^/?]+)/);
         if (match) extractedUsername = match[1];
@@ -1282,7 +1295,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
         // YouTube — extract channel handle (most reliable method)
         // youtube.com/channel_switcher or clicking avatar redirects to /@handle
         try {
-          await page.goto('https://www.youtube.com/@me', { waitUntil: 'networkidle', timeout: 15000 });
+          await page.goto('https://www.youtube.com/@me', { waitUntil: 'load', timeout: 15000 });
           const ytUrl = page.url();
           // YouTube redirects /@me to /@ActualHandle
           const handleMatch = ytUrl.match(/@([^/?]+)/);
@@ -1294,7 +1307,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
         // Fallback: try account page for display name
         if (!extractedUsername) {
           try {
-            await page.goto('https://www.youtube.com/account', { waitUntil: 'networkidle', timeout: 15000 });
+            await page.goto('https://www.youtube.com/account', { waitUntil: 'load', timeout: 15000 });
             // Use multiple resilient selectors for channel name
             const nameEl = page.locator(
               '#account-name, [id*="account-name"], ' +

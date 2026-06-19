@@ -143,6 +143,22 @@ function collectTaskJobIds(task: { bullmqJobId: string | null; config: unknown }
   return [...jobIds];
 }
 
+function collectTaskAccountIds(task: { accountId?: string | null; config: unknown }): string[] {
+  const accountIds = new Set<string>();
+  if (task.accountId) accountIds.add(task.accountId);
+
+  const configuredIds = asRecord(task.config).accountIds;
+  if (Array.isArray(configuredIds)) {
+    for (const id of configuredIds) {
+      if (typeof id === 'string' && id.length > 0) {
+        accountIds.add(id);
+      }
+    }
+  }
+
+  return [...accountIds];
+}
+
 const taskQueueClients = new Map<WorkerQueueName, Queue>();
 for (const config of QUEUE_CONFIGS) {
   taskQueueClients.set(config.name, new Queue(config.name, { connection }));
@@ -183,6 +199,7 @@ async function refreshTaskAfterTerminalJob(job: Job<any>, error?: string) {
       config: true,
       bullmqJobId: true,
       error: true,
+      accountId: true,
     },
   });
 
@@ -214,6 +231,27 @@ async function refreshTaskAfterTerminalJob(job: Job<any>, error?: string) {
       },
     });
     return;
+  }
+
+  if (!hasFailed && task.type === 'WARMUP') {
+    const accountIds = collectTaskAccountIds(task);
+    const warmingAccounts = accountIds.length === 0
+      ? 0
+      : await prisma.socialAccount.count({
+          where: {
+            id: { in: accountIds },
+            status: 'WARMING_UP',
+            warmupCompletedAt: null,
+          },
+        });
+
+    if (warmingAccounts > 0) {
+      await prisma.task.update({
+        where: { id: task.id },
+        data: { status: 'RUNNING' },
+      });
+      return;
+    }
   }
 
   await prisma.task.update({
