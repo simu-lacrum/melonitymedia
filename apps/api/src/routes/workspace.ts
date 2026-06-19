@@ -14,11 +14,58 @@ import crypto from 'crypto';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { dispatchAccountJob } from '../lib/job-dispatch.js';
+import {
+  analyticsCronQueue,
+  cleanupQueue,
+  cookiesQueue,
+  editProfileQueue,
+  loginQueue,
+  shadowbanCheckQueue,
+  uploadQueue,
+  warmupQueue,
+} from '../lib/bullmq.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { authRateLimit } from '../middleware/rate-limit.js';
 
 const router = Router();
 router.use(authMiddleware);
+
+const taskQueues = {
+  UPLOAD: uploadQueue,
+  WARMUP: warmupQueue,
+  COOKIES: cookiesQueue,
+  EDIT_PROFILE: editProfileQueue,
+  LOGIN: loginQueue,
+  ANALYTICS_CRON: analyticsCronQueue,
+  SHADOWBAN_CHECK: shadowbanCheckQueue,
+  CLEANUP: cleanupQueue,
+} as const;
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function collectTaskJobIds(task: {
+  bullmqJobId: string | null;
+  config: unknown;
+}): string[] {
+  const jobIds = new Set<string>();
+  if (task.bullmqJobId) jobIds.add(task.bullmqJobId);
+
+  const dispatchedJobs = asRecord(task.config).dispatchedJobs;
+  if (Array.isArray(dispatchedJobs)) {
+    for (const item of dispatchedJobs) {
+      const jobId = asRecord(item).jobId;
+      if (typeof jobId === 'string' && jobId.length > 0) {
+        jobIds.add(jobId);
+      }
+    }
+  }
+
+  return [...jobIds];
+}
 
 // ── Multer Setup ────────────────────────────────────────────
 // Videos saved to UPLOAD_DIR with random filename to avoid collisions
@@ -144,7 +191,16 @@ router.post('/upload', upload.single('video'), async (req: Request, res: Respons
       },
     });
 
-    res.status(201).json({ video });
+    res.status(201).json({
+      video: {
+        id: video.id,
+        originalName: video.originalName,
+        filename: video.filename,
+        size: video.size,
+        description: video.description,
+        hashtags: video.hashtags,
+      },
+    });
   } catch (err) {
     console.error('[Workspace] Upload error:', err);
     res.status(500).json({ error: 'Ошибка при загрузке видео' });
@@ -428,6 +484,122 @@ router.post('/launch', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[Workspace] Launch error:', err);
     res.status(500).json({ error: 'Ошибка при запуске задачи' });
+  }
+});
+
+// GET /jobs — list recent tasks for the current user
+router.get('/jobs', async (req: Request, res: Response) => {
+  try {
+    const tasks = await prisma.task.findMany({
+      where: { userId: req.user!.id },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      select: {
+        id: true,
+        type: true,
+        status: true,
+        config: true,
+        bullmqJobId: true,
+        progress: true,
+        error: true,
+        accountId: true,
+        cancelReason: true,
+        startedAt: true,
+        completedAt: true,
+        createdAt: true,
+      },
+    });
+
+    const active = tasks.filter(t => t.status === 'RUNNING');
+    const waiting = tasks.filter(t => t.status === 'PENDING');
+    const completed = tasks.filter(t => t.status === 'COMPLETED' || t.status === 'CANCELLED');
+    const failed = tasks.filter(t => t.status === 'FAILED');
+
+    res.json({
+      success: true,
+      tasks,
+      data: { active, waiting, completed, failed },
+    });
+  } catch (err) {
+    console.error('[Workspace] Jobs list error:', err);
+    res.status(500).json({ error: 'Ошибка при загрузке задач' });
+  }
+});
+
+// DELETE /jobs/:id — cancel a pending/running task and remove queued BullMQ jobs
+router.delete('/jobs/:id', async (req: Request, res: Response) => {
+  try {
+    const task = await prisma.task.findFirst({
+      where: { id: req.params.id as string, userId: req.user!.id },
+    });
+
+    if (!task) {
+      res.status(404).json({ error: 'Задача не найдена' });
+      return;
+    }
+
+    if (!['PENDING', 'RUNNING'].includes(task.status)) {
+      res.status(409).json({
+        error: 'Можно отменить только задачу в очереди или в работе',
+        status: task.status,
+      });
+      return;
+    }
+
+    const queue = taskQueues[task.type as keyof typeof taskQueues];
+    const jobIds = collectTaskJobIds(task);
+    const warnings: string[] = [];
+    let removedJobs = 0;
+
+    if (queue) {
+      for (const jobId of jobIds) {
+        const job = await queue.getJob(jobId);
+        if (!job) continue;
+        try {
+          await job.remove();
+          removedJobs += 1;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          warnings.push(`Job ${jobId}: ${message}`);
+        }
+      }
+    }
+
+    if (task.type === 'UPLOAD') {
+      await prisma.videoPublication.updateMany({
+        where: {
+          userId: req.user!.id,
+          taskId: task.id,
+          status: { in: ['QUEUED', 'PROCESSING'] },
+        },
+        data: {
+          status: 'SKIPPED',
+          error: 'Cancelled by user',
+        },
+      });
+    }
+
+    const cancelled = await prisma.task.update({
+      where: { id: task.id },
+      data: {
+        status: 'CANCELLED',
+        cancelReason: 'USER_CANCELLED',
+        completedAt: new Date(),
+        error: warnings.length > 0
+          ? 'Task cancelled; active browser jobs may finish their current step'
+          : null,
+      },
+    });
+
+    res.json({
+      success: true,
+      task: cancelled,
+      removedJobs,
+      warnings,
+    });
+  } catch (err) {
+    console.error('[Workspace] Job cancel error:', err);
+    res.status(500).json({ error: 'Ошибка при отмене задачи' });
   }
 });
 

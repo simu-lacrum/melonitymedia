@@ -25,7 +25,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import 'dotenv/config';
-import { Worker, Job } from 'bullmq';
+import { Worker, Job, Queue } from 'bullmq';
 import Redis from 'ioredis';
 
 import {
@@ -38,6 +38,7 @@ import {
   shadowbanDetectorHandler,
   loginHandler,
 } from './handlers/index.js';
+import { prisma } from './lib/prisma.js';
 
 // ── Master Key Validation ───────────────────────────────────
 // Fail fast if MASTER_KEY is missing/invalid — don't process any jobs
@@ -103,6 +104,129 @@ const QUEUE_CONFIGS: QueueConfig[] = [
   { name: 'login',           handler: loginHandler,                concurrency: 3 },
 ];
 
+const TASK_QUEUE_BY_TYPE: Record<string, WorkerQueueName> = {
+  UPLOAD: 'upload',
+  WARMUP: 'warmup',
+  COOKIES: 'cookies',
+  EDIT_PROFILE: 'edit-profile',
+  ANALYTICS_CRON: 'analytics-cron',
+  SHADOWBAN_CHECK: 'shadowban-check',
+  LOGIN: 'login',
+};
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function getTaskId(job: Job<any>): string | null {
+  const taskId = asRecord(job.data).taskId;
+  return typeof taskId === 'string' && taskId.length > 0 ? taskId : null;
+}
+
+function collectTaskJobIds(task: { bullmqJobId: string | null; config: unknown }, fallbackJobId?: string): string[] {
+  const jobIds = new Set<string>();
+  if (task.bullmqJobId) jobIds.add(task.bullmqJobId);
+  if (fallbackJobId) jobIds.add(fallbackJobId);
+
+  const dispatchedJobs = asRecord(task.config).dispatchedJobs;
+  if (Array.isArray(dispatchedJobs)) {
+    for (const item of dispatchedJobs) {
+      const jobId = asRecord(item).jobId;
+      if (typeof jobId === 'string' && jobId.length > 0) {
+        jobIds.add(jobId);
+      }
+    }
+  }
+
+  return [...jobIds];
+}
+
+const taskQueueClients = new Map<WorkerQueueName, Queue>();
+for (const config of QUEUE_CONFIGS) {
+  taskQueueClients.set(config.name, new Queue(config.name, { connection }));
+}
+
+async function markTaskRunningIfNeeded(job: Job<any>) {
+  const taskId = getTaskId(job);
+  if (!taskId) return true;
+
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: { status: true },
+  });
+
+  if (task?.status === 'CANCELLED') {
+    console.log(`[Worker:${job.queueName}] Job ${job.id} skipped: parent task ${taskId} was cancelled`);
+    return false;
+  }
+
+  await prisma.task.updateMany({
+    where: { id: taskId, status: 'PENDING' },
+    data: { status: 'RUNNING', startedAt: new Date() },
+  });
+
+  return true;
+}
+
+async function refreshTaskAfterTerminalJob(job: Job<any>, error?: string) {
+  const taskId = getTaskId(job);
+  if (!taskId) return;
+
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: {
+      id: true,
+      type: true,
+      status: true,
+      config: true,
+      bullmqJobId: true,
+      error: true,
+    },
+  });
+
+  if (!task || task.status === 'CANCELLED') return;
+
+  const queueName = TASK_QUEUE_BY_TYPE[task.type] ?? (job.queueName as WorkerQueueName);
+  const queue = taskQueueClients.get(queueName);
+  if (!queue) return;
+
+  const states = await Promise.all(
+    collectTaskJobIds(task, job.id).map(async (jobId) => {
+      const trackedJob = await queue.getJob(jobId);
+      if (!trackedJob) return 'missing';
+      return trackedJob.getState();
+    }),
+  );
+
+  const isStillInFlight = states.some(state =>
+    ['active', 'waiting', 'waiting-children', 'delayed', 'prioritized', 'paused'].includes(state),
+  );
+  const hasFailed = states.some(state => state === 'failed');
+
+  if (isStillInFlight) {
+    await prisma.task.update({
+      where: { id: task.id },
+      data: {
+        status: 'RUNNING',
+        ...(error ? { error } : {}),
+      },
+    });
+    return;
+  }
+
+  await prisma.task.update({
+    where: { id: task.id },
+    data: {
+      status: hasFailed ? 'FAILED' : 'COMPLETED',
+      progress: hasFailed ? undefined : 100,
+      error: hasFailed ? (error ?? task.error ?? 'One or more jobs failed') : null,
+      completedAt: new Date(),
+    },
+  });
+}
+
 const workers: Worker[] = [];
 
 for (const config of QUEUE_CONFIGS) {
@@ -113,6 +237,11 @@ for (const config of QUEUE_CONFIGS) {
       console.log(`[Worker:${config.name}] Data: userId=${job.data.userId}`);
 
       try {
+        const shouldRun = await markTaskRunningIfNeeded(job);
+        if (!shouldRun) {
+          return { skipped: true, reason: 'TASK_CANCELLED' };
+        }
+
         const result = await config.handler(job);
         console.log(`[Worker:${config.name}] ✅ Job ${job.id} completed`);
         return result;
@@ -129,10 +258,18 @@ for (const config of QUEUE_CONFIGS) {
 
   worker.on('failed', (job, err) => {
     console.error(`[Worker:${config.name}] Job ${job?.id} FAILED:`, err.message);
+    if (!job) return;
+    const maxAttempts = typeof job.opts.attempts === 'number' ? job.opts.attempts : 1;
+    if (job.attemptsMade >= maxAttempts) {
+      refreshTaskAfterTerminalJob(job, err.message)
+        .catch(trackErr => console.error(`[Worker:${config.name}] Task status update failed:`, trackErr));
+    }
   });
 
   worker.on('completed', (job) => {
     console.log(`[Worker:${config.name}] Job ${job.id} COMPLETED`);
+    refreshTaskAfterTerminalJob(job)
+      .catch(err => console.error(`[Worker:${config.name}] Task status update failed:`, err));
   });
 
   workers.push(worker);
@@ -179,6 +316,12 @@ const shutdown = async (signal: string) => {
     // Worker.close() waits for running jobs to finish, then stops polling
     await Promise.all(workers.map(w => w.close()));
     console.log('[Worker] ✅ All workers closed gracefully');
+
+    await Promise.all([...taskQueueClients.values()].map(q => q.close()));
+    console.log('[Worker] Queue clients closed');
+
+    await prisma.$disconnect();
+    console.log('[Worker] Prisma disconnected');
 
     await connection.quit();
     console.log('[Worker] ✅ Redis disconnected');

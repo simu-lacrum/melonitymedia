@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { LiveTerminal } from "@/components/ui/live-terminal"
-import { Play, Users, Save, Loader2, CheckCircle, AlertCircle, Upload, X, Hash, Settings2, Image, Trash2 } from "lucide-react"
+import { Play, Users, Save, Loader2, CheckCircle, AlertCircle, Upload, X, Hash, Settings2, Image, Trash2, RefreshCw, Square } from "lucide-react"
 import { api, ApiError } from "@/lib/api"
 import { toast } from "sonner"
 
@@ -102,6 +102,36 @@ interface BannerFile {
   size: number
 }
 
+interface WorkspaceTask {
+  id: string
+  type: string
+  status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED"
+  progress?: number
+  error?: string | null
+  cancelReason?: string | null
+  createdAt: string
+  startedAt?: string | null
+  completedAt?: string | null
+}
+
+const TASK_TYPE_LABELS: Record<string, string> = {
+  WARMUP: "Прогрев",
+  COOKIES: "Куки",
+  EDIT_PROFILE: "Профиль",
+  UPLOAD: "Залив",
+  LOGIN: "Логин",
+  ANALYTICS_CRON: "Аналитика",
+  SHADOWBAN_CHECK: "Shadowban check",
+}
+
+const TASK_STATUS_LABELS: Record<WorkspaceTask["status"], string> = {
+  PENDING: "В очереди",
+  RUNNING: "В работе",
+  COMPLETED: "Готово",
+  FAILED: "Ошибка",
+  CANCELLED: "Отменена",
+}
+
 export default function WorkspacePage() {
   const [mode, setMode] = React.useState("WARMUP")
   const [launchStatus, setLaunchStatus] = React.useState<LaunchStatus>("idle")
@@ -122,6 +152,39 @@ export default function WorkspacePage() {
   const [banners, setBanners] = React.useState<BannerFile[]>([])
   const [uploadingBanner, setUploadingBanner] = React.useState(false)
   const [uploadingAvatar, setUploadingAvatar] = React.useState(false)
+  const [jobs, setJobs] = React.useState<WorkspaceTask[]>([])
+  const [jobsLoading, setJobsLoading] = React.useState(false)
+  const [cancellingTaskId, setCancellingTaskId] = React.useState<string | null>(null)
+
+  const fetchJobs = React.useCallback(async () => {
+    setJobsLoading(true)
+    try {
+      const data = await api.get<{
+        tasks?: WorkspaceTask[]
+        data?: {
+          active?: WorkspaceTask[]
+          waiting?: WorkspaceTask[]
+          completed?: WorkspaceTask[]
+          failed?: WorkspaceTask[]
+        }
+      }>("/api/workspace/jobs")
+
+      if (Array.isArray(data.tasks)) {
+        setJobs(data.tasks)
+      } else {
+        setJobs([
+          ...(data.data?.active || []),
+          ...(data.data?.waiting || []),
+          ...(data.data?.failed || []),
+          ...(data.data?.completed || []),
+        ])
+      }
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось загрузить задачи")
+    } finally {
+      setJobsLoading(false)
+    }
+  }, [])
 
   React.useEffect(() => {
     api.get<{ presets: Preset[] }>("/api/workspace/presets")
@@ -135,7 +198,9 @@ export default function WorkspacePage() {
         setSelectedAccountIds(new Set(accs.filter((a: any) => a.status === 'ALIVE').map((a: any) => a.id)))
       })
       .catch(() => {})
-  }, [])
+
+    fetchJobs()
+  }, [fetchJobs])
 
   React.useEffect(() => {
     if (mode === "UPLOAD") {
@@ -233,12 +298,26 @@ export default function WorkspacePage() {
       setLaunchStatus("success")
       toast.success("Задача запущена!")
       setStatusMsg("Задача запущена!")
+      fetchJobs()
       setTimeout(() => setLaunchStatus("idle"), 3000)
     } catch (err) {
       setLaunchStatus("error")
       const msg = err instanceof ApiError ? err.message : "Ошибка запуска задачи"
       setStatusMsg(msg)
       toast.error(msg)
+    }
+  }
+
+  const handleCancelTask = async (taskId: string) => {
+    setCancellingTaskId(taskId)
+    try {
+      await api.delete(`/api/workspace/jobs/${taskId}`)
+      toast.success("Задача отменена")
+      fetchJobs()
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось отменить задачу")
+    } finally {
+      setCancellingTaskId(null)
     }
   }
 
@@ -641,6 +720,86 @@ export default function WorkspacePage() {
     }
   }
 
+  const renderTaskStatus = (task: WorkspaceTask) => {
+    if (task.status === "COMPLETED") {
+      return <Badge variant="default" className="gap-1"><CheckCircle className="size-3" />{TASK_STATUS_LABELS[task.status]}</Badge>
+    }
+    if (task.status === "FAILED") {
+      return <Badge variant="destructive" className="gap-1"><AlertCircle className="size-3" />{TASK_STATUS_LABELS[task.status]}</Badge>
+    }
+    if (task.status === "CANCELLED") {
+      return <Badge variant="outline">{TASK_STATUS_LABELS[task.status]}</Badge>
+    }
+    return <Badge variant="secondary">{TASK_STATUS_LABELS[task.status]}</Badge>
+  }
+
+  const renderTasksPanel = () => {
+    const visibleJobs = jobs.slice(0, 8)
+
+    return (
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="text-base">Задачи</CardTitle>
+            <Button variant="ghost" size="icon" className="size-8" onClick={fetchJobs} disabled={jobsLoading} title="Обновить задачи">
+              <RefreshCw className={`size-4 ${jobsLoading ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          {visibleJobs.length === 0 ? (
+            <div className="rounded-md border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
+              Активных задач пока нет
+            </div>
+          ) : (
+            visibleJobs.map((task) => {
+              const canCancel = task.status === "PENDING" || task.status === "RUNNING"
+              const progress = Math.max(0, Math.min(100, task.progress ?? (task.status === "COMPLETED" ? 100 : 0)))
+
+              return (
+                <div key={task.id} className="rounded-md border border-border p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium">{TASK_TYPE_LABELS[task.type] || task.type}</span>
+                        {renderTaskStatus(task)}
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {new Date(task.createdAt).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                      </div>
+                    </div>
+                    {canCancel && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-8 shrink-0 text-destructive hover:text-destructive"
+                        onClick={() => handleCancelTask(task.id)}
+                        disabled={cancellingTaskId === task.id}
+                        title="Отменить задачу"
+                      >
+                        {cancellingTaskId === task.id ? <Loader2 className="size-4 animate-spin" /> : <Square className="size-4" />}
+                      </Button>
+                    )}
+                  </div>
+                  {(task.status === "RUNNING" || progress > 0) && (
+                    <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
+                      <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${progress}%` }} />
+                    </div>
+                  )}
+                  {(task.error || task.cancelReason) && (
+                    <div className="mt-2 line-clamp-2 text-xs text-muted-foreground">
+                      {task.error || task.cancelReason}
+                    </div>
+                  )}
+                </div>
+              )
+            })
+          )}
+        </CardContent>
+      </Card>
+    )
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -771,10 +930,11 @@ export default function WorkspacePage() {
           </Card>
         </div>
 
-        <div className="lg:col-span-7">
+        <div className="lg:col-span-7 flex flex-col gap-6">
           <div className="sticky top-24">
             <LiveTerminal />
           </div>
+          {renderTasksPanel()}
         </div>
       </div>
     </motion.div>

@@ -89,12 +89,16 @@ function enrichProxy(proxy: any) {
     name: proxy.label || '',
     host: decomposed.host,
     port: decomposed.port,
-    username: decomposed.username,
-    password: decomposed.password,
+    username: undefined,
+    password: undefined,
     isActive: proxy.status === 'ACTIVE',
     lastCheckedAt: proxy.lastIPAt ?? null,
     lastIP: proxy.lastIP ?? null,
     address: undefined,
+    rotationLink: undefined,
+    providerApiKey: undefined,
+    providerApiKeyIv: undefined,
+    providerApiKeyTag: undefined,
   };
 }
 

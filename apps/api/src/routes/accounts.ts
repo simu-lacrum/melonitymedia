@@ -134,7 +134,7 @@ router.get('/', async (req: Request, res: Response) => {
       where: { userId: req.user!.id },
       include: {
         pinnedProxy: {
-          select: { id: true, host: true, port: true, address: true, label: true, type: true, carrier: true, country: true },
+          select: { id: true, host: true, port: true, label: true, type: true, carrier: true, country: true },
         },
         _count: { select: { videoPublications: { where: { status: 'UPLOADED' } } } },
       },
@@ -166,6 +166,13 @@ router.get('/', async (req: Request, res: Response) => {
         cookiesEncrypted: undefined,
         cookiesIv: undefined,
         cookiesAuthTag: undefined,
+        loginEncrypted: undefined,
+        loginIv: undefined,
+        loginAuthTag: undefined,
+        password: undefined,
+        passwordEncrypted: undefined,
+        passwordIv: undefined,
+        passwordAuthTag: undefined,
         // computed flags
         hasCookies: !!a.cookiesEncrypted,
         warmupDay,
@@ -917,7 +924,21 @@ router.patch('/:id', async (req: Request, res: Response) => {
       data: updateData,
     });
 
-    res.json({ account: { ...account, cookiesEncrypted: undefined, cookiesIv: undefined, cookiesAuthTag: undefined } });
+    res.json({
+      account: {
+        ...account,
+        cookiesEncrypted: undefined,
+        cookiesIv: undefined,
+        cookiesAuthTag: undefined,
+        loginEncrypted: undefined,
+        loginIv: undefined,
+        loginAuthTag: undefined,
+        password: undefined,
+        passwordEncrypted: undefined,
+        passwordIv: undefined,
+        passwordAuthTag: undefined,
+      },
+    });
   } catch (err) {
     console.error('[Accounts] Update error:', err);
     res.status(500).json({ error: 'Ошибка при обновлении аккаунта' });
@@ -1046,6 +1067,7 @@ router.post('/warmup', async (req: Request, res: Response) => {
       data: {
         bullmqJobId: results.find(r => r.jobId)?.jobId ?? null,
         status: dispatched > 0 ? 'PENDING' : 'FAILED',
+        config: { accountIds: ids, threads: 3, warmupDays: days, hashtags, dispatchedJobs: results } as any,
       },
     });
 
@@ -1093,6 +1115,7 @@ router.post('/cookies', async (req: Request, res: Response) => {
       data: {
         bullmqJobId: results.find(r => r.jobId)?.jobId ?? null,
         status: dispatched > 0 ? 'PENDING' : 'FAILED',
+        config: { accountIds: ids, threads: 3, dispatchedJobs: results } as any,
       },
     });
 

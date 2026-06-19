@@ -16,6 +16,17 @@ router.get('/', async (req: Request, res: Response) => {
     const videos = await prisma.video.findMany({
       where: { userId: req.user!.id, isUploaded: false },
       orderBy: { order: 'asc' },
+      select: {
+        id: true,
+        originalName: true,
+        filename: true,
+        size: true,
+        description: true,
+        hashtags: true,
+        status: true,
+        order: true,
+        createdAt: true,
+      },
     });
     res.json({ videos });
   } catch (err) {
