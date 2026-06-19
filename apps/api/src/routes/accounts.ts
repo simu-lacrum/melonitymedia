@@ -158,7 +158,9 @@ router.get('/', async (req: Request, res: Response) => {
 
     // Strip encrypted cookie data from response (never send to frontend)
     const sanitized = accounts.map((a: typeof accounts[number]) => {
-      const warmupDay = a.warmupStartedAt
+      const warmupDay = a.warmupCompletedAt
+        ? a.warmupDays ?? 10
+        : a.warmupStartedAt
         ? Math.min(
             a.warmupDays ?? 10,
             Math.ceil((Date.now() - new Date(a.warmupStartedAt).getTime()) / 86_400_000),
@@ -187,6 +189,7 @@ router.get('/', async (req: Request, res: Response) => {
         passwordEncrypted: undefined,
         passwordIv: undefined,
         passwordAuthTag: undefined,
+        fingerprint: undefined,
         // computed flags
         hasCookies: !!a.cookiesEncrypted,
         warmupDay,
