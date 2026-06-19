@@ -28,8 +28,10 @@ type LaunchStatus = "idle" | "launching" | "success" | "error"
 
 interface WarmupConfig {
   mode: "WARMUP"
+  warmupMode: "DAYS" | "HOURS"
   concurrency: number
   warmupDays: number
+  warmupHours: number
   useRotation: boolean
   headless: boolean
   hashtags: string[]
@@ -64,7 +66,7 @@ interface UploadConfig {
 
 const DEFAULT_CONFIGS = {
   WARMUP: {
-    mode: "WARMUP", concurrency: 3, warmupDays: 10, useRotation: true,
+    mode: "WARMUP", warmupMode: "DAYS", concurrency: 3, warmupDays: 10, warmupHours: 2, useRotation: true,
     headless: true, hashtags: ["dota2", "dota2highlights"],
   } as WarmupConfig,
   COOKIES: {
@@ -377,21 +379,43 @@ export default function WorkspacePage() {
       case "WARMUP":
         return (
           <div className="flex flex-col gap-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="flex gap-4">
+              <div className="flex flex-col gap-2 flex-1">
+                <Label htmlFor="warmup-mode">Режим прогрева</Label>
+                <Select value={warmup.warmupMode} onValueChange={(v: "DAYS" | "HOURS" | null) => v && setWarmup({ ...warmup, warmupMode: v })}>
+                  <SelectTrigger id="warmup-mode">
+                    <SelectValue placeholder="Режим" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="DAYS">Полноценный (Дни)</SelectItem>
+                    <SelectItem value="HOURS">Быстрый (Часы)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="warmup-threads">Потоки</Label>
-                <Input id="warmup-threads" type="number" min={1} max={20}
+                <Label htmlFor="warmup-concurrency">Потоки</Label>
+                <Input id="warmup-concurrency" type="number" min={1} max={10}
                   value={warmup.concurrency}
-                  onChange={e => setWarmup({ ...warmup, concurrency: parseInt(e.target.value) || 1 })}
+                  onChange={e => setWarmup({ ...warmup, concurrency: parseInt(e.target.value) || 3 })}
                 />
               </div>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="warmup-days">Дней прогрева</Label>
-                <Input id="warmup-days" type="number" min={3} max={21}
-                  value={warmup.warmupDays}
-                  onChange={e => setWarmup({ ...warmup, warmupDays: parseInt(e.target.value) || 10 })}
-                />
-              </div>
+              {warmup.warmupMode === "DAYS" ? (
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="warmup-days">Дней прогрева</Label>
+                  <Input id="warmup-days" type="number" min={3} max={21}
+                    value={warmup.warmupDays}
+                    onChange={e => setWarmup({ ...warmup, warmupDays: parseInt(e.target.value) || 10 })}
+                  />
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="warmup-hours">Часов (Без остановки)</Label>
+                  <Input id="warmup-hours" type="number" min={1} max={24}
+                    value={warmup.warmupHours}
+                    onChange={e => setWarmup({ ...warmup, warmupHours: parseInt(e.target.value) || 2 })}
+                  />
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-6">
               <div className="flex items-center gap-2">

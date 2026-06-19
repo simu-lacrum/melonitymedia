@@ -36,6 +36,8 @@ interface WarmupJobData {
   cookiesDir?: string;
   /** Optional override of warmupDay for replays; normally derived from warmupStartedAt */
   warmupDay?: number;
+  warmupMode?: 'DAYS' | 'HOURS';
+  warmupHours?: number;
   /** Hashtags to use for warmup (e.g. ['dota2', 'gaming']) */
   hashtags?: string[];
   /** Which session within the current day (0-based). Used for multi-session scheduling. */
@@ -278,6 +280,35 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     await page.screenshot({ path: `/tmp/warmup-screenshots/${data.accountId}_auth_ok.png` }).catch(() => {});
 
     await page.waitForTimeout(_randomDelay(3000, 5000));
+
+    if (data.warmupMode === 'HOURS') {
+      const hours = data.warmupHours || 2;
+      const endTime = Date.now() + hours * 3600_000;
+      logger.info(`⏳ Быстрый прогрев запущен на ${hours} часов`);
+      
+      let cycle = 1;
+      while (Date.now() < endTime) {
+        logger.info(`🔄 Часовой прогрев — цикл ${cycle}...`);
+        const activePhaseCtx = { ...phaseCtx, warmupDay: totalDays, warmupDays: totalDays };
+        await _activeEngagement(page, cursor, activePhaseCtx, logger, job);
+        
+        if (Date.now() < endTime) {
+           const breakDelay = _randomDelay(2 * 60_000, 5 * 60_000);
+           logger.info(`☕ Короткий перерыв ${Math.round(breakDelay/60_000)} мин...`);
+           await page.waitForTimeout(breakDelay);
+        }
+        cycle++;
+      }
+
+      await prisma.socialAccount.update({
+        where: { id: data.accountId },
+        data: { warmupCompletedAt: new Date(), status: 'ALIVE', lastWarmupDay: totalDays },
+      });
+      logger.info(`🎉 Быстрый прогрев (${hours}ч) завершён! Аккаунт ${data.accountId} готов к загрузкам.`);
+      
+      await job.updateProgress(100);
+      return;
+    }
 
     if (warmupDay <= passiveEnd) {
       await _passiveWatching(page, cursor, phaseCtx, logger, job);

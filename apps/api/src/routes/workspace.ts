@@ -246,7 +246,9 @@ router.post('/launch', async (req: Request, res: Response) => {
         return {
           taskId: task.id,
           hashtags: Array.isArray(cfg.hashtags) ? cfg.hashtags : [],
+          warmupMode: cfg.warmupMode ?? 'DAYS',
           warmupDays: cfg.warmupDays ?? 10,
+          warmupHours: cfg.warmupHours ?? 2,
         };
       }
 
