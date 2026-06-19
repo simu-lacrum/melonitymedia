@@ -96,7 +96,7 @@ MelonityMedia/
 |------|----------|
 | `src/index.ts` | Точка входа: подключение **8 BullMQ очередей**, MASTER_KEY валидация |
 | `src/handlers/upload.ts` | Залив уникализированного видео через Patchright + ghost-cursor |
-| `src/handlers/warmup.ts` | **10-day progressive curriculum**: passive → light → active engagement + **self-rescheduling** (авто-планировка следующего дня 20-28ч) |
+| `src/handlers/warmup.ts` | **10-day progressive curriculum**: passive → light → active engagement + **multi-session self-rescheduling** (1.5-4ч между сессиями, 6-8ч сон между днями) |
 | `src/handlers/cookies.ts` | Export/refresh cookies через Patchright session |
 | `src/handlers/edit-profile.ts` | Редактирование профиля: **аватар** (upload по URL), био, никнейм через ghost-cursor (TikTok + YouTube) |
 | `src/handlers/analytics.ts` | **curl-impersonate JSON API** (~200ms/профиль, без браузера) + **persist followers/views в БД** |

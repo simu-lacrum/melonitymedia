@@ -680,6 +680,53 @@ router.patch('/bulk', async (req: Request, res: Response) => {
     }
 
     const { accountIds, update } = parsed.data;
+    const force = req.query.force === 'true' && req.user!.role === 'ADMIN';
+
+    if (update.status) {
+      const ownedAccounts = await prisma.socialAccount.findMany({
+        where: {
+          id: { in: accountIds },
+          userId: req.user!.id,
+        },
+        select: { id: true, status: true },
+      });
+
+      const dangerousOrigins = ['BANNED', 'SHADOWBAN_SUSPECTED'];
+      const safeTargets = ['PAUSED'];
+      const bulkStatusBlockers = ownedAccounts.filter(account =>
+        dangerousOrigins.includes(account.status)
+        && !safeTargets.includes(update.status!)
+        && update.status !== account.status,
+      );
+
+      if (bulkStatusBlockers.length > 0 && !force) {
+        res.status(409).json({
+          error: `Cannot bulk change ${bulkStatusBlockers.length} protected account(s) to ${update.status}. ` +
+            `Use admin force override (?force=true) or re-verify account cookies first.`,
+          code: 'DANGEROUS_STATUS_TRANSITION',
+          blockedAccountIds: bulkStatusBlockers.map(account => account.id),
+        });
+        return;
+      }
+
+      if (bulkStatusBlockers.length > 0 && force) {
+        await prisma.$transaction(
+          bulkStatusBlockers.map(account => prisma.auditLog.create({
+            data: {
+              userId: req.user!.id,
+              action: 'account.status.force_override',
+              ip: req.ip ?? null,
+              details: {
+                entityType: 'SocialAccount',
+                entityId: account.id,
+                fromStatus: account.status,
+                toStatus: update.status,
+              },
+            },
+          })),
+        );
+      }
+    }
 
     const result = await prisma.socialAccount.updateMany({
       where: {

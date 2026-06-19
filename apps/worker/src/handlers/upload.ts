@@ -449,14 +449,14 @@ async function _uploadToTikTok(
 ): Promise<void> {
   // Navigate to TikTok Studio upload (2025+) — fallback to legacy /upload
   logger.info('Переход на страницу загрузки TikTok Studio...');
-  await page.goto('https://www.tiktok.com/tiktokstudio/upload', { waitUntil: 'networkidle', timeout: 30000 });
+  await page.goto('https://www.tiktok.com/tiktokstudio/upload', { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForTimeout(_randomDelay(3000, 5000));
 
   // Check if Studio loaded or we need legacy URL
   let currentUrl = page.url();
   if (!/tiktokstudio/i.test(currentUrl) && !/upload/i.test(currentUrl)) {
     logger.warn('TikTok Studio не загрузился — пробую legacy /upload');
-    await page.goto('https://www.tiktok.com/upload', { waitUntil: 'networkidle', timeout: 30000 });
+    await page.goto('https://www.tiktok.com/upload', { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(_randomDelay(3000, 5000));
     currentUrl = page.url();
   }
@@ -496,8 +496,9 @@ async function _uploadToTikTok(
 
     await humanType(page, captionSelector, caption, { clearBefore: true });
     logger.info('Описание и хештеги заполнены');
-  } catch {
-    logger.warn('Не удалось заполнить описание — селектор изменился');
+  } catch (captionErr) {
+    await page.screenshot({ path: `/app/screenshots/tiktok_caption_error_${Date.now()}.png`, fullPage: true }).catch(() => {});
+    throw new Error(`Не удалось заполнить описание TikTok перед публикацией: ${errorMessage(captionErr)}`);
   }
 
   await page.waitForTimeout(_randomDelay(2000, 3000));
@@ -524,6 +525,7 @@ async function _uploadToTikTok(
   }
 
   // Click Post button with human mouse
+  let postClicked = false;
   try {
     // Resilient post button — data-e2e + text-based fallbacks
     const postSelector =
@@ -532,6 +534,7 @@ async function _uploadToTikTok(
       'div[role="button"]:has-text("Post"), div[role="button"]:has-text("Опубликовать")';
     await page.waitForSelector(postSelector, { timeout: 10_000 });
     await humanClick(page, cursor, postSelector, { postClickDelay: 1000 });
+    postClicked = true;
     logger.info('Нажата кнопка публикации...');
   } catch {
     // Fallback: iterate all buttons and find Post/Upload
@@ -541,10 +544,16 @@ async function _uploadToTikTok(
       const text = await buttons.nth(i).textContent();
       if (text && /^\s*(Post|Опубликовать|Upload|Загрузить)\s*$/i.test(text)) {
         await buttons.nth(i).click();
+        postClicked = true;
         logger.info('Нажата кнопка публикации (fallback)');
         break;
       }
     }
+  }
+
+  if (!postClicked) {
+    await page.screenshot({ path: `/app/screenshots/tiktok_post_button_missing_${Date.now()}.png`, fullPage: true }).catch(() => {});
+    throw new Error('Не удалось найти и нажать кнопку публикации TikTok');
   }
 
   // Wait for upload completion
@@ -599,7 +608,45 @@ async function _uploadToTikTok(
     throw new Error('TikTok upload failed — error element detected on page');
   }
 
+  const confirmed = await _waitForTikTokPublishConfirmation(page);
+  if (!confirmed) {
+    await page.screenshot({ path: `/app/screenshots/tiktok_publish_unconfirmed_${Date.now()}.png`, fullPage: true }).catch(() => {});
+    throw new Error(
+      'TikTok не подтвердил публикацию видео. Задача остановлена, чтобы не пометить аккаунт как успешно загруженный без доказательства публикации.',
+    );
+  }
+
   logger.info('TikTok подтвердил загрузку ✓');
+}
+
+async function _waitForTikTokPublishConfirmation(page: Page): Promise<boolean> {
+  return page.waitForFunction(() => {
+    const href = window.location.href;
+    if (/tiktokstudio\/(content|posts|analytics)|creator-center\/content/i.test(href) && !/\/upload/i.test(href)) {
+      return true;
+    }
+
+    const body = document.body?.innerText || document.body?.textContent || '';
+    if (
+      /video published|your video has been posted|post published|published successfully|upload successful|view post|manage posts/i.test(body)
+      || /видео опубликовано|публикация завершена|опубликовано успешно|посмотреть пост|управление публикациями/i.test(body)
+    ) {
+      return true;
+    }
+
+    const dialogs = document.querySelectorAll('[role="dialog"], [class*="modal"], [class*="toast"]');
+    for (const dialog of dialogs) {
+      const text = dialog.textContent || '';
+      if (
+        /video published|post published|upload successful|view post|manage posts/i.test(text)
+        || /видео опубликовано|публикация завершена|опубликовано успешно|посмотреть пост/i.test(text)
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  }, { timeout: 90_000, polling: 2000 }).then(() => true).catch(() => false);
 }
 
 // ── YouTube Shorts Upload ───────────────────────────────────
@@ -830,12 +877,12 @@ async function _uploadToYouTube(
       await page.keyboard.press('Escape', { delay: Math.random() * 50 + 50 });
       await page.waitForTimeout(500);
     } else {
-      logger.warn('Не удалось найти видимое поле заголовка');
       await page.screenshot({ path: `/app/screenshots/title_missing_${Date.now()}.png`, fullPage: true }).catch(() => {});
+      throw new Error('Не удалось найти видимое поле заголовка YouTube Studio');
     }
   } catch (err) {
-    logger.warn(`Не удалось заполнить заголовок: ${(err as Error).message}`);
     await page.screenshot({ path: `/app/screenshots/title_error_${Date.now()}.png`, fullPage: true }).catch(() => {});
+    throw new Error(`Не удалось заполнить заголовок YouTube Studio: ${errorMessage(err)}`);
   }
 
   // Fill description + hashtags
@@ -1082,8 +1129,10 @@ async function _uploadToYouTube(
   }
 
   if (!success) {
-    logger.warn('Не удалось подтвердить публикацию (нет confirmation text), но дошли до конца flow');
     await page.screenshot({ path: `/app/screenshots/4_failed_confirm_${ts}.png`, fullPage: true }).catch(() => {});
+    throw new Error(
+      'YouTube Studio не подтвердил публикацию Shorts. Задача остановлена, чтобы не пометить видео как опубликованное без подтверждения.',
+    );
   } else {
     logger.info('Успешная публикация подтверждена (найден текст published/опубликовано/share)');
   }

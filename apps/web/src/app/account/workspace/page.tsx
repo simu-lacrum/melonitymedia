@@ -540,7 +540,7 @@ export default function WorkspacePage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="DAYS">Полноценный (Дни)</SelectItem>
-                    <SelectItem value="HOURS">Быстрый (Часы)</SelectItem>
+                    <SelectItem value="HOURS">Быстрый тест (часы)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -569,6 +569,14 @@ export default function WorkspacePage() {
                 </div>
               )}
             </div>
+            {warmup.warmupMode === "HOURS" && (
+              <Alert>
+                <AlertCircle className="size-4" />
+                <AlertDescription>
+                  Быстрый режим нужен для короткой активности и проверки сессии. Он не открывает заливы: после завершения аккаунт останется на паузе, пока вы не запустите полноценный прогрев по дням или admin force.
+                </AlertDescription>
+              </Alert>
+            )}
             <div className="flex items-center gap-6">
               <div className="flex items-center gap-2">
                 <Checkbox id="warmup-rotation"

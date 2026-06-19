@@ -30,6 +30,8 @@ interface SocialAccount {
   lastActive?: string
   updatedAt: string
   lastError?: string | null
+  warmupDay?: number | null
+  warmupDays?: number | null
   pinnedProxy?: {
     id: string
     host: string
@@ -417,6 +419,8 @@ export default function AccountsPage() {
     EXPIRED_COOKIES: "Срок действия cookies истёк. Обновите cookies или переимпортируйте аккаунт.",
     BANNED: "Аккаунт заблокирован TikTok. Попробуйте другой аккаунт.",
     SHADOWBAN_SUSPECTED: "Подозрение на теневой бан. Снизьте активность и подождите 24-48ч.",
+    WARMING_UP: "Аккаунт сейчас прогревается. Заливы будут заблокированы до завершения полноценного прогрева.",
+    PAUSED: "Аккаунт на паузе. Задачи не будут запускаться, пока вы не вернёте его в работу.",
   }
 
   const statusActions: Record<string, string> = {
@@ -424,6 +428,7 @@ export default function AccountsPage() {
     EXPIRED_COOKIES: "Импортируйте аккаунт заново с актуальными cookies.",
     BANNED: "Удалите аккаунт и используйте другой.",
     SHADOWBAN_SUSPECTED: "Приостановите публикации на 24-48ч, затем проверьте снова.",
+    PAUSED: "Проверьте причину паузы и включайте аккаунт только осознанно.",
   }
 
   const renderStatus = (acc: SocialAccount) => {
@@ -439,12 +444,15 @@ export default function AccountsPage() {
       VERIFYING: { label: "Проверка...", variant: "secondary" },
     }
     const cfg = map[status] || { label: status, variant: "secondary" as const }
+    const warmupProgress = status === "WARMING_UP" && acc.warmupDay
+      ? ` ${acc.warmupDay}/${acc.warmupDays || "?"}`
+      : ""
 
     if (status === "VERIFYING") {
       return (
         <Badge variant={cfg.variant} className="animate-pulse gap-1.5">
           <Loader2 className="size-3 animate-spin" />
-          {cfg.label}
+          {cfg.label}{warmupProgress}
         </Badge>
       )
     }
@@ -460,7 +468,7 @@ export default function AccountsPage() {
           <div className="flex items-center gap-2">
             <Badge variant={cfg.variant} className="gap-1">
               <AlertCircle className="size-3" />
-              {cfg.label}
+              {cfg.label}{warmupProgress}
             </Badge>
             {["AUTH_NEEDED", "EXPIRED_COOKIES"].includes(status) && (
               <button
@@ -484,7 +492,7 @@ export default function AccountsPage() {
       )
     }
 
-    return <Badge variant={cfg.variant}>{cfg.label}</Badge>
+    return <Badge variant={cfg.variant}>{cfg.label}{warmupProgress}</Badge>
   }
 
   return (

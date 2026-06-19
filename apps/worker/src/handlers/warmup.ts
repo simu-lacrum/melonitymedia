@@ -335,9 +335,14 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
 
       await prisma.socialAccount.update({
         where: { id: data.accountId },
-        data: { warmupCompletedAt: new Date(), status: 'ALIVE', lastWarmupDay: totalDays },
+        data: {
+          warmupCompletedAt: null,
+          status: 'PAUSED',
+          lastWarmupDay: null,
+          lastError: `Быстрый прогрев (${hours}ч) завершён, но не засчитан как полноценный прогрев. Для безопасных заливов запустите режим "Дни" или используйте admin force.`,
+        },
       });
-      logger.info(`🎉 Быстрый прогрев (${hours}ч) завершён! Аккаунт ${data.accountId} готов к загрузкам.`);
+      logger.info(`✅ Быстрый прогрев (${hours}ч) завершён. Аккаунт ${data.accountId} оставлен на паузе: быстрый режим не открывает upload-gate.`);
       
       await job.updateProgress(100);
       return;

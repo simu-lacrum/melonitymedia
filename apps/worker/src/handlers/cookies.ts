@@ -18,7 +18,7 @@ import { emitWorkerError } from '../lib/error-classifier.js';
 import { loadAccountContext } from '../lib/account-context.js';
 import { acquireAccountLock, releaseAccountLock } from '../lib/account-lock.js';
 import { prisma } from '../lib/prisma.js';
-import type { Browser } from 'patchright';
+import type { Browser, Page } from 'patchright';
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -69,21 +69,20 @@ export async function cookiesHandler(job: Job<CookiesJobData>): Promise<string> 
       ? 'https://www.tiktok.com'
       : 'https://www.youtube.com';
 
-    await page.goto(baseUrl, { waitUntil: 'networkidle' });
+    const waitUntil = ctxAcc.platform === 'YOUTUBE' ? 'load' : 'domcontentloaded';
+    await page.goto(baseUrl, { waitUntil, timeout: 45_000 });
     await page.waitForTimeout(_randomDelay(3000, 5000));
 
-    // Check auth status
-    const bodyText = await page.textContent('body');
-    const isLoggedOut =
-      bodyText?.includes('Log in') ||
-      bodyText?.includes('Sign in') ||
-      bodyText?.includes('Войти');
+    // Check auth status with platform-specific positive logout signals.
+    // Full body text is too noisy: logged-in pages can contain "Sign in" strings
+    // inside scripts, comments, or guest-only prompts.
+    const authCheck = await _detectLoggedOut(page, ctxAcc.platform);
 
-    if (isLoggedOut) {
-      logger.warn('Cookies истекли — требуется импорт новых cookies через UI');
+    if (authCheck.loggedOut) {
+      logger.warn(`Cookies истекли — требуется импорт новых cookies через UI (${authCheck.reason})`);
       await prisma.socialAccount.update({
         where: { id: data.accountId },
-        data: { status: 'EXPIRED_COOKIES' },
+        data: { status: 'EXPIRED_COOKIES', lastError: authCheck.reason },
       });
       throw new Error('COOKIES_EXPIRED');
     }
@@ -104,6 +103,14 @@ export async function cookiesHandler(job: Job<CookiesJobData>): Promise<string> 
     // Persist to BOTH disk cache AND database (BUG-H3 fix)
     await persistCookies(data.accountId, browserCookies, data.cookiesDir ?? '/data/cookies');
 
+    const statusReset = ['EXPIRED_COOKIES', 'AUTH_NEEDED', 'VERIFYING'].includes(ctxAcc.status)
+      ? { status: 'ALIVE' as const }
+      : {};
+    await prisma.socialAccount.update({
+      where: { id: data.accountId },
+      data: { ...statusReset, lastError: null },
+    });
+
     logger.info(`✅ Cookies обновлены и сохранены в DB (${browserCookies.length} шт)`);
     await job.updateProgress(100);
 
@@ -123,4 +130,63 @@ export async function cookiesHandler(job: Job<CookiesJobData>): Promise<string> 
 
 function _randomDelay(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+async function _detectLoggedOut(
+  page: Page,
+  platform: 'TIKTOK' | 'YOUTUBE',
+): Promise<{ loggedOut: boolean; reason: string }> {
+  const url = page.url();
+
+  if (platform === 'YOUTUBE') {
+    if (/accounts\.google\.com|ServiceLogin/i.test(url)) {
+      return { loggedOut: true, reason: 'redirected to Google login' };
+    }
+
+    const signInVisible = await page.evaluate(() => {
+      const elements = Array.from(document.querySelectorAll('a, button, ytd-button-renderer, tp-yt-paper-button'));
+      return elements.some((el) => {
+        const href = (el as HTMLAnchorElement).href || el.getAttribute('href') || '';
+        const label = `${el.getAttribute('aria-label') || ''} ${el.textContent || ''}`.toLowerCase();
+        const rect = (el as HTMLElement).getBoundingClientRect?.();
+        const visible = rect ? rect.width > 0 && rect.height > 0 : true;
+        return visible && (href.includes('ServiceLogin') || /\bsign in\b/.test(label));
+      });
+    }).catch(() => true);
+
+    return {
+      loggedOut: signInVisible,
+      reason: signInVisible ? 'YouTube sign-in control is visible' : 'session is authenticated',
+    };
+  }
+
+  if (/\/login|accounts\.tiktok\.com/i.test(url)) {
+    return { loggedOut: true, reason: 'redirected to TikTok login' };
+  }
+
+  const loginVisible = await page.evaluate(() => {
+    const selectors = [
+      'button[data-e2e="top-login-button"]',
+      'button[data-e2e*="login"]',
+      'a[href*="/login"]',
+    ];
+
+    for (const selector of selectors) {
+      const el = document.querySelector(selector) as HTMLElement | null;
+      if (!el) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) return true;
+    }
+
+    return Array.from(document.querySelectorAll('button')).some((button) => {
+      const text = (button.textContent || '').trim().toLowerCase();
+      const rect = button.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && (text === 'log in' || text === 'войти');
+    });
+  }).catch(() => true);
+
+  return {
+    loggedOut: loginVisible,
+    reason: loginVisible ? 'TikTok login control is visible' : 'session is authenticated',
+  };
 }

@@ -406,6 +406,8 @@ interface UploadJobPayload {
 interface WarmupJobPayload {
   accountId: string;
   warmupDays: number;       // 3-21, from account.warmupDays (default 10)
+  warmupMode?: "DAYS" | "HOURS";
+  warmupHours?: number;     // 1-24; diagnostic fast mode only, not upload readiness
   hashtags?: string[];      // user-provided hashtags for FYP niche targeting
   comments?: string[];      // user-provided comment pool; empty/missing = no comments
 
@@ -417,10 +419,16 @@ interface WarmupJobPayload {
   //   Day N+1+: Ready for upload
   //
   // SELF-RESCHEDULING (v3.3):
-  //   After completing day N (when N < warmupDays), handler auto-schedules
-  //   the next day's job via BullMQ with a randomized delay of 20-28 hours.
+  //   Each day runs 2-4 sessions. Mid-day sessions are separated by 1.5-4h;
+  //   after the last session, the next day is scheduled after a 6-8h sleep.
   //   User only needs to start warmup once — all subsequent days are automatic.
   //   On the final day: status → ALIVE, warmupCompletedAt → now().
+  //
+  // FAST HOURS MODE:
+  //   warmupMode="HOURS" runs a short active session loop for diagnostics and
+  //   session touch only. It finishes with status → PAUSED and
+  //   warmupCompletedAt stays null, so upload remains blocked unless an admin
+  //   explicitly launches with force.
 
   // All actions use:
   // - Patchright with per-account fingerprint

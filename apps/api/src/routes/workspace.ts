@@ -327,7 +327,12 @@ router.post('/launch', async (req: Request, res: Response) => {
           comments: normalizeWarmupComments(asRecord(config).comments),
         }
       : config;
-    const force = req.query.force === "true";
+    const forceRequested = req.query.force === "true";
+    if (forceRequested && req.user!.role !== "ADMIN") {
+      res.status(403).json({ error: "Force launch override is admin-only" });
+      return;
+    }
+    const force = forceRequested;
 
     let targetAccountIds = parsed.data.accountIds;
     if (parsed.data.applyToAll) {
