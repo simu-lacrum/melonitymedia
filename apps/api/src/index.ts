@@ -24,6 +24,7 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { createSocketServer } from './lib/socket.js';
 import { firewallMiddleware } from './middleware/firewall.js';
+import { apiRateLimit } from './middleware/rate-limit.js';
 
 // Route imports
 import authRoutes from './routes/auth.js';
@@ -100,11 +101,14 @@ app.use(express.json({ limit: '10mb' }));
 // Parse cookies (needed for JWT HttpOnly cookie)
 app.use(cookieParser());
 
+// Trust proxy headers (needed when behind nginx/docker)
+app.set('trust proxy', 1);
+
 // IP Firewall — check every request against Redis blacklist
 app.use(firewallMiddleware);
 
-// Trust proxy headers (needed when behind nginx/docker)
-app.set('trust proxy', 1);
+// General API rate limit; auth routes keep their stricter per-route limiter.
+app.use('/api', apiRateLimit);
 
 // ── API Routes ──────────────────────────────────────────────
 app.use('/api/auth', authRoutes);

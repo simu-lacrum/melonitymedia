@@ -3,7 +3,7 @@
 //
 // Checks incoming IP against Redis SET "firewall:blocked_ips".
 // If the IP is in the set → immediate 403 Forbidden.
-// Admin manages the blocklist via /admin/firewall endpoints.
+// Admin manages the blocklist via /api/admin/firewall endpoints.
 //
 // Why Redis SET? O(1) lookups, shared across all API instances,
 // changes take effect instantly (no restart needed).

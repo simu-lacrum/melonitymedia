@@ -125,8 +125,8 @@
 - **`apps/api/src/lib/job-dispatch.ts`**: Centralized job dispatch с BANNED/PAUSED guard и cross-tenant validation.
 - **Nginx reverse proxy**: `nginx/default.conf` с security headers, WebSocket support, 500MB upload limit.
 - **Docker SSL prep**: Порт 443 + SSL certificate volume примонтированы в docker-compose (готово к certbot).
-- **Admin unban**: `POST /admin/users/:id/unban` — разбан пользователя с проверками и audit log.
-- **IP validation**: `POST /admin/firewall` теперь валидирует IP формат через `net.isIP()`.
+- **Admin unban**: `POST /api/admin/users/:id/unban` — разбан пользователя с проверками и audit log.
+- **IP validation**: `POST /api/admin/firewall` теперь валидирует IP формат через `net.isIP()`.
 
 ### Changed
 - **README.md**: Обновлены секции Security (33 меры), Queues (8 вместо 7), Env vars (Redis auth, Postgres credentials), Docker (nginx, Redis auth), API endpoints (rate limits, new endpoints).
@@ -252,7 +252,7 @@
 - **HIGH-01/02**: Fixed ALIVE/ACTIVE enum mismatch — `patchAccountSchema` now uses `ALIVE` (matching Prisma enum and all handler code).
 - **HIGH-03**: Rewrote `decomposeAddress()` to handle passwords containing `:` or `@` using `lastIndexOf('@')` and `indexOf(':')`.
 - **HIGH-05**: Replaced proxy test stub with real TCP connectivity test via `undici.ProxyAgent` → `api.ipify.org`. Removes credential leak from response.
-- **HIGH-06**: Changed `DELETE /admin/firewall` → `POST /admin/firewall/unblock` (DELETE with body violates HTTP semantics).
+- **HIGH-06**: Changed `DELETE /api/admin/firewall` → `POST /api/admin/firewall/unblock` (DELETE with body violates HTTP semantics).
 - **HIGH-07**: `enrichProxy()` now uses DB values for `lastIP`/`lastIPAt` instead of hardcoding `null`.
 - **HIGH-08**: Video reorder endpoint now verifies `userId` ownership before updating order (IDOR fix).
 - **HIGH-09**: `warmupDay` clamp fixed — was `warmupDays + 1`, now correctly caps at `warmupDays`.
@@ -287,7 +287,7 @@
 
 ### Added
 - **LOGIN Queue**: New BullMQ queue (`login`) for automated account authorization via `login:pass` through Patchright. Total queues: 7 → 8.
-- **Rate Limiting**: Auth endpoints (`/auth/register`, `/auth/login`) rate-limited to 10 requests per 15 minutes (Redis-backed).
+- **Rate Limiting**: Auth endpoints (`/api/auth/register`, `/api/auth/login`) rate-limited to 10 requests per 15 minutes (Redis-backed).
 - **Admin Panel**: Full admin page with Runtime health (DB/Redis/CPU/RAM), Users management (soft-ban, thread limits), and IP Firewall (Redis blacklist).
 - **Docker Production**: Multi-stage Dockerfiles for API and Web services with OpenSSL support for Prisma, workspace stub resolution, and health checks.
 - **Prisma Schema**: Added `LOGIN` to `TaskType` enum, `ACTIVE`/`PAUSED` to `AccountStatus` enum, `binaryTargets` for Docker Debian builds.
@@ -298,8 +298,8 @@
   - `POST /accounts/bulk-proxy` → `PATCH /accounts/bulk/proxy`
   - `POST /workspace/queue/add` → `POST /workspace/queue`
   - `POST /proxies/import-from-provider` → `POST /proxies/import/provider`
-  - `POST /admin/firewall/block` → `POST /admin/firewall`
-  - `DELETE /admin/firewall/unblock` → `DELETE /admin/firewall`
+  - `POST /api/admin/firewall/block` → `POST /api/admin/firewall`
+  - `DELETE /api/admin/firewall/unblock` → `POST /api/admin/firewall/unblock`
 - **Docker Ports**: Host ports changed to `5433:5432` (DB) and `6380:6379` (Redis) to avoid conflicts. Configurable via `PORT_DB`/`PORT_REDIS` env vars.
 - **Database Hostnames**: `.env` now uses Docker-internal hostnames (`db:5432`, `redis:6379`) instead of `localhost`.
 - **Firewall Middleware**: Now uses `req.ip` instead of raw `X-Forwarded-For` header for proper Express trust proxy handling.

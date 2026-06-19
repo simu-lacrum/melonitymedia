@@ -27,8 +27,8 @@ router.get('/summary', async (req: Request, res: Response) => {
           where: { userId },
           _sum: { followers: true },
         }),
-        prisma.video.count({
-          where: { userId, isUploaded: true },
+        prisma.videoPublication.count({
+          where: { userId, status: 'UPLOADED' },
         }),
       ]);
 

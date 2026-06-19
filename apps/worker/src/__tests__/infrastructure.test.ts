@@ -5,6 +5,7 @@ import path from 'path';
 const WORKER_ROOT = path.resolve(__dirname, '../..');
 const DOCKERFILE = fs.readFileSync(path.join(WORKER_ROOT, 'Dockerfile'), 'utf-8');
 const ENTRYPOINT = fs.readFileSync(path.join(WORKER_ROOT, 'entrypoint.sh'), 'utf-8');
+const PATCHRIGHT_LAUNCHER = fs.readFileSync(path.join(WORKER_ROOT, 'src/core/browser/patchright-launcher.ts'), 'utf-8');
 
 // docker-compose is at repo root
 const COMPOSE = fs.readFileSync(path.join(WORKER_ROOT, '../../docker-compose.yml'), 'utf-8');
@@ -31,21 +32,25 @@ describe('Dockerfile source verification', () => {
   });
 });
 
-describe('entrypoint.sh source verification (BUG 12)', () => {
-  it('starts Xvfb explicitly', () => {
-    expect(ENTRYPOINT).toContain('Xvfb :99');
+describe('dynamic GUI source verification', () => {
+  it('keeps entrypoint focused on the worker process', () => {
+    expect(ENTRYPOINT).not.toContain('Xvfb :99');
+    expect(ENTRYPOINT).toContain('exec node dist/index.js');
   });
 
-  it('sets DISPLAY=:99', () => {
-    expect(ENTRYPOINT).toContain('DISPLAY=:99');
+  it('starts Xvfb per browser job', () => {
+    expect(PATCHRIGHT_LAUNCHER).toContain("spawn('Xvfb'");
+    expect(PATCHRIGHT_LAUNCHER).toContain('displayConfig.display');
   });
 
-  it('verifies Xvfb readiness via xdpyinfo', () => {
-    expect(ENTRYPOINT).toContain('xdpyinfo');
+  it('starts x11vnc without daemonizing away from the tracked process', () => {
+    expect(PATCHRIGHT_LAUNCHER).toContain("spawn('x11vnc'");
+    expect(PATCHRIGHT_LAUNCHER).not.toContain("'-bg'");
   });
 
-  it('exits on Xvfb failure', () => {
-    expect(ENTRYPOINT).toContain('exit 1');
+  it('builds VNC URL from environment-driven public host settings', () => {
+    expect(PATCHRIGHT_LAUNCHER).toContain('VNC_PUBLIC_HOST');
+    expect(PATCHRIGHT_LAUNCHER).not.toContain('melonitymedia.site');
   });
 });
 

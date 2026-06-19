@@ -83,6 +83,17 @@ async function getFreePortAndDisplay(): Promise<{ display: number; vncPort: numb
   throw new Error('No free ports/displays available for VNC');
 }
 
+function buildVncUrl(webPort: number): string {
+  const template = process.env.VNC_PUBLIC_URL_TEMPLATE;
+  if (template) {
+    return template.replace(/\{port\}/g, String(webPort));
+  }
+
+  const host = process.env.VNC_PUBLIC_HOST || process.env.PUBLIC_HOST || 'localhost';
+  const protocol = process.env.VNC_PUBLIC_PROTOCOL || 'http';
+  return `${protocol}://${host}:${webPort}/vnc.html`;
+}
+
 // ── Default Chrome Args ─────────────────────────────────────
 
 const STEALTH_ARGS = [
@@ -134,6 +145,12 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
       stale.map(i => i.message).join("; ") +
       ` — launching anyway; mark for regeneration on safe occasion.`
     );
+    await prisma.socialAccount.update({
+      where: { id: opts.accountId },
+      data: { fingerprintStale: true },
+    }).catch(err => {
+      console.warn(`[Patchright] Failed to persist fingerprintStale for ${opts.accountId}:`, err);
+    });
   }
   // Build proxy config for Patchright — parse URL to separate server from auth
   // Playwright prefers { server, username, password } over credentials-in-URL
@@ -224,7 +241,7 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
     guiProcesses.push(fluxbox);
 
     // Start x11vnc
-    const x11vncArgs = ['-display', `:${displayConfig.display}`, '-forever', '-shared', '-bg', '-rfbport', displayConfig.vncPort.toString()];
+    const x11vncArgs = ['-display', `:${displayConfig.display}`, '-forever', '-shared', '-rfbport', displayConfig.vncPort.toString()];
     if (fs.existsSync(process.env.HOME + '/.vnc/passwd')) {
       x11vncArgs.push('-rfbauth', process.env.HOME + '/.vnc/passwd');
     } else {
@@ -307,7 +324,7 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
     context, 
     page,
     vncPort: displayConfig?.webPort,
-    vncUrl: displayConfig ? `http://melonitymedia.site:${displayConfig.webPort}/vnc.html` : undefined
+    vncUrl: displayConfig ? buildVncUrl(displayConfig.webPort) : undefined
   };
 }
 

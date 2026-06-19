@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useRouter, usePathname } from "next/navigation"
-import { api } from "@/lib/api"
+import { api, getApiOrigin } from "@/lib/api"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -49,9 +49,7 @@ export default function AccountLayout({
   // Listens for structured error events from ALL worker handlers
   // (upload, warmup, login, edit-profile, cookies, analytics, etc.)
   React.useEffect(() => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"
-    const origin = apiUrl.replace(/\/api\/?$/, "") || apiUrl
-    const socket: Socket = io(`${origin}/logs`, {
+    const socket: Socket = io(`${getApiOrigin()}/logs`, {
       withCredentials: true,
       transports: ["websocket"],
     })

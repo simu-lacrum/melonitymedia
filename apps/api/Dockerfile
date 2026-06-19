@@ -80,4 +80,4 @@ WORKDIR /app/apps/api
 
 EXPOSE 4000
 
-CMD ["sh", "-c", "node prisma/db-sync.js && exec node dist/index.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy && node prisma/db-sync.js && exec node dist/index.js"]

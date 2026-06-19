@@ -57,6 +57,7 @@ async function _getVisibleSelector(page: Page, selectors: string, prefix: string
 
 interface UploadJobData {
   userId: string;          // for SocketLogger only — DO NOT use as auth signal
+  taskId?: string;
   videoId: string;
   videoPath: string;
   title: string;
@@ -65,12 +66,14 @@ interface UploadJobData {
   accountId: string;       // EVERYTHING else is resolved from this in the worker
   forceSkipWarmup?: boolean;
   cookiesDir?: string;
-  /** Index of this account WITHIN its platform group (0 = first for this platform) */
-  platformIndex?: number;
-  /** Total number of accounts across all platforms in this job (for cleanup) */
+  /** Number of upload jobs dispatched for this source video (for cleanup) */
   totalAccountsInJob?: number;
   /** Path to banner video for overlay (optional) */
   bannerPath?: string;
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 // ── Main ────────────────────────────────────────────────────
@@ -92,7 +95,41 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
       throw new Error(`Account ${data.accountId} is busy: ${holder}`);
     }
     lockAcquired = true;
+
+    const publicationKey = {
+      videoId_accountId: {
+        videoId: data.videoId,
+        accountId: data.accountId,
+      },
+    };
+
+    // Idempotency guard — one source video can be published to many accounts,
+    // but the same source/account pair must never publish twice.
+    const existingPublication = await prisma.videoPublication.findUnique({
+      where: publicationKey,
+      select: { status: true },
+    });
+    if (existingPublication?.status === 'UPLOADED') {
+      logger.warn(`Video ${data.videoId} already uploaded to account ${data.accountId} — skipping duplicate.`);
+      return;
+    }
+
     await prisma.video.updateMany({ where: { id: data.videoId }, data: { status: 'PROCESSING' } });
+    await prisma.videoPublication.upsert({
+      where: publicationKey,
+      create: {
+        userId: data.userId,
+        videoId: data.videoId,
+        accountId: data.accountId,
+        taskId: data.taskId ?? null,
+        status: 'PROCESSING',
+      },
+      update: {
+        taskId: data.taskId ?? undefined,
+        status: 'PROCESSING',
+        error: null,
+      },
+    });
 
     const ctxAcc = await loadAccountContext(data.accountId);
     const { platform, fingerprint, proxyUrl } = ctxAcc;
@@ -104,21 +141,6 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
     });
     if (accountStatus && ['BANNED', 'SHADOWBAN_SUSPECTED', 'PAUSED'].includes(accountStatus.status)) {
       throw new Error(`Account ${data.accountId} has status '${accountStatus.status}' — upload aborted.`);
-    }
-
-    // M-4 FIX: Idempotency guard — check if THIS ACCOUNT already uploaded THIS VIDEO
-    // NOTE: We do NOT check video.isUploaded globally because the same video
-    // is intentionally uploaded to multiple accounts in a single job batch.
-    const alreadyUploaded = await prisma.video.findFirst({
-      where: {
-        id: data.videoId,
-        accountId: data.accountId,
-        isUploaded: true,
-      },
-    });
-    if (alreadyUploaded) {
-      logger.warn(`Video ${data.videoId} already uploaded to account ${data.accountId} — skipping duplicate.`);
-      return;
     }
 
     logger.info(`Начинаю загрузку: "${data.title}" → ${platform}`);
@@ -140,16 +162,16 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
     if (!proxyUrl) {
       throw new Error(
         `Account ${data.accountId} has no pinned proxy. ` +
-        `Pin an LTE_MOBILE proxy via /account/profiles before uploading.`,
+        `Pin an LTE_MOBILE proxy via /account/accounts before uploading.`,
       );
     }
 
     // ── Gate 4: rate limit (3 videos / 24h) ─────────────────
     const dayAgo = new Date(Date.now() - 86_400_000);
-    const recentUploads = await prisma.video.count({
+    const recentUploads = await prisma.videoPublication.count({
       where: {
         accountId: data.accountId,
-        isUploaded: true,
+        status: 'UPLOADED',
         uploadedAt: { gte: dayAgo },
       },
     });
@@ -160,8 +182,8 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
     }
 
     // ── Gate 5: minimum 2h gap between uploads ──────────────
-    const lastUpload = await prisma.video.findFirst({
-      where: { accountId: data.accountId, isUploaded: true },
+    const lastUpload = await prisma.videoPublication.findFirst({
+      where: { accountId: data.accountId, status: 'UPLOADED' },
       orderBy: { uploadedAt: 'desc' },
       select: { uploadedAt: true },
     });
@@ -216,22 +238,16 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
     }
 
     // ── Uniquify video for this account ─────────────────────
-    // Logic: first account per platform gets the bannered original (no extra FFmpeg).
-    // Subsequent accounts get a uniquified copy of the bannered video.
-    // Cross-platform is safe (same video on YT + TT — different detection systems).
-    const isFirstForPlatform = (data.platformIndex ?? 0) === 0;
-
-    if (isFirstForPlatform) {
-      logger.info('Первый аккаунт на платформе — загрузка без уникализации');
-    } else {
-      logger.info('Уникализация видео (FFmpeg pipeline)...');
-      const { outputPath } = await uniquifyVideo({
-        accountId: data.accountId,
-        inputPath: videoToUpload,
-      });
-      uniquifiedPath = outputPath;
-      videoToUpload = outputPath;
-    }
+    // Always run the per-account transform. Skipping the "first" account makes
+    // every single-account job upload the raw source, which defeats the promise
+    // of per-account publication isolation.
+    logger.info('Уникализация видео (FFmpeg pipeline)...');
+    const { outputPath } = await uniquifyVideo({
+      accountId: data.accountId,
+      inputPath: videoToUpload,
+    });
+    uniquifiedPath = outputPath;
+    videoToUpload = outputPath;
     await job.updateProgress(25);
 
     // ── Launch stealth browser ──────────────────────────────
@@ -260,13 +276,22 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
     }
 
     // ── Mark this upload as done for this account ───────────
-    await prisma.video.updateMany({
-      where: { id: data.videoId },
-      data: {
-        isUploaded: true,
-        uploadedAt: new Date(),
-        status: 'UPLOADED',
+    const uploadedAt = new Date();
+    await prisma.videoPublication.upsert({
+      where: publicationKey,
+      create: {
+        userId: data.userId,
+        videoId: data.videoId,
         accountId: data.accountId,
+        taskId: data.taskId ?? null,
+        status: 'UPLOADED',
+        uploadedAt,
+      },
+      update: {
+        taskId: data.taskId ?? undefined,
+        status: 'UPLOADED',
+        uploadedAt,
+        error: null,
       },
     });
 
@@ -282,9 +307,13 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
           select: { shouldDelete: true, filepath: true },
         });
         if (video?.shouldDelete && video.filepath) {
-          // Count how many accounts have already uploaded this video
-          const uploadedCount = await prisma.video.count({
-            where: { id: data.videoId, isUploaded: true },
+          // Count how many target account publications have completed.
+          const uploadedCount = await prisma.videoPublication.count({
+            where: {
+              videoId: data.videoId,
+              status: 'UPLOADED',
+              ...(data.taskId ? { taskId: data.taskId } : {}),
+            },
           });
           // All accounts done → safe to delete the original file
           if (uploadedCount >= data.totalAccountsInJob) {
@@ -295,22 +324,66 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
             // Clear filepath in DB so we don't try to delete again
             await prisma.video.updateMany({
               where: { id: data.videoId },
-              data: { filepath: '' },
+              data: { filepath: '', isUploaded: true, uploadedAt, status: 'UPLOADED' },
             });
-            // Also clean up banner file (no longer needed after all accounts done)
-            if (data.bannerPath && fs.existsSync(data.bannerPath)) {
-              fs.unlinkSync(data.bannerPath);
-              logger.info(`🗑️ Баннер удалён: ${data.bannerPath}`);
-            }
+          } else {
+            await prisma.video.updateMany({
+              where: { id: data.videoId },
+              data: { status: 'PROCESSING' },
+            });
           }
+        } else {
+          await prisma.video.updateMany({
+            where: { id: data.videoId },
+            data: { isUploaded: true, uploadedAt, status: 'UPLOADED' },
+          });
         }
       } catch (cleanupErr) {
-        logger.warn(`Cleanup skipped: ${(cleanupErr as Error).message?.slice(0, 60)}`);
+        logger.warn(`Cleanup skipped: ${errorMessage(cleanupErr).slice(0, 60)}`);
       }
+    } else {
+      await prisma.video.updateMany({
+        where: { id: data.videoId },
+        data: { isUploaded: true, uploadedAt, status: 'UPLOADED' },
+      });
     }
 
   } catch (err: unknown) {
-    await prisma.video.update({ where: { id: data.videoId }, data: { status: 'FAILED' } }).catch(() => {});
+    await prisma.videoPublication.upsert({
+      where: {
+        videoId_accountId: {
+          videoId: data.videoId,
+          accountId: data.accountId,
+        },
+      },
+      create: {
+        userId: data.userId,
+        videoId: data.videoId,
+        accountId: data.accountId,
+        taskId: data.taskId ?? null,
+        status: 'FAILED',
+        error: errorMessage(err),
+      },
+      update: {
+        status: 'FAILED',
+        error: errorMessage(err),
+      },
+    }).catch(() => {});
+
+    if (!data.totalAccountsInJob || data.totalAccountsInJob <= 1) {
+      await prisma.video.update({ where: { id: data.videoId }, data: { status: 'FAILED' } }).catch(() => {});
+    } else {
+      const activePublications = await prisma.videoPublication.count({
+        where: {
+          videoId: data.videoId,
+          ...(data.taskId ? { taskId: data.taskId } : {}),
+          status: { in: ['QUEUED', 'PROCESSING'] },
+        },
+      }).catch(() => 0);
+      if (activePublications === 0) {
+        await prisma.video.update({ where: { id: data.videoId }, data: { status: 'FAILED' } }).catch(() => {});
+      }
+    }
     emitWorkerError(logger, data.accountId, 'upload', err);
     throw err;
   } finally {

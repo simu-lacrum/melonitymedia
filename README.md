@@ -322,7 +322,7 @@ docker compose logs -f worker
 ```mermaid
 graph LR
     subgraph Docker Compose
-        NGX["nginx<br/>Reverse Proxy<br/>:80/:443"]
+        NGX["nginx<br/>Reverse Proxy<br/>:80"]
         DB[("db<br/>PostgreSQL 16<br/>:5432")]
         RD[("redis<br/>Redis 7 (auth)<br/>:6379")]
         API[api<br/>Express.js<br/>:4000]
@@ -346,7 +346,7 @@ graph LR
 
 > **⚠️ Worker-контейнер** включает Xvfb + google-chrome-stable + ffmpeg + curl-impersonate. Используется **Patchright** (patched Playwright CDP) — НЕ Puppeteer и НЕ Selenium. Браузер запускается с `headless: false` внутри виртуального дисплея Xvfb `:99`, что позволяет обходить антифрод-детекцию TikTok и YouTube. Все cookies зашифрованы AES-256-GCM и хранятся в отдельном Docker volume `cookies`.
 >
-> **🔒 Nginx** проксирует весь трафик: `/api/*` и `/socket.io/*` → Express API, остальное → Next.js. Добавлены security headers (X-Content-Type-Options, X-Frame-Options, Referrer-Policy). HTTPS готов к настройке через certbot (порт 443 + SSL volume примонтированы).
+> **🔒 Nginx** проксирует весь трафик: `/api/*` и `/socket.io/*` → Express API, остальное → Next.js. Добавлены security headers (X-Content-Type-Options, X-Frame-Options, Referrer-Policy). HTTPS рекомендуется завершать на внешнем proxy/Cloudflare или добавлять отдельным SSL server block.
 >
 > **🔑 Redis 7** запускается с `--requirepass` — аутентификация обязательна. Пароль задаётся через `REDIS_PASSWORD` в `.env`.
 
@@ -361,8 +361,8 @@ graph TD
     ROOT --> ADMIN_Z
 
     subgraph AUTH_Z["🔐 /auth"]
-        LOGIN["/auth/login<br/>Вход"]
-        REG["/auth/register<br/>Регистрация"]
+        LOGIN["/auth/sign-in<br/>Вход"]
+        REG["/auth/sign-up<br/>Регистрация"]
     end
 
     subgraph ACCOUNT_Z["👤 /account"]
@@ -374,9 +374,9 @@ graph TD
     end
 
     subgraph ADMIN_Z["⚙️ /admin (role=ADMIN)"]
-        RT["/admin/runtime<br/>Здоровье системы"]
-        USR["/admin/users<br/>Управление юзерами"]
-        FW["/admin/firewall<br/>IP Blacklist"]
+        RT["/account/admin<br/>Здоровье системы"]
+        USR["/account/admin<br/>Управление юзерами"]
+        FW["/account/admin<br/>IP Blacklist"]
     end
 
     LANDING["/ Landing Page<br/>Hero + Features + CTA"]
@@ -390,15 +390,15 @@ graph TD
 | Роут | Описание | Доступ |
 |------|----------|--------|
 | `/` | Лендинг с hero-секцией, фичами, статистикой | Публичный |
-| `/auth/login` | JWT-авторизация через HttpOnly Cookie | Публичный |
-| `/auth/register` | Регистрация нового вебмастера | Публичный |
+| `/auth/sign-in` | JWT-авторизация через HttpOnly Cookie | Публичный |
+| `/auth/sign-up` | Регистрация нового вебмастера | Публичный |
 | `/account/dashboard` | KPI-карточки (6 метрик), **Recharts AreaChart**, активные задачи BullMQ | Авторизованный |
 | `/account/accounts` | DataGrid аккаунтов, **фильтр по платформе** (TikTok/YouTube вкладки), импорт cookies и login:password, привязка прокси при импорте, 3-dot меню (привязка прокси / обновление куки / удаление) | Авторизованный |
 | `/account/workspace` | **4 вкладки** (Прогрев/Куки/Профиль/Залив), **мульти-селект аккаунтов** с чекбоксами, Upload, Live Terminal | Авторизованный |
 | `/account/proxies` | CRUD прокси, тест коннекта, ротация IP, carrier/ASN валидация, **кликабельная привязка аккаунтов**, привязка аккаунтов при добавлении прокси | Авторизованный |
-| `/admin/runtime` | PostgreSQL, Redis, BullMQ, CPU/RAM мониторинг | Администратор |
-| `/admin/users` | Таблица вебмастеров, лимиты потоков, soft-ban | Администратор |
-| `/admin/firewall` | IP blacklist через Redis Middleware | Администратор |
+| `/account/admin` | PostgreSQL, Redis, BullMQ, CPU/RAM мониторинг | Администратор |
+| `/account/admin` | Таблица вебмастеров, лимиты потоков, soft-ban | Администратор |
+| `/account/admin` | IP blacklist через Redis Middleware | Администратор |
 
 ---
 
@@ -663,7 +663,7 @@ UPLOAD_DIR=./uploads
 CORS_ORIGIN=http://localhost:3000
 
 # ── Frontend (exposed to browser) ─────────────────────
-NEXT_PUBLIC_API_URL=http://localhost:4000
+NEXT_PUBLIC_API_URL=
 
 # ── Chrome Version (fingerprint + UA pinning) ─────────
 EXPECTED_CHROME_MAJOR=149

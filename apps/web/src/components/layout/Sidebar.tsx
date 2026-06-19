@@ -16,15 +16,15 @@ interface SidebarProps {
 
 const accountNav = [
   { href: '/account/dashboard', label: 'Дашборд', icon: LayoutDashboard },
-  { href: '/account/profiles', label: 'Аккаунты', icon: Users },
+  { href: '/account/accounts', label: 'Аккаунты', icon: Users },
   { href: '/account/workspace', label: 'Рабочая область', icon: Briefcase },
   { href: '/account/proxies', label: 'Прокси', icon: Wifi },
 ];
 
 const adminNav = [
-  { href: '/admin/runtime', label: 'Состояние', icon: Server },
-  { href: '/admin/users', label: 'Пользователи', icon: UserCog },
-  { href: '/admin/firewall', label: 'Файрвол', icon: Shield },
+  { href: '/account/admin', label: 'Состояние', icon: Server },
+  { href: '/account/admin', label: 'Пользователи', icon: UserCog },
+  { href: '/account/admin', label: 'Файрвол', icon: Shield },
 ];
 
 export function Sidebar({ isAdmin = false, isOpen = false, onClose }: SidebarProps) {
@@ -35,7 +35,7 @@ export function Sidebar({ isAdmin = false, isOpen = false, onClose }: SidebarPro
       const isActive = pathname === href;
       return (
         <Link
-          key={href}
+          key={`${href}-${label}`}
           href={href}
           onClick={onClose}
           className={cn(

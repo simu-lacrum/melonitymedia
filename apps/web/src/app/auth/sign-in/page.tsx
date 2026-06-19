@@ -59,7 +59,7 @@ export default function SignInPage() {
           <form onSubmit={handleSubmit} className="flex flex-col gap-5">
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
-                <Label htmlFor="login">Логин (Email или Username)</Label>
+                <Label htmlFor="login">Email</Label>
                 <Input id="login" name="login" required disabled={loading} autoFocus />
               </div>
               <div className="flex flex-col gap-2">

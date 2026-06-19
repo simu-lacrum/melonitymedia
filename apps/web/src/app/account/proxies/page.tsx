@@ -49,6 +49,11 @@ export default function ProxiesPage() {
   const [formPort, setFormPort] = React.useState("")
   const [formUser, setFormUser] = React.useState("")
   const [formPass, setFormPass] = React.useState("")
+  const [formType, setFormType] = React.useState("LTE_MOBILE")
+  const [formCountry, setFormCountry] = React.useState("US")
+  const [formCarrier, setFormCarrier] = React.useState("")
+  const [formRotationLink, setFormRotationLink] = React.useState("")
+  const [formRotationCooldown, setFormRotationCooldown] = React.useState("900")
   const [bulkText, setBulkText] = React.useState("")
 
   const [linkedAccountsOpen, setLinkedAccountsOpen] = React.useState(false)
@@ -121,6 +126,11 @@ export default function ProxiesPage() {
         port: parseInt(formPort, 10),
         username: formUser.trim() || undefined,
         password: formPass.trim() || undefined,
+        type: formType,
+        country: formCountry.trim() || undefined,
+        carrier: formCarrier.trim() || undefined,
+        rotationLink: formRotationLink.trim() || undefined,
+        rotationCooldown: parseInt(formRotationCooldown, 10) || 900,
       })
 
       if (bindAccountIds.length > 0 && result.proxy?.id) {
@@ -137,6 +147,7 @@ export default function ProxiesPage() {
       toast.success("Прокси добавлен")
       setShowModal(false)
       setFormHost(""); setFormPort(""); setFormUser(""); setFormPass("")
+      setFormType("LTE_MOBILE"); setFormCountry("US"); setFormCarrier(""); setFormRotationLink(""); setFormRotationCooldown("900")
       setBindAccountIds([])
       fetchProxies()
     } catch (err: any) {
@@ -151,7 +162,13 @@ export default function ProxiesPage() {
     setSubmitting(true)
     try {
       // BUG-12 fix: Use IDs returned by bulk import to distribute proxies across accounts
-      const result = await api.post<{ created: number; ids: string[] }>("/api/proxies/import", { raw: bulkText.trim() })
+      const result = await api.post<{ created: number; ids: string[] }>("/api/proxies/import", {
+        mode: "manual",
+        data: bulkText.trim(),
+        type: formType,
+        country: formCountry.trim() || undefined,
+        carrier: formCarrier.trim() || undefined,
+      })
 
       if (bindAccountIds.length > 0 && result.ids?.length > 0) {
         // Distribute proxies across accounts round-robin
@@ -419,6 +436,42 @@ export default function ProxiesPage() {
                     onChange={(e) => setFormPass(e.target.value)} />
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="proxy-type">Тип</Label>
+                  <Select value={formType} onValueChange={(v) => setFormType(v ?? "LTE_MOBILE")}>
+                    <SelectTrigger id="proxy-type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="LTE_MOBILE">LTE mobile</SelectItem>
+                      <SelectItem value="STATIC_RESIDENTIAL">Static residential</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="proxy-country">Страна</Label>
+                  <Input id="proxy-country" placeholder="US" value={formCountry}
+                    onChange={(e) => setFormCountry(e.target.value.toUpperCase())} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="proxy-carrier">Оператор</Label>
+                  <Input id="proxy-carrier" placeholder="T-Mobile" value={formCarrier}
+                    onChange={(e) => setFormCarrier(e.target.value)} />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="proxy-cooldown">Cooldown, сек</Label>
+                  <Input id="proxy-cooldown" type="number" min={60} max={3600} value={formRotationCooldown}
+                    onChange={(e) => setFormRotationCooldown(e.target.value)} />
+                </div>
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="proxy-rotation">Rotation link</Label>
+                <Input id="proxy-rotation" placeholder="https://provider.example/rotate/slot" value={formRotationLink}
+                  onChange={(e) => setFormRotationLink(e.target.value)} />
+              </div>
               {renderAccountSelector()}
               <Button onClick={handleAddSingle} disabled={submitting || !formHost || !formPort} className="w-full active:scale-[0.97] transition-transform">
                 {submitting ? <><Loader2 className="size-4 mr-2 animate-spin" />Добавление...</> : "Добавить"}
@@ -439,6 +492,30 @@ export default function ProxiesPage() {
                 <p className="text-xs text-muted-foreground">
                   Формат: host:port или host:port:user:pass — по одному на строку
                 </p>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="bulk-proxy-type">Тип</Label>
+                  <Select value={formType} onValueChange={(v) => setFormType(v ?? "LTE_MOBILE")}>
+                    <SelectTrigger id="bulk-proxy-type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="LTE_MOBILE">LTE</SelectItem>
+                      <SelectItem value="STATIC_RESIDENTIAL">Static</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="bulk-proxy-country">Страна</Label>
+                  <Input id="bulk-proxy-country" placeholder="US" value={formCountry}
+                    onChange={(e) => setFormCountry(e.target.value.toUpperCase())} />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="bulk-proxy-carrier">Оператор</Label>
+                  <Input id="bulk-proxy-carrier" placeholder="T-Mobile" value={formCarrier}
+                    onChange={(e) => setFormCarrier(e.target.value)} />
+                </div>
               </div>
               {renderAccountSelector()}
               <Button onClick={handleBulkImport} disabled={submitting || !bulkText.trim()} className="w-full active:scale-[0.97] transition-transform">

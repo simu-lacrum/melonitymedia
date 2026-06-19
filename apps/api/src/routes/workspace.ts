@@ -278,27 +278,10 @@ router.post('/launch', async (req: Request, res: Response) => {
       return { taskId: task.id, config };
     };
 
-    // Dispatch one job per account with staggered delay (M-4)
-    // For UPLOAD: group accounts by platform so we can assign platformIndex
-    // (index 0 = first for that platform = no uniquification needed)
-    let platformIndexMap: Map<string, number> | null = null;
-    if (type === 'UPLOAD') {
-      // Resolve platform for each target account
-      const accounts = await prisma.socialAccount.findMany({
-        where: { id: { in: targetAccountIds } },
-        select: { id: true, platform: true },
-      });
-      const platformCounters = new Map<string, number>();
-      platformIndexMap = new Map<string, number>();
-      for (const acc of accounts) {
-        const idx = platformCounters.get(acc.platform) ?? 0;
-        platformIndexMap.set(acc.id, idx);
-        platformCounters.set(acc.platform, idx + 1);
-      }
-    }
-
     // Pre-resolve banner path ONCE before iterating accounts (fixes N+1 query)
     let resolvedBannerPath: string | undefined;
+    let dispatchAccountIds = targetAccountIds;
+    let alreadyUploadedCount = 0;
     // Pre-resolve extra ONCE (fixes N+1 video.findFirstOrThrow inside loop)
     const baseExtra = await buildExtra();
     if (type === 'UPLOAD') {
@@ -310,16 +293,63 @@ router.post('/launch', async (req: Request, res: Response) => {
         });
         if (banner) resolvedBannerPath = banner.filepath;
       }
+
+      const videoId = (baseExtra as Record<string, unknown>).videoId as string | undefined;
+      if (!videoId) throw new Error("UPLOAD requires resolved videoId");
+
+      const pendingAccountIds = await Promise.all(targetAccountIds.map(async (accountId) => {
+        const existing = await prisma.videoPublication.findUnique({
+          where: { videoId_accountId: { videoId, accountId } },
+          select: { status: true },
+        });
+        if (existing?.status === 'UPLOADED') return null;
+
+        await prisma.videoPublication.upsert({
+          where: { videoId_accountId: { videoId, accountId } },
+          create: {
+            userId: req.user!.id,
+            videoId,
+            accountId,
+            taskId: task.id,
+            status: 'QUEUED',
+          },
+          update: {
+            taskId: task.id,
+            status: 'QUEUED',
+            error: null,
+          },
+        });
+        return accountId;
+      }));
+      dispatchAccountIds = pendingAccountIds.filter((id): id is string => Boolean(id));
+      alreadyUploadedCount = targetAccountIds.length - dispatchAccountIds.length;
+
+      if (dispatchAccountIds.length === 0) {
+        const completedTask = await prisma.task.update({
+          where: { id: task.id },
+          data: {
+            status: 'COMPLETED',
+            completedAt: new Date(),
+            config: { ...config, accountIds: targetAccountIds, threads, dispatchedJobs: [] },
+          },
+        });
+        res.status(200).json({
+          task: completedTask,
+          dispatched: 0,
+          skipped: targetAccountIds.length,
+          failures: [],
+        });
+        return;
+      }
     }
 
     const results = await Promise.all(
-      targetAccountIds.map(async (accountId, index) => {
+      dispatchAccountIds.map(async (accountId, index) => {
         // Clone pre-resolved extra for this account (no DB calls here)
         const extra = { ...baseExtra as Record<string, unknown> };
-        // Inject platformIndex and totalAccountsInJob for UPLOAD jobs
-        if (type === 'UPLOAD' && platformIndexMap) {
-          extra.platformIndex = platformIndexMap.get(accountId) ?? index;
-          extra.totalAccountsInJob = targetAccountIds.length;
+        // Inject per-batch count for upload cleanup.
+        if (type === 'UPLOAD') {
+          extra.totalAccountsInJob = dispatchAccountIds.length;
         }
         if (type === 'EDIT_PROFILE') {
           extra.jobIndex = index;
@@ -391,7 +421,8 @@ router.post('/launch', async (req: Request, res: Response) => {
     res.status(201).json({
       task: { ...task, bullmqJobId: results[0].jobId },
       dispatched: successCount,
-      skipped: failures.length,
+      skipped: failures.length + alreadyUploadedCount,
+      alreadyUploaded: alreadyUploadedCount,
       failures,
     });
   } catch (err) {
@@ -443,13 +474,40 @@ router.post('/queue', async (req: Request, res: Response) => {
       (task.accountId ? [task.accountId] : []);
 
     if (targetAccountIds.length > 0 && task.type === 'UPLOAD') {
+      let jobsDispatched = 0;
       for (const videoId of videoIds) {
         const video = await prisma.video.findFirst({
           where: { id: videoId, userId: req.user!.id },
-          select: { id: true, filepath: true, description: true, hashtags: true },
+          select: { id: true, filepath: true, originalName: true, description: true, hashtags: true },
         });
         if (video) {
+          const pendingAccountIds: string[] = [];
           for (const accId of targetAccountIds) {
+            const existing = await prisma.videoPublication.findUnique({
+              where: { videoId_accountId: { videoId: video.id, accountId: accId } },
+              select: { status: true },
+            });
+            if (existing?.status === 'UPLOADED') continue;
+            pendingAccountIds.push(accId);
+          }
+
+          for (const accId of pendingAccountIds) {
+            await prisma.videoPublication.upsert({
+              where: { videoId_accountId: { videoId: video.id, accountId: accId } },
+              create: {
+                userId: req.user!.id,
+                videoId: video.id,
+                accountId: accId,
+                taskId,
+                status: 'QUEUED',
+              },
+              update: {
+                taskId,
+                status: 'QUEUED',
+                error: null,
+              },
+            });
+
             await dispatchAccountJob({
               queueName: 'upload',
               accountId: accId,
@@ -458,17 +516,21 @@ router.post('/queue', async (req: Request, res: Response) => {
                 taskId,
                 videoId: video.id,
                 videoPath: video.filepath,
-                title: video.description ?? '',
+                title: video.originalName,
                 description: video.description ?? '',
                 hashtags: (video.hashtags as string[]) ?? [],
+                totalAccountsInJob: pendingAccountIds.length,
               },
             });
+            jobsDispatched++;
           }
         }
       }
+      res.json({ added: true, totalVideos: updatedVideos.length, jobsDispatched });
+      return;
     }
 
-    res.json({ added: true, totalVideos: updatedVideos.length, jobsDispatched: videoIds.length });
+    res.json({ added: true, totalVideos: updatedVideos.length, jobsDispatched: 0 });
   } catch (err) {
     console.error('[Workspace] Queue add error:', err);
     res.status(500).json({ error: 'Ошибка при добавлении в очередь' });

@@ -23,8 +23,8 @@
 
 | Роут | Компонент | Описание |
 |------|-----------|----------|
-| `/auth/login` | `auth/login/page.tsx` | Форма входа (email + пароль). JWT → HttpOnly Cookie |
-| `/auth/register` | `auth/register/page.tsx` | Форма регистрации. Редирект → `/account/dashboard` |
+| `/auth/sign-in` | `auth/sign-in/page.tsx` | Форма входа (email + пароль). JWT → HttpOnly Cookie |
+| `/auth/sign-up` | `auth/sign-up/page.tsx` | Форма регистрации. Редирект → `/account/dashboard` |
 
 ---
 
@@ -92,7 +92,7 @@
 
 ## Зона администратора (`/admin`)
 
-### Runtime (`/admin/runtime`)
+### Runtime (`/account/admin`)
 | Метрика | Источник |
 |---------|----------|
 | PostgreSQL | `SELECT 1` healthcheck |
@@ -100,14 +100,14 @@
 | BullMQ | Active / Waiting / Completed counts |
 | CPU / RAM | `os.cpus()` + `process.memoryUsage()` |
 
-### Users (`/admin/users`)
+### Users (`/account/admin`)
 | Функция | Описание |
 |---------|----------|
 | DataTable | Email, Роль, Аккаунты, max_threads, Статус |
 | Лимиты | Изменение `max_threads_limit` |
 | Soft-Ban | Мгновенная отмена задач + выброс из сессии |
 
-### Firewall (`/admin/firewall`)
+### Firewall (`/account/admin`)
 | Функция | Описание |
 |---------|----------|
 | IP Blacklist | Список заблокированных IP |

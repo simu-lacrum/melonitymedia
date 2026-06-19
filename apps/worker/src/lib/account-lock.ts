@@ -11,12 +11,14 @@
 //
 // Lock key format: account-browser-lock:{accountId}
 // Lock value: job type string (e.g., "warmup", "upload", "login")
-// TTL: 30 minutes (max expected job duration)
+// TTL: 4 hours by default. Uploads, manual checks, captcha waits, and slow
+// platform processing can exceed 30 minutes; too-short locks allow a second
+// browser session to start on the same account while the first is still alive.
 // ─────────────────────────────────────────────────────────────
 
 import Redis from 'ioredis';
 
-const LOCK_TTL_SECONDS = 30 * 60; // 30 minutes
+const LOCK_TTL_SECONDS = Number(process.env.ACCOUNT_LOCK_TTL_SECONDS ?? 4 * 60 * 60);
 const LOCK_PREFIX = 'account-browser-lock:';
 
 let _redis: Redis | null = null;

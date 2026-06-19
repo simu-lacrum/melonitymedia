@@ -46,7 +46,7 @@ describe('detectShadowbanForAccount', () => {
 
     const result = await detectShadowbanForAccount('acc-1');
     expect(result.flagged).toBe(false);
-    expect(prismaMock.video.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.videoPublication.findMany).not.toHaveBeenCalled();
   });
 
   it('returns flagged:false when warmupCompletedAt is null', async () => {
@@ -61,9 +61,9 @@ describe('detectShadowbanForAccount', () => {
 
   it('returns flagged:false when fewer than 3 candidate videos exist', async () => {
     prismaMock.socialAccount.findUniqueOrThrow.mockResolvedValue(baseAccount as any);
-    prismaMock.video.findMany.mockResolvedValue([
-      { id: 'v1', views: 5, uploadedAt: new Date() },
-      { id: 'v2', views: 8, uploadedAt: new Date() },
+    prismaMock.videoPublication.findMany.mockResolvedValue([
+      { id: 'vp1', videoId: 'v1', views: 5, uploadedAt: new Date() },
+      { id: 'vp2', videoId: 'v2', views: 8, uploadedAt: new Date() },
     ] as any);
 
     const result = await detectShadowbanForAccount('acc-1');
@@ -73,10 +73,10 @@ describe('detectShadowbanForAccount', () => {
 
   it('returns flagged:false when any video has >= 100 views', async () => {
     prismaMock.socialAccount.findUniqueOrThrow.mockResolvedValue(baseAccount as any);
-    prismaMock.video.findMany.mockResolvedValue([
-      { id: 'v1', views: 5, uploadedAt: new Date() },
-      { id: 'v2', views: 150, uploadedAt: new Date() },
-      { id: 'v3', views: 8, uploadedAt: new Date() },
+    prismaMock.videoPublication.findMany.mockResolvedValue([
+      { id: 'vp1', videoId: 'v1', views: 5, uploadedAt: new Date() },
+      { id: 'vp2', videoId: 'v2', views: 150, uploadedAt: new Date() },
+      { id: 'vp3', videoId: 'v3', views: 8, uploadedAt: new Date() },
     ] as any);
 
     const result = await detectShadowbanForAccount('acc-1');
@@ -86,10 +86,10 @@ describe('detectShadowbanForAccount', () => {
 
   it('flags account and cancels PENDING upload tasks when 3 consecutive low-view videos exist', async () => {
     prismaMock.socialAccount.findUniqueOrThrow.mockResolvedValue(baseAccount as any);
-    prismaMock.video.findMany.mockResolvedValue([
-      { id: 'v1', views: 5, uploadedAt: new Date() },
-      { id: 'v2', views: 12, uploadedAt: new Date() },
-      { id: 'v3', views: 3, uploadedAt: new Date() },
+    prismaMock.videoPublication.findMany.mockResolvedValue([
+      { id: 'vp1', videoId: 'v1', views: 5, uploadedAt: new Date() },
+      { id: 'vp2', videoId: 'v2', views: 12, uploadedAt: new Date() },
+      { id: 'vp3', videoId: 'v3', views: 3, uploadedAt: new Date() },
     ] as any);
     prismaMock.socialAccount.update.mockResolvedValue({} as any);
     prismaMock.task.updateMany.mockResolvedValue({ count: 2 } as any);
@@ -112,11 +112,11 @@ describe('detectShadowbanForAccount', () => {
 
   it('uses 24h age gate — fresh videos must NOT be queried', async () => {
     prismaMock.socialAccount.findUniqueOrThrow.mockResolvedValue(baseAccount as any);
-    prismaMock.video.findMany.mockResolvedValue([] as any);
+    prismaMock.videoPublication.findMany.mockResolvedValue([] as any);
 
     await detectShadowbanForAccount('acc-1');
 
-    const findManyCall = prismaMock.video.findMany.mock.calls[0][0]!;
+    const findManyCall = prismaMock.videoPublication.findMany.mock.calls[0][0]!;
     const where = findManyCall.where as any;
     expect(where.uploadedAt).toHaveProperty('lte');
     expect(where.uploadedAt).toHaveProperty('gte');

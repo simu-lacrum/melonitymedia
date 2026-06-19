@@ -145,7 +145,7 @@ router.post('/', async (req: Request, res: Response) => {
         password: password || null,
         address,
         label: name || null,
-        type: type ?? (isRotating ? 'LTE_MOBILE' : 'STATIC_RESIDENTIAL'),
+        type: type ?? 'LTE_MOBILE',
         isRotating,
         rotationLink: rotationLink || null,
         rotationCooldown: rotationCooldown ?? 900,
@@ -337,18 +337,41 @@ router.post('/:id/test', async (req: Request, res: Response) => {
   }
 });
 
+const importProxySchema = z.object({
+  mode: z.enum(['manual', 'proxys_io']).default('manual'),
+  data: z.string().optional(),
+  raw: z.string().optional(),
+  apiKey: z.string().optional(),
+  type: z.enum(['LTE_MOBILE', 'STATIC_RESIDENTIAL']).default('LTE_MOBILE'),
+  country: z.string().optional(),
+  carrier: z.string().optional(),
+  rotationLink: z.string().url().optional().or(z.literal('')),
+  rotationCooldown: z.number().int().min(60).max(3600).optional(),
+}).refine(d => d.mode !== 'manual' || d.data || d.raw, {
+  message: 'Data is required for manual import',
+});
+
 // ── POST /import — bulk import and proxys.io sync ─────────────
 router.post('/import', async (req: Request, res: Response) => {
   try {
-    const { mode, data, apiKey, type = 'STATIC_RESIDENTIAL' } = req.body;
+    const parsed = importProxySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.errors[0].message });
+      return;
+    }
+
+    const { mode, data, raw, apiKey, type, country, carrier, rotationLink, rotationCooldown } = parsed.data;
+    const importText = data || raw || '';
     let added = 0;
+    let skipped = 0;
+    const ids: string[] = [];
 
     if (mode === 'manual') {
-      if (!data || typeof data !== 'string') {
+      if (!importText || typeof importText !== 'string') {
         res.status(400).json({ error: 'Data is required for manual import' });
         return;
       }
-      const lines = data.split('\n').map(l => l.trim()).filter(Boolean);
+      const lines = importText.split('\n').map(l => l.trim()).filter(Boolean);
       for (const line of lines) {
         // expect ip:port:user:pass or host:port
         const parts = line.split(':');
@@ -363,9 +386,12 @@ router.post('/import', async (req: Request, res: Response) => {
         const existingProxy = await prisma.proxy.findFirst({
           where: { host, port, userId: req.user!.id },
         });
-        if (existingProxy) continue;
+        if (existingProxy) {
+          skipped++;
+          continue;
+        }
 
-        await prisma.proxy.create({
+        const proxy = await prisma.proxy.create({
           data: {
             userId: req.user!.id,
             host,
@@ -374,8 +400,14 @@ router.post('/import', async (req: Request, res: Response) => {
             password,
             address: composeAddress(host, port, username || undefined, password || undefined),
             type,
+            isRotating: !!rotationLink,
+            rotationLink: rotationLink || null,
+            rotationCooldown: rotationCooldown ?? 900,
+            country: country ?? 'US',
+            carrier: carrier || null,
           },
         });
+        ids.push(proxy.id);
         added++;
       }
     } else if (mode === 'proxys_io') {
@@ -414,9 +446,12 @@ router.post('/import', async (req: Request, res: Response) => {
          const existingProxy = await prisma.proxy.findFirst({
            where: { host, port, userId: req.user!.id },
          });
-         if (existingProxy) continue;
+         if (existingProxy) {
+           skipped++;
+           continue;
+         }
 
-         await prisma.proxy.create({
+         const proxy = await prisma.proxy.create({
            data: {
              userId: req.user!.id,
              host,
@@ -428,6 +463,7 @@ router.post('/import', async (req: Request, res: Response) => {
              label: `Proxys.io #${p.id || host}`,
            }
          });
+         ids.push(proxy.id);
          added++;
       }
     } else {
@@ -435,7 +471,7 @@ router.post('/import', async (req: Request, res: Response) => {
       return;
     }
 
-    res.json({ added });
+    res.json({ added, created: added, skipped, ids });
   } catch (err) {
     console.error('[Proxies] Import error:', err);
     res.status(500).json({ error: 'Import failed' });
@@ -517,7 +553,22 @@ router.post('/import/provider', async (req: Request, res: Response) => {
     }
 
     const created: string[] = [];
+    let skipped = 0;
     for (const p of proxies) {
+      const existing = await prisma.proxy.findFirst({
+        where: {
+          userId: req.user!.id,
+          OR: [
+            { host: p.host, port: p.port },
+            { provider, providerExternalId: p.externalId },
+          ],
+        },
+      });
+      if (existing) {
+        skipped++;
+        continue;
+      }
+
       const proxy = await prisma.proxy.create({
         data: {
           userId: req.user!.id,
@@ -530,7 +581,7 @@ router.post('/import/provider', async (req: Request, res: Response) => {
           port: p.port,
           username: p.username ?? null,
           password: p.password ?? null,
-          address: `${p.host}:${p.port}` + (p.username ? `:${p.username}:${p.password}` : ''),
+          address: composeAddress(p.host, p.port, p.username, p.password),
           type: 'LTE_MOBILE',
           isRotating: true,
           carrier: p.carrier ?? null,
@@ -541,7 +592,7 @@ router.post('/import/provider', async (req: Request, res: Response) => {
       created.push(proxy.id);
     }
 
-    res.status(201).json({ created: created.length, ids: created });
+    res.status(201).json({ created: created.length, skipped, ids: created });
   } catch (err) {
     console.error('[Proxies] Provider import error:', err);
     res.status(500).json({ error: 'Ошибка при импорте прокси от провайдера' });

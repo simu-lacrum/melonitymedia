@@ -17,7 +17,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Search, Plus, Trash2, RefreshCw, MoreVertical, Loader2, Shield, KeyRound, RotateCcw, Clock, AlertCircle } from "lucide-react"
-import { api, ApiError } from "@/lib/api"
+import { api, ApiError, getApiOrigin } from "@/lib/api"
 import { toast } from "sonner"
 import { io, Socket } from "socket.io-client"
 
@@ -143,7 +143,7 @@ export default function AccountsPage() {
   // Socket.io connection for login verification events
   React.useEffect(() => {
     const socket: Socket = io(
-      `${process.env.NEXT_PUBLIC_API_URL || ""}/logs`,
+      `${getApiOrigin()}/logs`,
       { withCredentials: true, transports: ["websocket", "polling"] }
     )
 
@@ -974,4 +974,3 @@ function timeAgo(dateStr: string): string {
   if (hours < 24) return `${hours} ч назад`
   return `${Math.floor(hours / 24)} дн назад`
 }
-

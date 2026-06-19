@@ -52,15 +52,14 @@ MelonityMedia/
 | Путь | Описание |
 |------|----------|
 | `src/app/page.tsx` | Landing page (публичная) |
-| `src/app/auth/login/page.tsx` | Страница входа |
-| `src/app/auth/register/page.tsx` | Страница регистрации |
+| `src/app/auth/sign-in/page.tsx` | Страница входа |
+| `src/app/auth/sign-up/page.tsx` | Страница регистрации |
 | `src/app/account/dashboard/page.tsx` | Дашборд аналитики (Recharts) |
-| `src/app/account/profiles/page.tsx` | База аккаунтов + массовые действия + cookie import |
+| `src/app/account/accounts/page.tsx` | База аккаунтов + массовые действия + cookie import |
 | `src/app/account/workspace/page.tsx` | Загрузчик + 4 вкладки + Live Terminal |
 | `src/app/account/proxies/page.tsx` | Управление прокси (type/carrier/rotation cooldown) |
-| `src/app/admin/runtime/page.tsx` | Здоровье системы |
-| `src/app/admin/users/page.tsx` | Управление пользователями |
-| `src/app/admin/firewall/page.tsx` | IP Blacklist |
+| `src/app/account/admin/page.tsx` | Здоровье системы и управление пользователями |
+| `src/app/account/admin/page.tsx` | IP Blacklist |
 | `src/app/globals.css` | Дизайн-токены, анимации, Tailwind config |
 | `src/components/ui/` | 11 переиспользуемых компонентов |
 | `src/components/layout/` | Header, Sidebar |

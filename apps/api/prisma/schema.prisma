@@ -45,6 +45,7 @@ model User {
   proxies      Proxy[]
   tasks        Task[]
   videos       Video[]
+  videoPublications VideoPublication[]
   banners      Banner[]
   presets      Preset[]
   auditLogs      AuditLog[]
@@ -116,6 +117,7 @@ model SocialAccount {
   user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   pinnedProxy Proxy? @relation(fields: [pinnedProxyId], references: [id], onDelete: SetNull)
   videos Video[]
+  videoPublications VideoPublication[]
   dailySnapshots DailySnapshot[]
 
   @@index([userId])
@@ -247,6 +249,7 @@ model Video {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   account SocialAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  publications VideoPublication[]
 
   @@index([userId])
   @@index([userId, isUploaded])
@@ -258,6 +261,43 @@ enum VideoStatus {
   PROCESSING
   UPLOADED
   FAILED
+}
+
+// ── Video Publication ───────────────────────────────────────
+// Per-account publication history for a source video.
+// A single uploaded source file may be published to many accounts; this
+// table is the source of truth for per-account rate limits, shadowban checks,
+// idempotency, and cleanup decisions.
+model VideoPublication {
+  id          String                 @id @default(cuid())
+  userId      String
+  videoId     String
+  accountId   String
+  taskId      String?
+  status      VideoPublicationStatus @default(QUEUED)
+  uploadedAt  DateTime?
+  views       Int                    @default(0)
+  error       String?
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video   Video         @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  account SocialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([videoId, accountId])
+  @@index([userId])
+  @@index([accountId, uploadedAt])
+  @@index([videoId, status])
+  @@index([taskId])
+}
+
+enum VideoPublicationStatus {
+  QUEUED
+  PROCESSING
+  UPLOADED
+  FAILED
+  SKIPPED
 }
 
 // ── Banner ──────────────────────────────────────────────────

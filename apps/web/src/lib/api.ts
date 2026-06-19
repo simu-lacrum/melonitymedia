@@ -1,7 +1,13 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? (
+  process.env.NODE_ENV === 'production' ? '' : 'http://localhost:4000'
+);
+
+export function getApiOrigin() {
+  return API_BASE.replace(/\/api\/?$/, '');
+}
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(`${API_BASE}${path}`, {
     method,
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include', // CRITICAL for JWT cookie

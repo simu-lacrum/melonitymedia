@@ -6,6 +6,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { io, Socket } from 'socket.io-client';
+import { getApiOrigin } from './api';
 
 export interface LogLine {
   id: string;
@@ -37,9 +38,7 @@ export function ensureConnected() {
     return;
   }
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-  const origin = apiUrl.replace(/\/api\/?$/, '') || apiUrl;
-  socket = io(`${origin}/logs`, {
+  socket = io(`${getApiOrigin()}/logs`, {
     withCredentials: true,
     transports: ['websocket'],
     reconnection: true,

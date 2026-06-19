@@ -17,7 +17,7 @@ export function Header({ user, onMenuToggle }: HeaderProps) {
 
   const handleLogout = async () => {
     await api.post('/api/auth/logout');
-    window.location.href = '/auth/login';
+    window.location.href = '/auth/sign-in';
   };
 
   return (

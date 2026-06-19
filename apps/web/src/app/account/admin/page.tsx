@@ -123,7 +123,7 @@ export default function AdminPage() {
 
   const handleUnblockIp = async (ip: string) => {
     try {
-      await api.delete("/api/admin/firewall", { ip })
+      await api.post("/api/admin/firewall/unblock", { ip })
       toast.success(`IP ${ip} разблокирован`)
       loadAll()
     } catch { toast.error("Ошибка разблокировки IP") }

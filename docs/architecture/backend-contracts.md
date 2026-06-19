@@ -517,7 +517,8 @@ interface ShadowbanCheckPayload {
 //
 // ALGORITHM:
 //   1. Skip if account.status !== "ALIVE" OR warmupCompletedAt is null.
-//   2. Fetch the most recent N videos that satisfy BOTH:
+//   2. Fetch the most recent N VideoPublication rows that satisfy ALL:
+//        - status = "UPLOADED"
 //        - uploadedAt <= now - 24h    (CRITICAL: 24h post-publish gate;
 //                                       TikTok ramps distribution over hours)
 //        - uploadedAt >= now - 14d    (older videos aren't representative)
@@ -533,7 +534,7 @@ interface ShadowbanCheckPayload {
 //   criterion and prematurely flag the account, blocking its entire queue.
 //
 // RECOVERY (manual):
-//   Owner reviews the flagged account in /account/profiles, decides whether to:
+//   Owner reviews the flagged account in /account/accounts, decides whether to:
 //     (a) pause uploads 7+ days then resume with organic content, OR
 //     (b) discard the account.
 //   Status reverts to ALIVE only via manual user action — never automatically.
@@ -742,7 +743,7 @@ interface AccountFingerprint {
 A `FingerprintInconsistencyError` is thrown on the first violation —
 generation aborts; load aborts with a worker-level log so the operator
 can decide to regenerate (allowed only for accounts that have never
-published — see UI warning in `/account/profiles`).
+published — see UI warning in `/account/accounts`).
 
 **Why this matters:** rotating or randomising fingerprint per session is
 the #1 cause of TikTok shadowban in 2026. A stable, internally consistent
@@ -789,5 +790,5 @@ Pinning policy: один аккаунт = один прокси на 14+ дне�
 ```
 
 **Frontend handling:**
-- В `/account/profiles` при попытке bulk-bind показывается modal с человекочитаемой причиной из `error.message` и кнопкой «Override (admin only)» если у текущего юзера `role === ADMIN`.
+- В `/account/accounts` при попытке bulk-bind показывается modal с человекочитаемой причиной из `error.message` и кнопкой «Override (admin only)» если у текущего юзера `role === ADMIN`.
 - В `/account/proxies` при добавлении нового прокси индикатор `bgpPathValid: false` рисует ⚠️ жёлтый бейдж.

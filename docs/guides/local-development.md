@@ -71,6 +71,15 @@ melonitymedia-redis-1   Up (healthy)        0.0.0.0:6380->6379/tcp
 > Host-порты настраиваются через `PORT_DB` и `PORT_REDIS` в `.env` (по умолчанию 5433 и 6380).
 > Внутри Docker-сети сервисы всегда используют стандартные порты (5432, 6379).
 
+Если API/worker запускаются **вне Docker** на хосте, используйте host URLs:
+
+```env
+DATABASE_URL=postgresql://melonity:melonity@localhost:5433/melonitymedia
+REDIS_URL=redis://:changeme_redis@localhost:6380
+NEXT_PUBLIC_API_URL=http://localhost:4000
+WORKER_API_URL=http://localhost:4000
+```
+
 ## 3. Установка зависимостей
 
 ```bash
@@ -128,7 +137,7 @@ npm run dev
 Регистрация владельца панели и первый прогон end-to-end:
 
 1. Откройте http://localhost:3000
-2. Зарегистрируйтесь через `/auth/register` — это **владелец панели MelonityMedia**, не TikTok-аккаунт.
+2. Зарегистрируйтесь через `/auth/sign-up` — это **владелец панели MelonityMedia**, не TikTok-аккаунт.
 3. После авторизации вы попадёте на `/account/dashboard`.
 
 ### Полный first-run путь (~30 минут)
@@ -156,18 +165,18 @@ npm run dev
 1. Установите расширение Cookie-Editor / EditThisCookie в обычный Chrome.
 2. Залогиньтесь вручную в TikTok с **того же региона**, что и купленный прокси (если прокси US — VPN/RDP в US, иначе TikTok сразу выставит challenge).
 3. Экспортируйте cookies → `JSON` или `Netscape .txt`.
-4. В панели: `/account/profiles` → **«Импорт аккаунтов»** → перетащите файл cookies в DropZone.
+4. В панели: `/account/accounts` → **«Импорт аккаунтов»** → перетащите файл cookies в DropZone.
 5. Дождитесь сообщения «Аккаунт импортирован, fingerprint сгенерирован». Cookies моментально шифруются AES-256-GCM перед записью в БД.
 
 ### 6.3. Привязка прокси к аккаунту (14-day pin)
 
-1. В таблице `/account/profiles` выберите аккаунт чекбоксом.
+1. В таблице `/account/accounts` выберите аккаунт чекбоксом.
 2. **Bulk Actions** → **«Привязать прокси»** → выберите тот, что добавили в 6.1.
 3. После привязки `proxyPinnedAt = now()`. Менять прокси у этого аккаунта в течение 14 дней нельзя без `force=true` (см. `backend-contracts.md` → Carrier Stability Rule).
 
 ### 6.4. Прогрев аккаунта (обязательно перед первым заливом)
 
-1. В таблице `/account/profiles` выберите аккаунт → **«Запустить прогрев»**.
+1. В таблице `/account/accounts` выберите аккаунт → **«Запустить прогрев»**.
 2. Статус сменится на `WARMING_UP`. Worker автоматически запустит 10-day curriculum:
    - Day 1-3: passive FYP scroll
    - Day 4-6: light engagement (likes, 1 comment)

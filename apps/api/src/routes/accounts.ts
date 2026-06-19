@@ -52,8 +52,8 @@ router.post('/:id/regenerate-fingerprint', async (req: Request, res: Response) =
     // GUARD: only allow fingerprint regen on accounts that haven't published yet.
     // Changing fingerprint on a published account resets TikTok's identity correlation
     // and triggers shadowban almost certainly.
-    const publishedCount = await prisma.video.count({
-      where: { accountId: account.id, isUploaded: true },
+    const publishedCount = await prisma.videoPublication.count({
+      where: { accountId: account.id, status: 'UPLOADED' },
     });
     if (publishedCount > 0 && req.query.force !== 'true') {
       res.status(409).json({
@@ -136,7 +136,7 @@ router.get('/', async (req: Request, res: Response) => {
         pinnedProxy: {
           select: { id: true, host: true, port: true, address: true, label: true, type: true, carrier: true, country: true },
         },
-        _count: { select: { videos: { where: { isUploaded: true } } } },
+        _count: { select: { videoPublications: { where: { status: 'UPLOADED' } } } },
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
@@ -160,7 +160,7 @@ router.get('/', async (req: Request, res: Response) => {
       return {
         ...a,
         login: a.username ?? a.nickname ?? null,
-        videos: a._count.videos,
+        videos: a._count.videoPublications,
         platform: a.platform,
         // strip secrets — never expose any of these
         cookiesEncrypted: undefined,
@@ -312,15 +312,45 @@ router.post('/import', async (req: Request, res: Response) => {
     // Resolve geo + device class from proxy so fingerprint matches proxy location & type
     let proxyGeo: { country?: string; city?: string } | undefined;
     let proxyIsMobile = false;
+    let proxyRecord: {
+      id: string;
+      country: string;
+      dma: string | null;
+      carrier: string | null;
+      type: 'LTE_MOBILE' | 'STATIC_RESIDENTIAL' | 'DATACENTER_DEPRECATED';
+    } | null = null;
     if (proxyId) {
-      const proxyRecord = await prisma.proxy.findFirst({
+      proxyRecord = await prisma.proxy.findFirst({
         where: { id: proxyId, userId: req.user!.id },
-        select: { country: true, dma: true, type: true },
+        select: { id: true, country: true, dma: true, carrier: true, type: true },
       });
-      if (proxyRecord) {
-        proxyGeo = { country: proxyRecord.country ?? undefined, city: proxyRecord.dma ?? undefined };
-        proxyIsMobile = proxyRecord.type === 'LTE_MOBILE';
+      if (!proxyRecord) {
+        res.status(404).json({ error: 'Прокси не найден' });
+        return;
       }
+
+      const violation = validatePinChange({
+        account: {
+          id: 'new-import-account',
+          platform,
+          pinnedProxyId: null,
+          proxyPinnedAt: null,
+          createdAt: new Date(),
+        },
+        oldProxy: null,
+        newProxy: proxyRecord,
+      });
+      if (violation) {
+        res.status(409).json({
+          success: false,
+          error: violation.message,
+          code: violation.code,
+        });
+        return;
+      }
+
+      proxyGeo = { country: proxyRecord.country ?? undefined, city: proxyRecord.dma ?? undefined };
+      proxyIsMobile = proxyRecord.type === 'LTE_MOBILE';
     }
 
     for (let i = 0; i < entries.length; i++) {
@@ -337,6 +367,8 @@ router.post('/import', async (req: Request, res: Response) => {
           platform: platform as 'TIKTOK' | 'YOUTUBE',
           username: entry.login ?? null,
           status: 'VERIFYING',
+          pinnedProxyId: proxyRecord?.id ?? null,
+          proxyPinnedAt: proxyRecord ? new Date() : null,
         };
 
         // Track import mode for login job dispatch
@@ -414,23 +446,6 @@ router.post('/import', async (req: Request, res: Response) => {
         failed.push({ line: i + 1, reason });
       }
     }
-    // Auto-bind proxy to imported accounts if proxyId was specified
-    if (proxyId && created.length > 0) {
-      try {
-        const proxy = await prisma.proxy.findFirst({
-          where: { id: proxyId, userId: req.user!.id },
-        });
-        if (proxy) {
-          await prisma.socialAccount.updateMany({
-            where: { id: { in: created }, userId: req.user!.id },
-            data: { pinnedProxyId: proxyId, proxyPinnedAt: new Date() },
-          });
-        }
-      } catch (bindErr) {
-        console.error('[Accounts] Proxy auto-bind error:', bindErr);
-      }
-    }
-
     res.status(202).json({
       created: created.length,
       failed: failed.length,

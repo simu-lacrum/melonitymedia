@@ -11,7 +11,11 @@
 
 import { io, Socket } from 'socket.io-client';
 
-const API_URL = process.env.CORS_ORIGIN || 'http://localhost:4000';
+const API_URL =
+  process.env.WORKER_API_URL ||
+  process.env.API_INTERNAL_URL ||
+  process.env.API_URL ||
+  'http://localhost:4000';
 
 export class SocketLogger {
   private socket: Socket | null = null;

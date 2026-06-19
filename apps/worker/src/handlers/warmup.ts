@@ -158,12 +158,12 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     }
     lockAcquired = true;
 
-    // Check account status — skip BANNED/PAUSED accounts
+    // Check account status — skip unsafe states before every self-rescheduled session.
     const accStatus = await prisma.socialAccount.findUnique({
       where: { id: data.accountId },
       select: { status: true },
     });
-    if (accStatus && ['BANNED', 'SHADOWBANNED', 'PAUSED'].includes(accStatus.status)) {
+    if (accStatus && ['BANNED', 'SHADOWBAN_SUSPECTED', 'PAUSED'].includes(accStatus.status)) {
       logger.warn(`⏭️ Пропускаю прогрев — аккаунт ${accStatus.status}`);
       throw new Error(`Account ${data.accountId} is ${accStatus.status}`);
     }

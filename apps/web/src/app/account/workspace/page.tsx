@@ -67,20 +67,24 @@ interface UploadConfig {
 const DEFAULT_CONFIGS = {
   WARMUP: {
     mode: "WARMUP", warmupMode: "DAYS", concurrency: 3, warmupDays: 10, warmupHours: 2, useRotation: true,
-    headless: true, hashtags: ["dota2", "dota2highlights"],
+    headless: false, hashtags: [],
   } as WarmupConfig,
   COOKIES: {
-    mode: "COOKIES", concurrency: 5, headless: true,
+    mode: "COOKIES", concurrency: 5, headless: false,
   } as CookiesConfig,
   EDIT_PROFILE: {
-    mode: "EDIT_PROFILE", concurrency: 3, headless: true,
+    mode: "EDIT_PROFILE", concurrency: 3, headless: false,
     bio: "", nickname: "", avatarUrl: "",
   } as EditProfileConfig,
   UPLOAD: {
-    mode: "UPLOAD", concurrency: 3, headless: true, videoId: "",
+    mode: "UPLOAD", concurrency: 3, headless: false, videoId: "",
     title: "", description: "", hashtags: [], scheduleAt: "", bannerId: "",
   } as UploadConfig,
 }
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? (
+  process.env.NODE_ENV === "production" ? "" : "http://localhost:4000"
+)
 
 interface VideoFile {
   id: string
@@ -220,7 +224,7 @@ export default function WorkspacePage() {
       await api.post("/api/workspace/launch", {
         type: mode,
         accountIds: Array.from(selectedAccountIds),
-        applyToAll: selectedAccountIds.size === accounts.length,
+        applyToAll: false,
         config,
         threads: concurrency,
         delayMin: 2000,
@@ -269,7 +273,7 @@ export default function WorkspacePage() {
       const formData = new FormData()
       formData.append("video", file)
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"}/api/workspace/upload`,
+        `${API_BASE}/api/workspace/upload`,
         { method: "POST", body: formData, credentials: "include" }
       )
       if (!res.ok) throw new Error("Upload failed")
@@ -292,7 +296,7 @@ export default function WorkspacePage() {
       const formData = new FormData()
       formData.append("banner", file)
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"}/api/workspace/upload-banner`,
+        `${API_BASE}/api/workspace/upload-banner`,
         { method: "POST", body: formData, credentials: "include" }
       )
       if (!res.ok) throw new Error("Banner upload failed")
@@ -315,7 +319,7 @@ export default function WorkspacePage() {
       const formData = new FormData()
       formData.append("avatar", file)
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"}/api/workspace/upload-avatar`,
+        `${API_BASE}/api/workspace/upload-avatar`,
         { method: "POST", body: formData, credentials: "include" }
       )
       if (!res.ok) throw new Error("Avatar upload failed")
@@ -332,7 +336,7 @@ export default function WorkspacePage() {
   const handleDeleteBanner = async (bannerId: string) => {
     try {
       await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"}/api/workspace/banner/${bannerId}`,
+        `${API_BASE}/api/workspace/banner/${bannerId}`,
         { method: "DELETE", credentials: "include" }
       )
       setBanners(banners.filter(b => b.id !== bannerId))
@@ -425,13 +429,6 @@ export default function WorkspacePage() {
                 />
                 <Label htmlFor="warmup-rotation" className="mb-0 cursor-pointer text-sm">Ротация IP</Label>
               </div>
-              <div className="flex items-center gap-2">
-                <Checkbox id="warmup-headless"
-                  checked={warmup.headless}
-                  onCheckedChange={(v) => setWarmup({ ...warmup, headless: !!v })}
-                />
-                <Label htmlFor="warmup-headless" className="mb-0 cursor-pointer text-sm">Headless</Label>
-              </div>
             </div>
             {renderHashtags(warmup.hashtags, "warmup")}
           </div>
@@ -446,13 +443,6 @@ export default function WorkspacePage() {
                 value={cookies.concurrency}
                 onChange={e => setCookies({ ...cookies, concurrency: parseInt(e.target.value) || 1 })}
               />
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox id="cookies-headless"
-                checked={cookies.headless}
-                onCheckedChange={(v) => setCookies({ ...cookies, headless: !!v })}
-              />
-              <Label htmlFor="cookies-headless" className="mb-0 cursor-pointer text-sm">Headless режим</Label>
             </div>
             <Alert>
               <AlertDescription className="text-sm text-muted-foreground">
@@ -513,13 +503,6 @@ export default function WorkspacePage() {
                   </Button>
                 </div>
               )}
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox id="edit-headless"
-                checked={editProfile.headless}
-                onCheckedChange={(v) => setEditProfile({ ...editProfile, headless: !!v })}
-              />
-              <Label htmlFor="edit-headless" className="mb-0 cursor-pointer text-sm">Headless режим</Label>
             </div>
           </div>
         )
@@ -648,13 +631,6 @@ export default function WorkspacePage() {
               />
             </div>
             {renderHashtags(upload.hashtags, "upload")}
-            <div className="flex items-center gap-2">
-              <Checkbox id="upload-headless"
-                checked={upload.headless}
-                onCheckedChange={(v) => setUpload({ ...upload, headless: !!v })}
-              />
-              <Label htmlFor="upload-headless" className="mb-0 cursor-pointer text-sm">Headless режим</Label>
-            </div>
           </div>
         )
 
