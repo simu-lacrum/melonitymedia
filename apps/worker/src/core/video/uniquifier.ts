@@ -11,7 +11,7 @@
 // with deterministic transforms seeded by accountId.
 //
 // Transforms applied:
-// - Pixel shift (crop + pad by 1-3px)
+// - Pixel shift (crop + pad by 2-4px)
 // - Brightness/contrast adjustment (±2-5%)
 // - Audio pitch shift (±2%)
 // - Trim first/last 0.1-0.5s
@@ -36,6 +36,8 @@ export interface UniquifyOptions {
   accountId: string;
   /** Source video path */
   inputPath: string;
+  /** Stable logical source key for retries when inputPath is a temp file */
+  seedKey?: string;
   /** Output directory (default: /tmp/uniquified/) */
   outputDir?: string;
 }
@@ -91,9 +93,11 @@ function seededInt(rng: () => number, min: number, max: number): number {
  * @returns Path to the uniquified video file
  */
 export async function uniquifyVideo(opts: UniquifyOptions): Promise<UniquifyResult> {
-  const { accountId, inputPath, outputDir = '/tmp/uniquified' } = opts;
-  // Seed from accountId + inputPath so different videos get different transforms
-  const rng = createSeededRandom(`${accountId}:${inputPath}`);
+  const { accountId, inputPath, seedKey, outputDir = '/tmp/uniquified' } = opts;
+  // Seed from accountId + a stable logical source so retries use the same transform.
+  // inputPath remains the fallback for direct calls that do not create temp files first.
+  const seedMaterial = seedKey ?? inputPath;
+  const rng = createSeededRandom(`${accountId}:${seedMaterial}`);
   const transforms: string[] = [];
 
   // Ensure output directory exists
@@ -106,8 +110,9 @@ export async function uniquifyVideo(opts: UniquifyOptions): Promise<UniquifyResu
   const filters: string[] = [];
   const audioFilters: string[] = [];
 
-  // 1. Pixel shift — crop by 1-3px from random edges, pad back
-  const cropPx = seededInt(rng, 1, 3);
+  // 1. Pixel shift — crop by an even 2-4px from random edges, pad back.
+  // yuv420p/libx264 need even dimensions; odd crop values can shrink output.
+  const cropPx = seededInt(rng, 1, 2) * 2;
   const cropSide = seededInt(rng, 0, 3); // 0=top, 1=right, 2=bottom, 3=left
   const cropMap = [
     `crop=iw:ih-${cropPx}:0:${cropPx},pad=iw:ih+${cropPx}:0:0`,       // top
@@ -173,12 +178,14 @@ export async function uniquifyVideo(opts: UniquifyOptions): Promise<UniquifyResu
     '-flags:a', '+bitexact',
     // Encoding — re-encode for pixel-level differences
     '-c:v', 'libx264',
-    '-preset', 'ultrafast',
+    '-preset', 'veryfast',
     '-crf', '23',
+    '-pix_fmt', 'yuv420p',
     '-c:a', 'aac',
     '-b:a', '128k',
     // Trim from end using calculated effective duration
     '-t', effectiveDuration.toFixed(3),
+    '-movflags', '+faststart',
     outputPath,
   ];
 

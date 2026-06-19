@@ -411,6 +411,8 @@ router.post('/launch', async (req: Request, res: Response) => {
         const cfg = normalizedConfig as Record<string, unknown>;
         const videoId = cfg.videoId as string | undefined;
         if (!videoId) throw new Error("UPLOAD requires config.videoId");
+        const rawBannerId = typeof cfg.bannerId === 'string' ? cfg.bannerId.trim() : '';
+        const bannerId = rawBannerId && rawBannerId !== 'none' ? rawBannerId : undefined;
 
         const video = await prisma.video.findFirstOrThrow({
           where: { id: videoId, userId: req.user!.id },
@@ -423,7 +425,7 @@ router.post('/launch', async (req: Request, res: Response) => {
           title: (cfg.title as string) || video.originalName,
           description: (cfg.description as string) || video.description || "",
           hashtags: (cfg.hashtags as string[]) ?? video.hashtags ?? [],
-          bannerId: (cfg.bannerId as string) || undefined,
+          bannerId,
           bannerPath: undefined as string | undefined,
         };
       }
@@ -445,7 +447,16 @@ router.post('/launch', async (req: Request, res: Response) => {
           where: { id: bannerId, userId: req.user!.id },
           select: { filepath: true },
         });
-        if (banner) resolvedBannerPath = banner.filepath;
+        if (!banner || !fs.existsSync(banner.filepath)) {
+          const error = 'Выбранный баннер не найден или файл удалён';
+          await prisma.task.update({
+            where: { id: task.id },
+            data: { status: 'FAILED', error, completedAt: new Date() },
+          });
+          res.status(400).json({ error });
+          return;
+        }
+        resolvedBannerPath = banner.filepath;
       }
 
       const videoId = (baseExtra as Record<string, unknown>).videoId as string | undefined;
@@ -856,6 +867,21 @@ router.post('/queue', async (req: Request, res: Response) => {
     const currentConfig = task.config as Record<string, unknown>;
     const currentVideos = (currentConfig.videoIds as string[]) || [];
     const updatedVideos = [...currentVideos, ...videoIds];
+    const rawBannerId = typeof currentConfig.bannerId === 'string' ? currentConfig.bannerId.trim() : '';
+    const queueBannerId = rawBannerId && rawBannerId !== 'none' ? rawBannerId : undefined;
+    let queueBannerPath: string | undefined;
+
+    if (task.type === 'UPLOAD' && queueBannerId) {
+      const banner = await prisma.banner.findFirst({
+        where: { id: queueBannerId, userId: req.user!.id },
+        select: { filepath: true },
+      });
+      if (!banner || !fs.existsSync(banner.filepath)) {
+        res.status(400).json({ error: 'Выбранный баннер не найден или файл удалён' });
+        return;
+      }
+      queueBannerPath = banner.filepath;
+    }
 
     await prisma.task.update({
       where: { id: taskId },
@@ -915,6 +941,7 @@ router.post('/queue', async (req: Request, res: Response) => {
                 title: video.originalName,
                 description: video.description ?? '',
                 hashtags: (video.hashtags as string[]) ?? [],
+                bannerPath: queueBannerPath,
                 totalAccountsInJob: pendingAccountIds.length,
               },
             });

@@ -225,7 +225,11 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
     // so each account gets a unique copy of the bannered video.
     let videoToUpload: string = data.videoPath;
 
-    if (data.bannerPath && fs.existsSync(data.bannerPath)) {
+    if (data.bannerPath) {
+      if (!fs.existsSync(data.bannerPath)) {
+        throw new Error(`Баннер выбран, но файл не найден: ${data.bannerPath}`);
+      }
+
       logger.info('Наложение баннера на видео (FFmpeg overlay)...');
       const { outputPath: bannered, position } = await applyBannerOverlay({
         inputPath: videoToUpload,
@@ -245,6 +249,7 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
     const { outputPath } = await uniquifyVideo({
       accountId: data.accountId,
       inputPath: videoToUpload,
+      seedKey: `${data.videoId}:${data.bannerPath ?? 'no-banner'}`,
     });
     uniquifiedPath = outputPath;
     videoToUpload = outputPath;

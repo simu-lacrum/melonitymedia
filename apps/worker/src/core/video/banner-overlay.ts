@@ -54,6 +54,12 @@ const SAFE_BOTTOM = 0.18;
 // Banner width relative to video width (>1.0 = extends past edges)
 const BANNER_WIDTH_RATIO = 1.15;
 
+// MP4 banners often use a pure black background instead of an alpha channel.
+// Keep the threshold conservative so dark UI elements inside the banner survive.
+const BLACK_KEY_COLOR = '0x000000';
+const BLACK_KEY_SIMILARITY = 0.10;
+const BLACK_KEY_BLEND = 0.05;
+
 // ── Helpers ─────────────────────────────────────────────────
 
 /**
@@ -140,14 +146,14 @@ export async function applyBannerOverlay(
 
   // Build filter_complex
   // If banner has alpha → preserve transparency via yuva420p
-  // If banner has no alpha → overlay directly with its own background
+  // If banner has no alpha → key out the pure black background first.
   const bannerFilter = hasAlpha
     ? `[1:v]scale=${scaledW}:${scaledH},format=yuva420p[ban]`
-    : `[1:v]scale=${scaledW}:${scaledH}[ban]`;
+    : `[1:v]scale=${scaledW}:${scaledH},format=rgba,colorkey=${BLACK_KEY_COLOR}:${BLACK_KEY_SIMILARITY}:${BLACK_KEY_BLEND}[ban]`;
 
   const filterComplex = [
     bannerFilter,
-    `[0:v][ban]overlay=${overlayX}:${overlayY}:shortest=1`,
+    `[0:v][ban]overlay=${overlayX}:${overlayY}:shortest=1:format=auto`,
   ].join(';');
 
   // Ensure output directory exists
@@ -166,7 +172,7 @@ export async function applyBannerOverlay(
     '-map', '0:a?',                     // audio from main video only (? = optional)
     '-c:a', 'copy',                     // copy audio codec (no re-encode)
     '-c:v', 'libx264',
-    '-preset', 'ultrafast',
+    '-preset', 'veryfast',
     '-crf', '23',
     '-pix_fmt', 'yuv420p',             // ensure compatibility
     '-t', durationSec.toFixed(3),       // exact duration of main video
