@@ -95,10 +95,23 @@ function decryptField(encrypted: Buffer, iv: Buffer, authTag: Buffer): string {
   return out.toString('utf8');
 }
 
+async function abortIfRateLimited(result: any, accountId: string, logger: SocketLogger) {
+  if (result.rateLimited) {
+    const errMsg = result.rateLimitMessage || 'Слишком много попыток входа. Попробуйте позже.';
+    await safeUpdateAccount(accountId, { status: 'AUTH_NEEDED', lastError: errMsg });
+    emitStatusChange(logger, accountId, 'AUTH_NEEDED', errMsg);
+    emitLoginEvent(logger, accountId, 'login:failed', {
+      code: 'RATE_LIMITED',
+      message: errMsg,
+    });
+    throw new LoginError('RATE_LIMITED', errMsg);
+  }
+}
+
 // ── 2FA type detection ──────────────────────────────────────
 type TwoFAType = 'email' | 'sms' | 'authenticator' | 'number_match' | 'phone_prompt' | 'unknown';
 
-async function detect2FAType(page: any, platform: 'TIKTOK' | 'YOUTUBE'): Promise<{ has2FA: boolean; type: TwoFAType; hint: string; challengeNumber?: string }> {
+async function detect2FAType(page: any, platform: 'TIKTOK' | 'YOUTUBE'): Promise<{ has2FA: boolean; type: TwoFAType; hint: string; challengeNumber?: string; rateLimited?: boolean; rateLimitMessage?: string }> {
   if (platform === 'TIKTOK') {
     const currentUrl = page.url();
     const bodyText = await page.textContent('body') || '';
@@ -113,12 +126,8 @@ async function detect2FAType(page: any, platform: 'TIKTOK' | 'YOUTUBE'): Promise
       '[data-e2e*="error"], [data-e2e*="rate"], ' +
       'p:visible, span:visible, div[role="alert"]'
     ).allTextContents().then((texts: string[]) => texts.join(' ')).catch(() => '');
-    if (/maximum.*attempts|too many.*attempts|слишком.*попыток|повторите.*позже/i.test(visibleRateLimitText)) {
-      // Still on the login form = rate-limited, not 2FA
-      const hasLoginForm = await page.locator('input[name="username"], input[placeholder*="Email"], input[placeholder*="email"]').count();
-      if (hasLoginForm > 0) {
-        return { has2FA: false, type: 'unknown', hint: '' };
-      }
+    if (/maximum.*attempts|too many.*attempts|слишком.*попыток|повторите.*позже|you.*too.*fast|слишком.*часто/i.test(visibleRateLimitText)) {
+      return { has2FA: false, type: 'unknown', hint: '', rateLimited: true, rateLimitMessage: 'Слишком много попыток. TikTok заблокировал вход — попробуйте позже.' };
     }
 
     // Check 1: code input field present (classic 2FA)
@@ -560,12 +569,12 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
         ).allTextContents().catch(() => [] as string[]);
         const rateLimitText = (rateLimitElements as string[]).join(' ');
         // More specific regex — removed "try again later" (too generic, triggers on page boilerplate)
-        if (/maximum.*attempts|too many.*attempts|слишком.*попыток|повторите.*позже/i.test(rateLimitText)) {
+        if (/maximum.*attempts|too many.*attempts|слишком.*попыток|повторите.*позже|you.*too.*fast|слишком.*часто/i.test(rateLimitText)) {
           // Only treat as rate-limit if we're still on login form
           const onLoginForm = await page.locator('input[name="username"], input[type="password"]').count();
           if (onLoginForm > 0) {
             // Debug: log matched text and capture screenshot
-            const matched = rateLimitText.match(/maximum.*attempts|too many.*attempts|слишком.*попыток|повторите.*позже/i);
+            const matched = rateLimitText.match(/maximum.*attempts|too many.*attempts|слишком.*попыток|повторите.*позже|you.*too.*fast|слишком.*часто/i);
             logger.info(`[RATE_LIMIT_DEBUG] Matched text: "${matched?.[0]}" | URL: ${page.url()} | onLoginForm: ${onLoginForm}`);
             try {
               const screenshotPath = `/tmp/rate-limit-${data.accountId}-${Date.now()}.png`;
@@ -590,6 +599,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
       // TikTok's verification page body text can contain words like "неверный"
       // in unrelated UI elements, causing false "wrong password" detection.
       const earlyFA = await detect2FAType(page, ctx.platform);
+      await abortIfRateLimited(earlyFA, data.accountId, logger);
       if (!earlyFA.has2FA) {
         // Only check for password errors if NOT on a verification page
         // Use specific error selectors instead of full body text to avoid false positives
@@ -895,6 +905,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
 
     // ── 2FA Detection ──────────────────────────────────────
     const twoFA = await detect2FAType(page, ctx.platform);
+    await abortIfRateLimited(twoFA, data.accountId, logger);
 
     if (twoFA.has2FA) {
       logger.warn(`🔒 ${twoFA.hint}`);
@@ -1097,6 +1108,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
       if (isVerificationPage) {
         // Re-run 2FA detection — the page might now have a code input
         const lateFA = await detect2FAType(page, ctx.platform);
+        await abortIfRateLimited(lateFA, data.accountId, logger);
         if (lateFA.has2FA) {
           logger.warn(`🔒 Обнаружена верификация (после redirect timeout): ${lateFA.hint}`);
           emitLoginEvent(logger, data.accountId, 'login:2fa_required', {

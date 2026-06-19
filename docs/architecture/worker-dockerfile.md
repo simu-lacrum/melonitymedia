@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y wget gnupg ca-certificates && \
     echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-linux.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google.list && \
     apt-get update && apt-get install -y \
         google-chrome-stable \
-        xvfb libxi6 libgconf-2-4 fonts-liberation \
+        xvfb x11vnc novnc websockify libxi6 libgconf-2-4 fonts-liberation \
         libnss3 libatk-bridge2.0-0 libdrm2 libgbm1 libasound2 \
         ffmpeg whois
 ```
@@ -36,6 +36,8 @@ RUN apt-get update && apt-get install -y wget gnupg ca-certificates && \
 |-------|-------|
 | `google-chrome-stable` | Patchright подключается к нему через CDP |
 | `xvfb` | Виртуальный дисплей для headless: false (Patchright не поддерживает headless для TikTok) |
+| `x11vnc` | VNC-сервер для ручного прохождения капчи/2FA (v0.4.0) |
+| `novnc`, `websockify` | Web-клиент VNC, транслирующий порт 5900 в 6080 (WebSocket) (v0.4.0) |
 | `libnss3` | Chrome не запустится без NSS (Network Security Services) |
 | `libatk-bridge2.0-0` | Accessibility bridge — требуется Chrome |
 | `libdrm2`, `libgbm1` | GPU абстракция — без них Chrome падает с `[ERROR:gpu_init.cc]` |
@@ -94,22 +96,28 @@ if (k.length !== 32) {
 "
 
 # ── 2. Virtual display for Patchright headless: false ────
+rm -f /tmp/.X99-lock  # Cleanup stale Xvfb lock
 Xvfb :99 -screen 0 1920x1080x24 -ac +extension RANDR &
 export DISPLAY=:99
 sleep 1
 
-# ── 3. Log Chrome version (fingerprint pinning baseline) ─
+# ── 3. Start VNC and noVNC (Manual Bypass) ───────────────
+x11vnc -display :99 -nopw -xkb -forever &
+websockify --web /usr/share/novnc/ 6080 localhost:5900 &
+
+# ── 4. Log Chrome version (fingerprint pinning baseline) ─
 google-chrome --version
 
-# ── 4. Start worker ──────────────────────────────────────
+# ── 5. Start worker ──────────────────────────────────────
 exec node dist/index.js
 ```
 
 **Порядок критичен:**
 1. `MASTER_KEY` проверяется ДО запуска Xvfb — не тратим ресурсы при невалидном ключе
-2. Xvfb стартует в фоне с разрешением 1920×1080 (покрывает все fingerprint viewport'ы)
-3. Chrome version логируется для отладки fingerprint stale ситуаций
-4. `exec` заменяет bash на node — сигналы (SIGTERM) доходят до Node.js напрямую
+2. Xvfb стартует в фоне с разрешением 1920×1080 (покрывает все fingerprint viewport'ы). Предварительно удаляем stale lock файл `rm -f /tmp/.X99-lock`.
+3. Стартует x11vnc и noVNC (websockify) для обеспечения ручного обхода капч пользователем.
+4. Chrome version логируется для отладки fingerprint stale ситуаций
+5. `exec` заменяет bash на node — сигналы (SIGTERM) доходят до Node.js напрямую
 
 ---
 
@@ -126,7 +134,10 @@ exec node dist/index.js
 
 ## Порты
 
-Worker **не открывает** внешних портов. Всё взаимодействие через:
+- **6080** — noVNC (Web-доступ к экрану браузера для прохождения ручной капчи/2FA).
+- **5900** — VNC (Опционально для десктопных VNC клиентов).
+
+В остальном Worker **не открывает** внешних портов для API взаимодействия. Всё взаимодействие идёт через:
 - **BullMQ** (Redis) — получение задач
 - **Prisma** (PostgreSQL) — чтение/запись данных
 - **Socket.io** (подключение к API серверу) — отправка логов
