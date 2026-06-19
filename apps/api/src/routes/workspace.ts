@@ -85,6 +85,7 @@ async function reconcileTaskStatuses(userId: string) {
       config: true,
       bullmqJobId: true,
       error: true,
+      createdAt: true,
     },
   });
 
@@ -93,7 +94,20 @@ async function reconcileTaskStatuses(userId: string) {
     if (!queue) return;
 
     const jobIds = collectTaskJobIds(task);
-    if (jobIds.length === 0) return;
+    if (jobIds.length === 0) {
+      const ageMs = Date.now() - new Date(task.createdAt).getTime();
+      if (ageMs < 10 * 60_000) return;
+
+      await prisma.task.update({
+        where: { id: task.id },
+        data: {
+          status: 'FAILED',
+          error: task.error ?? 'No worker job was created for this task',
+          completedAt: new Date(),
+        },
+      });
+      return;
+    }
 
     const states = await Promise.all(jobIds.map(async (jobId) => {
       const job = await queue.getJob(jobId);
