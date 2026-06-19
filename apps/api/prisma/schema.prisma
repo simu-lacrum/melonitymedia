@@ -48,6 +48,7 @@ model User {
   videoPublications VideoPublication[]
   banners      Banner[]
   presets      Preset[]
+  vncSessions  VncSession[]
   auditLogs      AuditLog[]
   dailySnapshots DailySnapshot[]
 }
@@ -119,6 +120,7 @@ model SocialAccount {
   videos Video[]
   videoPublications VideoPublication[]
   dailySnapshots DailySnapshot[]
+  vncSessions VncSession[]
 
   @@index([userId])
   @@index([userId, platform])
@@ -336,6 +338,7 @@ model Task {
   createdAt   DateTime   @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vncSessions VncSession[]
 
   @@index([userId])
   @@index([userId, status])
@@ -359,6 +362,36 @@ enum TaskStatus {
   COMPLETED
   FAILED
   CANCELLED
+}
+
+model VncSession {
+  id        String           @id @default(cuid())
+  userId    String
+  taskId    String
+  accountId String
+  jobId     String
+  display   Int
+  vncPort   Int
+  webPort   Int
+  password  String
+  status    VncSessionStatus @default(ACTIVE)
+  startedAt DateTime         @default(now())
+  endedAt   DateTime?
+  updatedAt DateTime         @updatedAt
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task    Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  account SocialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, jobId])
+  @@index([userId, status])
+  @@index([taskId, status])
+  @@index([accountId])
+}
+
+enum VncSessionStatus {
+  ACTIVE
+  CLOSED
 }
 
 // ── Preset ──────────────────────────────────────────────────

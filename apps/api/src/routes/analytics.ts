@@ -5,6 +5,7 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { sanitizeTaskConfig } from '../lib/task-sanitize.js';
 
 const router = Router();
 router.use(authMiddleware);
@@ -120,7 +121,12 @@ router.get('/active-tasks', async (req: Request, res: Response) => {
       take: 10,
     });
 
-    res.json({ tasks });
+    res.json({
+      tasks: tasks.map(task => ({
+        ...task,
+        config: sanitizeTaskConfig(task.config),
+      })),
+    });
   } catch (err) {
     console.error('[Analytics] Active tasks error:', err);
     res.status(500).json({ error: 'Ошибка при загрузке задач' });

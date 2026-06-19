@@ -33,6 +33,7 @@ import http from 'http';
 
 interface EditProfileJobData {
   userId: string;
+  taskId?: string;
   accountId: string;
   cookiesDir?: string;
   changes: {
@@ -153,6 +154,9 @@ export async function editProfileHandler(job: Job<EditProfileJobData>): Promise<
 
     ctx = await launchStealthContext({
       accountId: data.accountId,
+      taskId: data.taskId,
+      jobId: job.id,
+      jobType: 'edit-profile',
       proxyUrl: ctxAcc.proxyUrl,
       cookiesPath: data.cookiesDir ?? '/data/cookies',
       fingerprint: ctxAcc.fingerprint,

@@ -354,6 +354,20 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
 // Response 200
 {
   success: true,
+  tasks: Array<{
+    id: string,
+    type: string,
+    status: string,
+    vncSessions: Array<{
+      id: string,
+      jobId: string,
+      accountId: string,
+      accountLabel: string,
+      platform: 'TIKTOK' | 'YOUTUBE',
+      status: 'ACTIVE',
+      monitorUrl: string
+    }>
+  }>,
   data: {
     active: Job[],
     waiting: Job[],

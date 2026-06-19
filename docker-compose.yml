@@ -60,6 +60,8 @@ services:
       dockerfile: apps/api/Dockerfile
     restart: unless-stopped
     env_file: .env
+    environment:
+      - VNC_WORKER_HOST=${VNC_WORKER_HOST:-worker}
     depends_on:
       db:
         condition: service_healthy
@@ -97,10 +99,6 @@ services:
     environment:
       - VNC_PASSWORD=${VNC_PASSWORD:-melonity}
       - WORKER_API_URL=${WORKER_API_URL:-http://api:4000}
-      - VNC_PUBLIC_HOST=${VNC_PUBLIC_HOST:-localhost}
-      - VNC_PUBLIC_PROTOCOL=${VNC_PUBLIC_PROTOCOL:-http}
-    ports:
-      - "6000-6020:6000-6020"
     depends_on:
       db:
         condition: service_healthy

@@ -254,6 +254,9 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
     logger.info('Запуск Patchright (stealth Chrome)...');
     ctx = await launchStealthContext({
       accountId: data.accountId,
+      taskId: data.taskId,
+      jobId: job.id,
+      jobType: 'upload',
       proxyUrl,
       cookiesPath: data.cookiesDir ?? '/data/cookies',
       fingerprint,

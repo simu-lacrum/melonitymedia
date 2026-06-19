@@ -28,6 +28,7 @@ import type { Browser } from 'patchright';
 
 interface AnalyticsJobData {
   userId: string;
+  taskId?: string;
   accountId: string;
   cookiesDir?: string;
   secUid?: string;
@@ -133,6 +134,9 @@ export async function analyticsHandler(job: Job<any>): Promise<ProfileStats | { 
     // This ensures identical fingerprint, proxy, and cookie injection
     const stealth = await launchStealthContext({
       accountId: data.accountId,
+      taskId: data.taskId,
+      jobId: job.id,
+      jobType: 'analytics',
       proxyUrl,
       cookiesPath: data.cookiesDir ?? '/data/cookies',
       fingerprint,

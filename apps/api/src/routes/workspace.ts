@@ -26,6 +26,8 @@ import {
 } from '../lib/bullmq.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { authRateLimit } from '../middleware/rate-limit.js';
+import { buildNoVncClientUrl, getOwnedVncSession, proxyNoVncHttp } from '../lib/vnc-proxy.js';
+import { buildTaskMonitorUrl, sanitizeTaskConfig } from '../lib/task-sanitize.js';
 
 const router = Router();
 router.use(authMiddleware);
@@ -65,6 +67,15 @@ function collectTaskJobIds(task: {
   }
 
   return [...jobIds];
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // ── Multer Setup ────────────────────────────────────────────
@@ -487,10 +498,77 @@ router.post('/launch', async (req: Request, res: Response) => {
   }
 });
 
-// GET /jobs — list recent tasks for the current user
+// GET /jobs/:taskId/monitor/:jobId - owner-scoped noVNC monitor page
+router.get('/jobs/:taskId/monitor/:jobId', async (req: Request, res: Response) => {
+  try {
+    const taskId = req.params.taskId as string;
+    const jobId = req.params.jobId as string;
+    const session = await getOwnedVncSession(req.user!.id, taskId, jobId);
+
+    if (!session) {
+      res.status(404).json({ error: 'Monitor not found' });
+      return;
+    }
+
+    const noVncUrl = buildNoVncClientUrl(taskId, jobId, session.password);
+    if (req.query.embed === '1') {
+      res.redirect(noVncUrl);
+      return;
+    }
+
+    res.type('html').send(`<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VNC Monitor</title>
+  <style>
+    html, body { margin: 0; width: 100%; height: 100%; background: #050505; color: #f4f4f5; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .shell { display: grid; grid-template-rows: auto 1fr; width: 100%; height: 100%; }
+    .bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 0 14px; border-bottom: 1px solid #27272a; background: #09090b; }
+    .title { min-width: 0; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .status { font-size: 12px; color: #a1a1aa; white-space: nowrap; }
+    iframe { width: 100%; height: 100%; border: 0; background: #000; }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <div class="bar">
+      <div class="title">VNC Monitor</div>
+      <div class="status">Task ${escapeHtml(taskId.slice(0, 8))} - Job ${escapeHtml(jobId.slice(0, 8))}</div>
+    </div>
+    <iframe src="${escapeHtml(noVncUrl)}" allow="clipboard-read; clipboard-write; fullscreen; pointer-lock"></iframe>
+  </main>
+</body>
+</html>`);
+  } catch (err) {
+    console.error('[Workspace] VNC monitor error:', err);
+    res.status(500).json({ error: 'Monitor is unavailable' });
+  }
+});
+
+router.use('/jobs/:taskId/vnc/:jobId', async (req: Request, res: Response) => {
+  try {
+    const taskId = req.params.taskId as string;
+    const jobId = req.params.jobId as string;
+    const session = await getOwnedVncSession(req.user!.id, taskId, jobId);
+
+    if (!session) {
+      res.status(404).json({ error: 'Monitor not found' });
+      return;
+    }
+
+    await proxyNoVncHttp(req, res, session.webPort, req.url || '/vnc.html');
+  } catch (err) {
+    console.error('[Workspace] VNC proxy error:', err);
+    res.status(500).json({ error: 'Monitor is unavailable' });
+  }
+});
+
+// GET /jobs - list recent tasks for the current user
 router.get('/jobs', async (req: Request, res: Response) => {
   try {
-    const tasks = await prisma.task.findMany({
+    const rawTasks = await prisma.task.findMany({
       where: { userId: req.user!.id },
       orderBy: { createdAt: 'desc' },
       take: 100,
@@ -507,8 +585,46 @@ router.get('/jobs', async (req: Request, res: Response) => {
         startedAt: true,
         completedAt: true,
         createdAt: true,
+        vncSessions: {
+          where: { status: 'ACTIVE' },
+          orderBy: { startedAt: 'desc' },
+          select: {
+            id: true,
+            jobId: true,
+            accountId: true,
+            status: true,
+            startedAt: true,
+            updatedAt: true,
+            account: {
+              select: {
+                username: true,
+                nickname: true,
+                platform: true,
+              },
+            },
+          },
+        },
       },
     });
+
+    const tasks = rawTasks.map(task => ({
+      ...task,
+      config: sanitizeTaskConfig(task.config),
+      vncSessions: task.vncSessions.map(session => ({
+        id: session.id,
+        jobId: session.jobId,
+        accountId: session.accountId,
+        status: session.status,
+        startedAt: session.startedAt,
+        updatedAt: session.updatedAt,
+        monitorUrl: buildTaskMonitorUrl(task.id, session.jobId),
+        accountLabel:
+          session.account.username ||
+          session.account.nickname ||
+          session.accountId.slice(0, 8),
+        platform: session.account.platform,
+      })),
+    }));
 
     const active = tasks.filter(t => t.status === 'RUNNING');
     const waiting = tasks.filter(t => t.status === 'PENDING');

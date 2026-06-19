@@ -107,7 +107,7 @@ graph TB
         PG[("PostgreSQL 16")]
         RD[("Redis 7")]
         XVFB[Xvfb Virtual Display]
-        VNC[noVNC :5900/:6080]
+        VNC[API-gated noVNC monitors]
     end
 
     Client -->|HTTP/WS| API
@@ -563,6 +563,7 @@ graph LR
 | `POST` | `/api/workspace/presets` | Сохранить пресет |
 | `GET` | `/api/workspace/cookies/export` | Скачать cookies аккаунтов (JSON) |
 | `GET` | `/api/workspace/jobs` | Список задач |
+| `GET` | `/api/workspace/jobs/:taskId/monitor/:jobId` | Авторизованный VNC-монитор задачи |
 | `DELETE` | `/api/workspace/jobs/:id` | Отмена задачи |
 
 ### Администрирование

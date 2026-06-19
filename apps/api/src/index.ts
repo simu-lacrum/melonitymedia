@@ -23,6 +23,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { createSocketServer } from './lib/socket.js';
+import { attachVncWebSocketProxy } from './lib/vnc-proxy.js';
 import { firewallMiddleware } from './middleware/firewall.js';
 import { apiRateLimit } from './middleware/rate-limit.js';
 
@@ -80,6 +81,7 @@ const httpServer = createServer(app);
 // Attach Socket.io to the same HTTP server
 // This allows real-time log streaming to the frontend
 const io = createSocketServer(httpServer);
+attachVncWebSocketProxy(httpServer);
 
 // Make Socket.io accessible in route handlers for emitting events
 app.set('io', io);

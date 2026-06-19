@@ -32,6 +32,7 @@ import type { GhostCursor } from 'ghost-cursor';
 
 interface WarmupJobData {
   userId: string;
+  taskId?: string;
   accountId: string;          // only field needed; the rest comes from the DB
   cookiesDir?: string;
   /** Optional override of warmupDay for replays; normally derived from warmupStartedAt */
@@ -208,6 +209,9 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
 
     const ctx = await launchStealthContext({
       accountId: data.accountId,
+      taskId: data.taskId,
+      jobId: job.id,
+      jobType: 'warmup',
       proxyUrl: ctxAcc.proxyUrl,
       cookiesPath: data.cookiesDir ?? '/data/cookies',
       fingerprint: ctxAcc.fingerprint,

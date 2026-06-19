@@ -32,6 +32,12 @@ import fs from 'fs';
 export interface LaunchOptions {
   /** Account ID for cookie/fingerprint lookup */
   accountId: string;
+  /** Parent workspace task id, used to scope the VNC monitor */
+  taskId?: string;
+  /** BullMQ job id, used to separate concurrent monitors under one task */
+  jobId?: string;
+  /** Human-readable queue/job type for diagnostics */
+  jobType?: string;
   /** Proxy URL: http://user:pass@host:port */
   proxyUrl?: string;
   /** Path to encrypted cookie store */
@@ -48,7 +54,10 @@ export interface StealthContext {
   vncUrl?: string;
 }
 
-async function getFreePortAndDisplay(): Promise<{ display: number; vncPort: number; webPort: number }> {
+type DisplayConfig = { display: number; vncPort: number; webPort: number };
+type VncSessionIdentity = { taskId: string; jobId: string };
+
+async function getFreePortAndDisplay(): Promise<DisplayConfig> {
   for (let webPort = 6000; webPort <= 6020; webPort++) {
     try {
       // Check if webPort is free
@@ -83,7 +92,21 @@ async function getFreePortAndDisplay(): Promise<{ display: number; vncPort: numb
   throw new Error('No free ports/displays available for VNC');
 }
 
-function buildVncUrl(webPort: number): string {
+function getVncSessionIdentity(opts: LaunchOptions): VncSessionIdentity | null {
+  if (!opts.taskId || !opts.jobId) return null;
+  return { taskId: opts.taskId, jobId: opts.jobId };
+}
+
+function createVncPassword(): string {
+  return crypto.randomBytes(12).toString('base64url').slice(0, 8);
+}
+
+function buildVncUrl(webPort: number, opts: LaunchOptions): string {
+  const identity = getVncSessionIdentity(opts);
+  if (identity) {
+    return `/api/workspace/jobs/${encodeURIComponent(identity.taskId)}/monitor/${encodeURIComponent(identity.jobId)}`;
+  }
+
   const template = process.env.VNC_PUBLIC_URL_TEMPLATE;
   if (template) {
     return template.replace(/\{port\}/g, String(webPort));
@@ -92,6 +115,69 @@ function buildVncUrl(webPort: number): string {
   const host = process.env.VNC_PUBLIC_HOST || process.env.PUBLIC_HOST || 'localhost';
   const protocol = process.env.VNC_PUBLIC_PROTOCOL || 'http';
   return `${protocol}://${host}:${webPort}/vnc.html`;
+}
+
+async function registerVncSession(
+  opts: LaunchOptions,
+  displayConfig: DisplayConfig,
+  password: string | null,
+): Promise<void> {
+  const identity = getVncSessionIdentity(opts);
+  if (!identity || !password) return;
+
+  const account = await prisma.socialAccount.findUnique({
+    where: { id: opts.accountId },
+    select: { userId: true },
+  });
+
+  if (!account) {
+    console.warn(`[Patchright] Cannot register VNC session: account ${opts.accountId} not found`);
+    return;
+  }
+
+  await prisma.vncSession.upsert({
+    where: {
+      taskId_jobId: {
+        taskId: identity.taskId,
+        jobId: identity.jobId,
+      },
+    },
+    create: {
+      userId: account.userId,
+      taskId: identity.taskId,
+      accountId: opts.accountId,
+      jobId: identity.jobId,
+      display: displayConfig.display,
+      vncPort: displayConfig.vncPort,
+      webPort: displayConfig.webPort,
+      password,
+      status: 'ACTIVE',
+    },
+    update: {
+      display: displayConfig.display,
+      vncPort: displayConfig.vncPort,
+      webPort: displayConfig.webPort,
+      password,
+      status: 'ACTIVE',
+      endedAt: null,
+    },
+  });
+}
+
+async function closeVncSession(identity: VncSessionIdentity | null): Promise<void> {
+  if (!identity) return;
+
+  await prisma.vncSession.updateMany({
+    where: {
+      taskId: identity.taskId,
+      jobId: identity.jobId,
+      status: 'ACTIVE',
+    },
+    data: {
+      status: 'CLOSED',
+      endedAt: new Date(),
+    },
+  });
 }
 
 // ── Default Chrome Args ─────────────────────────────────────
@@ -225,8 +311,11 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
   }
 
   // Setup dynamic GUI (Xvfb + VNC)
-  let displayConfig: { display: number; vncPort: number; webPort: number } | null = null;
+  let displayConfig: DisplayConfig | null = null;
   const guiProcesses: ChildProcess[] = [];
+  const vncIdentity = getVncSessionIdentity(opts);
+  const vncPassword = vncIdentity ? createVncPassword() : null;
+  let vncSessionRegistered = false;
   try {
     displayConfig = await getFreePortAndDisplay();
     console.log(`[Patchright] Allocated Display :${displayConfig.display}, VNC port ${displayConfig.vncPort}, noVNC web port ${displayConfig.webPort}`);
@@ -242,7 +331,9 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
 
     // Start x11vnc
     const x11vncArgs = ['-display', `:${displayConfig.display}`, '-forever', '-shared', '-rfbport', displayConfig.vncPort.toString()];
-    if (fs.existsSync(process.env.HOME + '/.vnc/passwd')) {
+    if (vncPassword) {
+      x11vncArgs.push('-passwd', vncPassword);
+    } else if (fs.existsSync(process.env.HOME + '/.vnc/passwd')) {
       x11vncArgs.push('-rfbauth', process.env.HOME + '/.vnc/passwd');
     } else {
       x11vncArgs.push('-nopw');
@@ -253,6 +344,13 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
     // Start websockify
     const websockify = spawn('websockify', ['--web', '/usr/share/novnc', displayConfig.webPort.toString(), `localhost:${displayConfig.vncPort}`], { stdio: 'ignore' });
     guiProcesses.push(websockify);
+
+    try {
+      await registerVncSession(opts, displayConfig, vncPassword);
+      vncSessionRegistered = Boolean(vncIdentity);
+    } catch (err) {
+      console.warn('[Patchright] Failed to register VNC session:', err);
+    }
 
   } catch (e) {
     console.warn(`[Patchright] Failed to start dynamic GUI:`, e);
@@ -266,7 +364,9 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
     env.DISPLAY = `:${displayConfig.display}`;
   }
 
-  const browser = await chromium.launch({
+  let browser: Browser;
+  try {
+    browser = await chromium.launch({
     channel: 'chrome',        // CRITICAL: use system Chrome, not bundled Chromium
     headless: false,           // CRITICAL: TikTok detects headless even patched
     env,
@@ -275,7 +375,16 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
       `--user-agent=${fingerprint.userAgent}`,
     ],
     proxy: proxyConfig,
-  });
+    });
+  } catch (err) {
+    for (const p of guiProcesses) {
+      try { p.kill(); } catch (e) {}
+    }
+    await closeVncSession(vncIdentity).catch(closeErr => {
+      console.warn('[Patchright] Failed to close VNC session after launch error:', closeErr);
+    });
+    throw err;
+  }
 
   // Cleanup GUI processes when browser closes
   browser.on('disconnected', () => {
@@ -283,6 +392,9 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
     for (const p of guiProcesses) {
       try { p.kill(); } catch (e) {}
     }
+    void closeVncSession(vncIdentity).catch(err => {
+      console.warn('[Patchright] Failed to close VNC session:', err);
+    });
   });
 
   const isMobileDevice = fingerprint.deviceClass === 'mobile';
@@ -319,12 +431,14 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
   // Apply fingerprint overrides via CDP (canvas, WebGL, hardware, etc.)
   await applyFingerprint(page, fingerprint);
 
+  const shouldExposeVncUrl = Boolean(displayConfig && (!vncIdentity || vncSessionRegistered));
+
   return { 
     browser, 
     context, 
     page,
     vncPort: displayConfig?.webPort,
-    vncUrl: displayConfig ? buildVncUrl(displayConfig.webPort) : undefined
+    vncUrl: shouldExposeVncUrl && displayConfig ? buildVncUrl(displayConfig.webPort, opts) : undefined
   };
 }
 

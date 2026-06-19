@@ -24,6 +24,7 @@ import type { Browser } from 'patchright';
 
 interface CookiesJobData {
   userId: string;
+  taskId?: string;
   accountId: string;
   cookiesDir?: string;
   // platform, fingerprint, proxyUrl are resolved from DB via loadAccountContext()
@@ -53,6 +54,9 @@ export async function cookiesHandler(job: Job<CookiesJobData>): Promise<string> 
     // Launch browser with existing cookies
     const ctx = await launchStealthContext({
       accountId: data.accountId,
+      taskId: data.taskId,
+      jobId: job.id,
+      jobType: 'cookies',
       proxyUrl: ctxAcc.proxyUrl,
       cookiesPath: data.cookiesDir ?? '/data/cookies',
       fingerprint: ctxAcc.fingerprint,

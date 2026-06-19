@@ -52,6 +52,12 @@ describe('dynamic GUI source verification', () => {
     expect(PATCHRIGHT_LAUNCHER).toContain('VNC_PUBLIC_HOST');
     expect(PATCHRIGHT_LAUNCHER).not.toContain('melonitymedia.site');
   });
+
+  it('registers owner-scoped VNC sessions for task monitors', () => {
+    expect(PATCHRIGHT_LAUNCHER).toContain('prisma.vncSession.upsert');
+    expect(PATCHRIGHT_LAUNCHER).toContain('taskId_jobId');
+    expect(PATCHRIGHT_LAUNCHER).toContain('/api/workspace/jobs/');
+  });
 });
 
 describe('docker-compose.yml (BUG 12)', () => {
@@ -61,5 +67,10 @@ describe('docker-compose.yml (BUG 12)', () => {
 
   it('sets shm_size for Chrome stability', () => {
     expect(COMPOSE).toContain('shm_size');
+  });
+
+  it('does not publish VNC monitor ports publicly', () => {
+    expect(COMPOSE).not.toContain('"6000-6020:6000-6020"');
+    expect(COMPOSE).not.toContain("'6000-6020:6000-6020'");
   });
 });

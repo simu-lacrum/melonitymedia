@@ -39,6 +39,7 @@ import type { Browser } from 'patchright';
 
 interface LoginJobData {
   userId: string;
+  taskId?: string;
   accountId: string;
   cookiesDir?: string;
   /** 'credentials' = login:pass flow, 'cookies' = cookie validation only */
@@ -465,6 +466,9 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
     // Launch browser
     const stealth = await launchStealthContext({
       accountId: data.accountId,
+      taskId: data.taskId,
+      jobId: job.id,
+      jobType: 'login',
       proxyUrl: ctx.proxyUrl,
       cookiesPath: data.cookiesDir ?? '/data/cookies',
       fingerprint: ctx.fingerprint,

@@ -14,7 +14,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { LiveTerminal } from "@/components/ui/live-terminal"
-import { Play, Users, Save, Loader2, CheckCircle, AlertCircle, Upload, X, Hash, Settings2, Image, Trash2, RefreshCw, Square } from "lucide-react"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Play, Users, Save, Loader2, CheckCircle, AlertCircle, Upload, X, Hash, Settings2, Image, Trash2, RefreshCw, Square, Monitor, ExternalLink, ChevronLeft, ChevronRight } from "lucide-react"
 import { api, ApiError } from "@/lib/api"
 import { toast } from "sonner"
 
@@ -102,6 +103,18 @@ interface BannerFile {
   size: number
 }
 
+interface WorkspaceVncSession {
+  id: string
+  jobId: string
+  accountId: string
+  status: "ACTIVE" | "CLOSED"
+  startedAt: string
+  updatedAt: string
+  monitorUrl: string
+  accountLabel: string
+  platform: "TIKTOK" | "YOUTUBE"
+}
+
 interface WorkspaceTask {
   id: string
   type: string
@@ -112,6 +125,7 @@ interface WorkspaceTask {
   createdAt: string
   startedAt?: string | null
   completedAt?: string | null
+  vncSessions?: WorkspaceVncSession[]
 }
 
 const TASK_TYPE_LABELS: Record<string, string> = {
@@ -155,6 +169,30 @@ export default function WorkspacePage() {
   const [jobs, setJobs] = React.useState<WorkspaceTask[]>([])
   const [jobsLoading, setJobsLoading] = React.useState(false)
   const [cancellingTaskId, setCancellingTaskId] = React.useState<string | null>(null)
+  const [selectedMonitor, setSelectedMonitor] = React.useState<{
+    task: WorkspaceTask
+    session: WorkspaceVncSession
+  } | null>(null)
+
+  const activeMonitors = React.useMemo(
+    () => jobs.flatMap((task) =>
+      (task.vncSessions || []).map((session) => ({ task, session })),
+    ),
+    [jobs],
+  )
+
+  const selectedMonitorIndex = React.useMemo(() => {
+    if (!selectedMonitor) return -1
+    return activeMonitors.findIndex(({ task, session }) =>
+      task.id === selectedMonitor.task.id && session.id === selectedMonitor.session.id,
+    )
+  }, [activeMonitors, selectedMonitor])
+
+  const openAdjacentMonitor = React.useCallback((direction: -1 | 1) => {
+    if (selectedMonitorIndex === -1) return
+    const next = activeMonitors[selectedMonitorIndex + direction]
+    if (next) setSelectedMonitor(next)
+  }, [activeMonitors, selectedMonitorIndex])
 
   const fetchJobs = React.useCallback(async () => {
     setJobsLoading(true)
@@ -786,6 +824,36 @@ export default function WorkspacePage() {
                       <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${progress}%` }} />
                     </div>
                   )}
+                  {(task.vncSessions?.length || 0) > 0 && (
+                    <div className="mt-3 flex flex-col gap-2">
+                      {task.vncSessions!.map((session) => (
+                        <div key={session.id} className="flex items-center gap-2 rounded-md border border-border bg-muted/30 p-1.5">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="min-w-0 flex-1 justify-start text-xs"
+                            onClick={() => setSelectedMonitor({ task, session })}
+                            title="Открыть монитор"
+                          >
+                            <Monitor className="size-3.5" />
+                            <span className="truncate">{session.accountLabel}</span>
+                            <Badge variant="secondary" className="ml-auto text-[10px]">
+                              {session.platform === "TIKTOK" ? "TT" : "YT"}
+                            </Badge>
+                          </Button>
+                          <a
+                            href={session.monitorUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                            title="Открыть в новой вкладке"
+                          >
+                            <ExternalLink className="size-3.5" />
+                          </a>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {(task.error || task.cancelReason) && (
                     <div className="mt-2 line-clamp-2 text-xs text-muted-foreground">
                       {task.error || task.cancelReason}
@@ -801,6 +869,7 @@ export default function WorkspacePage() {
   }
 
   return (
+    <>
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
@@ -938,5 +1007,66 @@ export default function WorkspacePage() {
         </div>
       </div>
     </motion.div>
+    <Dialog open={!!selectedMonitor} onOpenChange={(open) => { if (!open) setSelectedMonitor(null) }}>
+      <DialogContent className="w-[calc(100vw-2rem)] max-w-[1200px] gap-0 overflow-hidden p-0">
+        <DialogHeader className="border-b px-4 py-3 pr-12">
+          <DialogTitle className="flex items-center gap-2">
+            <Monitor className="size-4" />
+            VNC Monitor
+          </DialogTitle>
+          <DialogDescription className="truncate">
+            {selectedMonitor
+              ? `${TASK_TYPE_LABELS[selectedMonitor.task.type] || selectedMonitor.task.type} - ${selectedMonitor.session.accountLabel}`
+              : ""}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex items-center justify-between gap-2 border-b bg-muted/30 px-4 py-2">
+          <div className="min-w-0 truncate text-xs text-muted-foreground">
+            {selectedMonitor ? selectedMonitor.session.jobId.slice(0, 12) : ""}
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => openAdjacentMonitor(-1)}
+              disabled={selectedMonitorIndex <= 0}
+              title="Предыдущий монитор"
+            >
+              <ChevronLeft className="size-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => openAdjacentMonitor(1)}
+              disabled={selectedMonitorIndex === -1 || selectedMonitorIndex >= activeMonitors.length - 1}
+              title="Следующий монитор"
+            >
+              <ChevronRight className="size-4" />
+            </Button>
+            {selectedMonitor && (
+              <a
+                href={selectedMonitor.session.monitorUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <ExternalLink className="size-3.5" />
+                Открыть
+              </a>
+            )}
+          </div>
+        </div>
+        {selectedMonitor && (
+          <iframe
+            title="VNC monitor"
+            src={`${selectedMonitor.session.monitorUrl}?embed=1`}
+            className="h-[72vh] min-h-[420px] w-full bg-black"
+            allow="clipboard-read; clipboard-write; fullscreen; pointer-lock"
+            sandbox="allow-same-origin allow-scripts allow-forms allow-pointer-lock allow-downloads"
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+    </>
   )
 }
