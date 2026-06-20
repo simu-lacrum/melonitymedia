@@ -23,11 +23,86 @@ import { authMiddleware } from '../middleware/auth.js';
 import crypto from 'crypto';
 import { generateFingerprint, generateMobileFingerprint } from '../lib/fingerprint.js';
 import { publishVerificationCode, publishResendCommand } from '../lib/redis-pubsub.js';
-import { dispatchAccountJob } from '../lib/job-dispatch.js';
+import { dispatchAccountJob, type DispatchedJob } from '../lib/job-dispatch.js';
 import { hasCompletedWarmupMismatch, normalizeWarmupComments, normalizeWarmupDays } from '../lib/warmup-state.js';
 
 const router = Router();
 router.use(authMiddleware);
+
+type LoginMode = 'credentials' | 'cookies';
+type LoginTaskSource = 'account_import' | 'retry_login';
+
+function buildLoginTaskConfig(
+  accountId: string,
+  mode: LoginMode,
+  source: LoginTaskSource,
+  result?: DispatchedJob,
+) {
+  const dispatchedJobs = result
+    ? [{
+        accountId: result.accountId,
+        jobId: result.jobId,
+        ...(result.error ? { error: result.error } : {}),
+      }]
+    : undefined;
+
+  return {
+    mode,
+    source,
+    accountIds: [accountId],
+    threads: 1,
+    ...(dispatchedJobs ? { dispatchedJobs } : {}),
+  };
+}
+
+function loginDispatchErrorMessage(error?: string) {
+  return `Не удалось запустить верификацию входа: ${error || 'unknown error'}`;
+}
+
+async function createLoginMonitorTask(
+  userId: string,
+  accountId: string,
+  mode: LoginMode,
+  source: LoginTaskSource,
+) {
+  return prisma.task.create({
+    data: {
+      userId,
+      type: 'LOGIN',
+      accountId,
+      config: buildLoginTaskConfig(accountId, mode, source),
+    },
+  });
+}
+
+async function finalizeLoginMonitorTask(
+  taskId: string,
+  accountId: string,
+  mode: LoginMode,
+  source: LoginTaskSource,
+  result: DispatchedJob,
+) {
+  const config = buildLoginTaskConfig(accountId, mode, source, result);
+  if (result.jobId) {
+    await prisma.task.update({
+      where: { id: taskId },
+      data: {
+        bullmqJobId: result.jobId,
+        config,
+      },
+    });
+    return;
+  }
+
+  await prisma.task.update({
+    where: { id: taskId },
+    data: {
+      status: 'FAILED',
+      error: loginDispatchErrorMessage(result.error),
+      config,
+    },
+  });
+}
 
 // POST /:id/regenerate-fingerprint
 const regenSchema = z.object({
@@ -452,6 +527,12 @@ router.post('/import', async (req: Request, res: Response) => {
         }
 
         await prisma.socialAccount.create({ data: data_ });
+        const loginTask = await createLoginMonitorTask(
+          req.user!.id,
+          accountId,
+          importMode,
+          'account_import',
+        );
 
         // Dispatch login verification job to worker
         // This runs in background — frontend tracks via Socket.io
@@ -459,8 +540,38 @@ router.post('/import', async (req: Request, res: Response) => {
           queueName: 'login',
           userId: req.user!.id,
           accountId,
-          extra: { mode: importMode },
-        }).catch(err => {
+          extra: { mode: importMode, taskId: loginTask.id },
+        }).then(async (result) => {
+          await finalizeLoginMonitorTask(
+            loginTask.id,
+            accountId,
+            importMode,
+            'account_import',
+            result,
+          );
+
+          if (result.error) {
+            const errMsg = loginDispatchErrorMessage(result.error);
+            await prisma.socialAccount.update({
+              where: { id: accountId },
+              data: { status: 'AUTH_NEEDED', lastError: errMsg },
+            });
+            console.error(`[Accounts] Login dispatch failed for ${accountId}:`, result.error);
+          }
+        }).catch(async (err) => {
+          const error = err?.message ?? String(err);
+          const errMsg = loginDispatchErrorMessage(error);
+          await finalizeLoginMonitorTask(
+            loginTask.id,
+            accountId,
+            importMode,
+            'account_import',
+            { accountId, jobId: null, error },
+          ).catch(() => {});
+          await prisma.socialAccount.update({
+            where: { id: accountId },
+            data: { status: 'AUTH_NEEDED', lastError: errMsg },
+          }).catch(() => {});
           console.error(`[Accounts] Login dispatch failed for ${accountId}:`, err);
         });
         created.push(accountId);
@@ -572,26 +683,55 @@ router.post('/:id/retry-login', async (req: Request, res: Response) => {
       return;
     }
 
+    const previousStatus = account.status;
+
     // Set status back to VERIFYING
     await prisma.socialAccount.update({
       where: { id: account.id },
       data: { status: 'VERIFYING' },
     });
 
+    const loginTask = await createLoginMonitorTask(
+      req.user!.id,
+      account.id,
+      mode,
+      'retry_login',
+    );
+
     // Dispatch login job
     const result = await dispatchAccountJob({
       queueName: 'login',
       userId: req.user!.id,
       accountId: account.id,
-      extra: { mode },
+      extra: { mode, taskId: loginTask.id },
     });
+    await finalizeLoginMonitorTask(
+      loginTask.id,
+      account.id,
+      mode,
+      'retry_login',
+      result,
+    );
 
     if (result.error) {
+      await prisma.socialAccount.update({
+        where: { id: account.id },
+        data: {
+          status: previousStatus,
+          lastError: loginDispatchErrorMessage(result.error),
+        },
+      });
       res.status(400).json({ error: `Не удалось запустить верификацию: ${result.error}` });
       return;
     }
 
-    res.json({ success: true, jobId: result.jobId, message: 'Повторная верификация запущена' });
+    res.json({
+      success: true,
+      jobId: result.jobId,
+      taskId: loginTask.id,
+      workspaceUrl: '/account/workspace',
+      message: 'Повторная верификация запущена',
+    });
   } catch (err) {
     console.error('[Accounts] Retry login error:', err);
     res.status(500).json({ error: 'Ошибка при повторном входе' });

@@ -375,8 +375,12 @@ export default function AccountsPage() {
       if (status === 'BANNED') {
         toast.warning('Аккаунт заблокирован — повторный вход маловероятно поможет')
       }
-      await api.post(`/api/accounts/${id}/retry-login${forceParam}`)
-      toast.success("Повторная верификация запущена")
+      const retry = await api.post<{ taskId?: string; workspaceUrl?: string }>(`/api/accounts/${id}/retry-login${forceParam}`)
+      toast.success(
+        retry.taskId
+          ? "Повторная верификация запущена. Если понадобится ручной контроль, монитор появится в Воркспейсе."
+          : "Повторная верификация запущена"
+      )
       setVerifyErrors(prev => { const n = { ...prev }; delete n[id]; return n })
       fetchAccounts()
     } catch (err) {
@@ -415,7 +419,7 @@ export default function AccountsPage() {
   }
 
   const statusHints: Record<string, string> = {
-    AUTH_NEEDED: "Вход не завершён. Возможно, требуется подтверждение через email/SMS, или данные неверны.",
+    AUTH_NEEDED: "Вход не завершён. Возможно, требуется код email/SMS, подтверждение Google на телефоне, или данные неверны.",
     EXPIRED_COOKIES: "Срок действия cookies истёк. Обновите cookies или переимпортируйте аккаунт.",
     BANNED: "Аккаунт заблокирован TikTok. Попробуйте другой аккаунт.",
     SHADOWBAN_SUSPECTED: "Подозрение на теневой бан. Снизьте активность и подождите 24-48ч.",
@@ -424,7 +428,7 @@ export default function AccountsPage() {
   }
 
   const statusActions: Record<string, string> = {
-    AUTH_NEEDED: "Нажмите «Повторить». Если TikTok просит код — введите его в появившемся окне.",
+    AUTH_NEEDED: "Нажмите «Повторить». Если TikTok/Google просит код или подтверждение на телефоне — следуйте появившемуся окну.",
     EXPIRED_COOKIES: "Импортируйте аккаунт заново с актуальными cookies.",
     BANNED: "Удалите аккаунт и используйте другой.",
     SHADOWBAN_SUSPECTED: "Приостановите публикации на 24-48ч, затем проверьте снова.",

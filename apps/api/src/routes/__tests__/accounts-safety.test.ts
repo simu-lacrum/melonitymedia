@@ -40,4 +40,14 @@ describe('account route safety guards', () => {
     expect(WORKSPACE_SRC).toContain("warmupCompletedAt: null");
     expect(WORKSPACE_SRC).toContain("data: { status: 'RUNNING' }");
   });
+
+  it('creates monitorable LOGIN tasks for account import and retry login', () => {
+    expect(ACCOUNTS_SRC).toContain('createLoginMonitorTask');
+    expect(ACCOUNTS_SRC).toContain("type: 'LOGIN'");
+    expect(ACCOUNTS_SRC).toContain("'account_import'");
+    expect(ACCOUNTS_SRC).toContain("'retry_login'");
+    expect(ACCOUNTS_SRC).toContain("extra: { mode: importMode, taskId: loginTask.id }");
+    expect(ACCOUNTS_SRC).toContain("extra: { mode, taskId: loginTask.id }");
+    expect(ACCOUNTS_SRC).toContain("workspaceUrl: '/account/workspace'");
+  });
 });

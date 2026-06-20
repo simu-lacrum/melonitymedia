@@ -24,4 +24,19 @@ describe('account UI safety copy', () => {
     expect(WORKSPACE_PAGE_SRC).toContain('откроет заливы');
     expect(WORKSPACE_PAGE_SRC).toContain('рискованнее');
   });
+
+  it('shows Google/TikTok verification flows in the account 2FA dialog', () => {
+    expect(ACCOUNTS_PAGE_SRC).toContain('login:2fa_required');
+    expect(ACCOUNTS_PAGE_SRC).toContain('phone_prompt');
+    expect(ACCOUNTS_PAGE_SRC).toContain('number_match');
+    expect(ACCOUNTS_PAGE_SRC).toContain('challengeNumber');
+    expect(ACCOUNTS_PAGE_SRC).toContain('TikTok/Google');
+  });
+
+  it('exposes VNC monitor controls for active workspace jobs', () => {
+    expect(WORKSPACE_PAGE_SRC).toContain('vncSessions');
+    expect(WORKSPACE_PAGE_SRC).toContain('monitorUrl');
+    expect(WORKSPACE_PAGE_SRC).toContain('VNC Monitor');
+    expect(WORKSPACE_PAGE_SRC).toContain('title="VNC monitor"');
+  });
 });
