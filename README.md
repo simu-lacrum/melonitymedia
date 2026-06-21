@@ -609,7 +609,7 @@ graph LR
 | **Cookie Export Audit** | `/workspace/cookies/export` логирует `[AUDIT]` с userId, email и количеством cookies |
 | **Fingerprint Consistency** | 7 правил валидации: OS↔platform, GPU↔OS, screen≥viewport, locale↔timezone, hardware bounds, Chrome version pinning, touch coherence |
 | **Auto Fingerprint Device Class** | Mobile/desktop device class определяется автоматически по типу прокси (LTE_MOBILE → mobile, Residential → desktop) |
-| **Carrier Stability Rule** | 14-day proxy pin window, immutable country, LTE-only для всех аккаунтов младше 30 дней |
+| **Proxy Start Rule** | Любая job требует привязанный прокси; `LTE_MOBILE` и `STATIC_RESIDENTIAL` оба разрешены, страна операций immutable |
 | **Shadowban 24h Gate** | Детекция shadowban только по видео старше 24ч (предотвращение ложных срабатываний) |
 | **No Secrets in Response** | Encrypted cookies никогда не отправляются на фронтенд, `address` field stripped, API key в Authorization header |
 | **Cross-Tenant Proxy Guard** | Worker proxy lookup scoped by `userId` — User A не может использовать rotation key User B |

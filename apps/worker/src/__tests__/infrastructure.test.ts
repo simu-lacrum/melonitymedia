@@ -87,6 +87,12 @@ describe('dynamic GUI source verification', () => {
     expect(PATCHRIGHT_LAUNCHER).toContain('empty cookie jar after disk cache and DB fallback');
     expect(PATCHRIGHT_LAUNCHER).not.toContain('Continue without cookies');
   });
+
+  it('refuses to launch browser jobs without a pinned proxy', () => {
+    expect(PATCHRIGHT_LAUNCHER).toContain('no pinned proxy');
+    expect(PATCHRIGHT_LAUNCHER).toContain('LTE_MOBILE or STATIC_RESIDENTIAL');
+    expect(PATCHRIGHT_LAUNCHER).not.toContain('using direct connection');
+  });
 });
 
 describe('task state truthfulness', () => {

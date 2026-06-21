@@ -114,19 +114,8 @@ export async function dispatchAccountJob(args: {
     }
   }
 
-  if (!account.pinnedProxy && args.queueName !== 'login') {
+  if (!account.pinnedProxy) {
     return { accountId: args.accountId, jobId: null, error: "NO_PROXY" };
-  }
-
-  if (account.pinnedProxy) {
-    const accountAgeDays = (Date.now() - account.createdAt.getTime()) / 86_400_000;
-    if (accountAgeDays < 30 && account.pinnedProxy.type !== 'LTE_MOBILE') {
-      return {
-        accountId: args.accountId,
-        jobId: null,
-        error: 'PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT',
-      };
-    }
   }
 
   if (!account.fingerprint && args.queueName !== 'login') {

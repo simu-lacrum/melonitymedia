@@ -43,7 +43,7 @@ MelonityMedia/
 | `src/lib/bullmq.ts` | Фабрика BullMQ очередей |
 | `src/lib/cron-scheduler.ts` | **Cron планировщик** — регистрирует BullMQ repeatable jobs при старте API: analytics-cron (6ч), shadowban-check (12ч) |
 | `prisma/schema.prisma` | Схема БД v3: User, SocialAccount (cookie-auth + fingerprint + pinnedProxyId), Proxy (type/carrier/ASN), Video, Task, Preset, AuditLog |
-| `src/lib/proxy-pin-rules.ts` | **Carrier Stability Rule** — валидация смены прокси: 4 кода нарушений (PIN_WINDOW_ACTIVE, CARRIER_CHANGE_BLOCKED, COUNTRY_CHANGE_BLOCKED, PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT) |
+| `src/lib/proxy-pin-rules.ts` | **Carrier Stability Rule** — валидация смены прокси: PIN_WINDOW_ACTIVE, CARRIER_CHANGE_BLOCKED, COUNTRY_CHANGE_BLOCKED; тип прокси не блокирует старт job |
 
 ---
 

@@ -24,8 +24,7 @@ export interface PinViolation {
   code:
     | "PIN_WINDOW_ACTIVE"
     | "CARRIER_CHANGE_BLOCKED"
-    | "COUNTRY_CHANGE_BLOCKED"
-    | "PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT";
+    | "COUNTRY_CHANGE_BLOCKED";
   message: string;
   overrideAllowed: boolean;
   daysRemaining?: number;
@@ -46,7 +45,8 @@ export interface PinViolation {
  *  2. Carrier change at any point within the 14-day window is a hard block —
  *     correlation window resets, account hits shadowban for 14-21 days.
  *  3. Country change is never allowed once an account has session history.
- *  4. Accounts younger than 30 days must use LTE_MOBILE proxy. Residential is rejected.
+ *  4. Proxy type is not a launch blocker: LTE_MOBILE and STATIC_RESIDENTIAL
+ *     are both allowed as long as an account has a pinned proxy.
  */
 export function validatePinChange(args: {
   account: AccountFields;
@@ -57,19 +57,7 @@ export function validatePinChange(args: {
   const { account, oldProxy, newProxy } = args;
   const now = args.now ?? new Date();
 
-  // Rule 4: young accounts must be LTE_MOBILE to pass BGP path scoring.
-  const ageDays = (now.getTime() - account.createdAt.getTime()) / 86_400_000;
-  if (ageDays < 30 && newProxy.type !== "LTE_MOBILE") {
-    return {
-      code: "PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT",
-      overrideAllowed: false,
-      message:
-        `Accounts younger than 30 days require LTE_MOBILE proxy (got ${newProxy.type}). ` +
-        `Datacenter and residential proxies trigger BGP path scoring on new accounts.`,
-    };
-  }
-
-  // If there's no previous pin, anything goes (within Rule 4 above).
+  // If there's no previous pin, any supported proxy type is allowed.
   if (!oldProxy || !account.proxyPinnedAt) {
     return null;
   }

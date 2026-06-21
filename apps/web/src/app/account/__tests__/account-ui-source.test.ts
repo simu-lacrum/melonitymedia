@@ -69,6 +69,14 @@ describe('account UI safety copy', () => {
     expect(PROXIES_PAGE_SRC).toContain('{isMobileProxy && (');
   });
 
+  it('requires a proxy for imports and surfaces backend pre-flight errors', () => {
+    expect(ACCOUNTS_PAGE_SRC).toContain('Выберите прокси для импорта');
+    expect(ACCOUNTS_PAGE_SRC).toContain('LTE mobile или Static residential');
+    expect(ACCOUNTS_PAGE_SRC).toContain('Прокси для аккаунта *');
+    expect(ACCOUNTS_PAGE_SRC).toContain('err instanceof ApiError ? err.message : "Ошибка запуска"');
+    expect(ACCOUNTS_PAGE_SRC).not.toContain('Привязать прокси (опционально)');
+  });
+
   it('highlights interactive dropdown rows and uses pointer cursor', () => {
     expect(SELECT_SRC).toContain('cursor-pointer');
     expect(SELECT_SRC).toContain('data-highlighted:bg-primary/10');

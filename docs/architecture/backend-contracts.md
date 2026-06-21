@@ -175,7 +175,7 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
 // Response 409 CONFLICT (Carrier Stability Rule violation, force not passed)
 {
   success: false,
-  code: "CARRIER_CHANGE_BLOCKED" | "COUNTRY_CHANGE_BLOCKED" | "PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT" | "PIN_WINDOW_ACTIVE",
+  code: "CARRIER_CHANGE_BLOCKED" | "COUNTRY_CHANGE_BLOCKED" | "PIN_WINDOW_ACTIVE",
   error: "Human-readable description with daysRemaining / old vs new values",
   overrideAllowed: boolean,
   details: { daysRemaining?: number, oldCarrier?: string, newCarrier?: string }
@@ -196,7 +196,7 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
 // Response 409 CONFLICT (violations detected, force not passed)
 {
   success: false,
-  code: "CARRIER_CHANGE_BLOCKED" | "COUNTRY_CHANGE_BLOCKED" | "PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT" | "PIN_WINDOW_ACTIVE",
+  code: "CARRIER_CHANGE_BLOCKED" | "COUNTRY_CHANGE_BLOCKED" | "PIN_WINDOW_ACTIVE",
   error: "Human-readable message",
   blockedAccountIds: string[],
   violations: Array<{
@@ -790,21 +790,21 @@ Pinning policy: один аккаунт = один прокси на 14+ дне�
 
 // NON-OVERRIDABLE HARD BLOCKS (always HTTP 409):
 
-// 1. PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT
-//    Any account younger than 30 days requires `type === "LTE_MOBILE"`.
-//    Residential / datacenter on fresh accounts triggers BGP path scoring.
-
-// 2. COUNTRY_CHANGE_BLOCKED
+// 1. COUNTRY_CHANGE_BLOCKED
 //    Cannot swap proxy across countries on an account with existing
 //    session history. Country of operations is immutable.
+//
+// Job launch rule:
+//    Every browser job requires a pinned proxy, but proxy type is flexible:
+//    `LTE_MOBILE` and `STATIC_RESIDENTIAL` are both accepted.
 
 // OVERRIDABLE ADMIN WARNINGS:
 
-// 3. CARRIER_CHANGE_BLOCKED (TikTok-only)
+// 2. CARRIER_CHANGE_BLOCKED (TikTok-only)
 //    Cannot swap to a different carrier (T-Mobile -> Verizon, etc.).
 //    Resets the 14-day correlation window. Expected shadowban 14-21 days.
 
-// 4. PIN_WINDOW_ACTIVE
+// 3. PIN_WINDOW_ACTIVE
 //    Same-carrier, same-country swap within 14 days of last pin.
 //    Frequent rotations within window are themselves a signal.
 

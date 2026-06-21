@@ -8,10 +8,12 @@ const JOB_DISPATCH_SRC = fs.readFileSync(
 );
 
 describe('job dispatch safety guards', () => {
-  it('blocks automation for young accounts without LTE_MOBILE proxies', () => {
-    expect(JOB_DISPATCH_SRC).toContain('accountAgeDays < 30');
-    expect(JOB_DISPATCH_SRC).toContain("account.pinnedProxy.type !== 'LTE_MOBILE'");
-    expect(JOB_DISPATCH_SRC).toContain("error: 'PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT'");
+  it('requires a pinned proxy but does not require LTE_MOBILE', () => {
+    expect(JOB_DISPATCH_SRC).toContain('if (!account.pinnedProxy)');
+    expect(JOB_DISPATCH_SRC).toContain('error: "NO_PROXY"');
+    expect(JOB_DISPATCH_SRC).not.toContain('accountAgeDays < 30');
+    expect(JOB_DISPATCH_SRC).not.toContain("account.pinnedProxy.type !== 'LTE_MOBILE'");
+    expect(JOB_DISPATCH_SRC).not.toContain('PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT');
   });
 
   it('keeps fingerprint and proxy resolved fresh in the worker', () => {

@@ -149,8 +149,8 @@ export default function ProxiesPage() {
             accountIds: bindAccountIds,
             proxyId: result.proxy.id,
           })
-        } catch {
-          toast.error('Не удалось привязать прокси к некоторым аккаунтам')
+        } catch (err) {
+          toast.error(err instanceof ApiError ? err.message : 'Не удалось привязать прокси к некоторым аккаунтам')
         }
       }
 
@@ -230,8 +230,8 @@ export default function ProxiesPage() {
       toast.success("Аккаунт отвязан")
       setLinkedAccounts(prev => prev.filter(a => a.id !== accountId))
       fetchProxies()
-    } catch {
-      toast.error("Ошибка")
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Ошибка")
     }
   }
 
@@ -243,8 +243,8 @@ export default function ProxiesPage() {
       setLinkAccountId("")
       handleShowLinked(linkedProxyId)
       fetchProxies()
-    } catch {
-      toast.error("Ошибка привязки")
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Ошибка привязки")
     }
   }
 

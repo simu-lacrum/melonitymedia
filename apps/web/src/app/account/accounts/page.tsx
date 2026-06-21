@@ -45,6 +45,7 @@ interface ProxyItem {
   id: string
   host: string
   port: number
+  type: "LTE_MOBILE" | "STATIC_RESIDENTIAL" | "DATACENTER_DEPRECATED"
 }
 
 export default function AccountsPage() {
@@ -259,6 +260,12 @@ export default function AccountsPage() {
 
   const handleImport = async () => {
     if (!importText.trim()) return
+    if (!importProxyId || importProxyId === "none") {
+      toast.error("Выберите прокси для импорта", {
+        description: "Для проверки входа и любых задач к аккаунту должен быть привязан прокси. Подходит LTE mobile или Static residential.",
+      })
+      return
+    }
     try {
       setImportLoading(true)
       const result = await api.post<{
@@ -341,8 +348,8 @@ export default function AccountsPage() {
         delayMax: 0,
       })
       toast.success("Сбор куки запущен")
-    } catch {
-      toast.error("Ошибка запуска")
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Ошибка запуска")
     }
   }
 
@@ -362,8 +369,8 @@ export default function AccountsPage() {
       setProxyBindOpen(false)
       setProxyBindValue("")
       fetchAccounts()
-    } catch {
-      toast.error("Ошибка привязки прокси")
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Ошибка привязки прокси")
     } finally {
       setBindingProxy(false)
     }
@@ -681,8 +688,8 @@ export default function AccountsPage() {
                           delayMax: 5000,
                         })
                         toast.success(`Сбор куки запущен для ${selectedIds.length} аккаунтов`)
-                      } catch {
-                        toast.error("Ошибка запуска")
+                      } catch (err) {
+                        toast.error(err instanceof ApiError ? err.message : "Ошибка запуска")
                       }
                     }}>
                       <RefreshCw className="size-4 mr-2" />
@@ -754,16 +761,18 @@ export default function AccountsPage() {
 
             {/* Proxy */}
             <div className="flex flex-col gap-2">
-              <Label>Привязать прокси (опционально)</Label>
+              <Label>Прокси для аккаунта *</Label>
               <Select value={importProxyId} onValueChange={(v) => setImportProxyId(v ?? "")}>
-                <SelectTrigger><SelectValue placeholder="Без прокси" /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Выберите прокси" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">Без прокси</SelectItem>
                   {availableProxies.map(p => (
-                    <SelectItem key={p.id} value={p.id}>{p.host}:{p.port}</SelectItem>
+                    <SelectItem key={p.id} value={p.id}>{p.host}:{p.port} · {p.type}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">
+                Любая browser-задача требует привязанный прокси. Можно использовать LTE mobile или Static residential.
+              </p>
             </div>
           </div>
 

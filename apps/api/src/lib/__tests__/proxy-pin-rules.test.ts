@@ -30,7 +30,7 @@ describe('validatePinChange', () => {
     expect(result).toBeNull();
   });
 
-  it('blocks young accounts from non-LTE proxies across platforms', () => {
+  it('allows young accounts to use STATIC_RESIDENTIAL proxies', () => {
     const result = validatePinChange({
       account: mkAccount({
         platform: 'YOUTUBE',
@@ -39,9 +39,7 @@ describe('validatePinChange', () => {
       oldProxy: null,
       newProxy: mkProxy({ type: 'STATIC_RESIDENTIAL' }),
     });
-    expect(result).not.toBeNull();
-    expect(result!.code).toBe('PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT');
-    expect(result!.overrideAllowed).toBe(false);
+    expect(result).toBeNull();
   });
 
   it('blocks country change within pin window', () => {

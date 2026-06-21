@@ -612,8 +612,12 @@ router.post('/launch', async (req: Request, res: Response) => {
         const runningTask = busyFailures[0].error?.split(':')[1] || 'задача';
         const label = BUSY_TASK_LABELS[runningTask] || runningTask;
         errorMsg = `Аккаунт(ы) заняты — сейчас выполняется: ${label}. Дождитесь завершения.`;
-      } else if (failures.some(f => f.error === 'PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT')) {
-        errorMsg = 'Аккаунтам младше 30 дней нужен LTE_MOBILE прокси. Привяжите мобильный прокси той же страны и повторите запуск.';
+      } else if (failures.some(f => f.error === 'NO_PROXY')) {
+        errorMsg = 'К аккаунту должен быть привязан прокси перед запуском задачи. Подходит LTE_MOBILE или STATIC_RESIDENTIAL.';
+      } else if (failures.some(f => f.error === 'NO_COOKIES')) {
+        errorMsg = 'У аккаунта нет валидных cookies. Выполните вход или импорт cookies, затем повторите запуск.';
+      } else if (failures.some(f => f.error === 'NO_FINGERPRINT')) {
+        errorMsg = 'У аккаунта нет fingerprint. Переимпортируйте аккаунт или пересоздайте fingerprint до запуска задачи.';
       } else {
         errorMsg = "Все аккаунты заблокированы pre-flight проверками";
       }

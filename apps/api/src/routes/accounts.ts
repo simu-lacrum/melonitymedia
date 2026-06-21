@@ -56,6 +56,9 @@ function buildLoginTaskConfig(
 }
 
 function loginDispatchErrorMessage(error?: string) {
+  if (error === 'NO_PROXY') {
+    return 'Не удалось запустить проверку входа: к аккаунту должен быть привязан прокси. Подходит LTE_MOBILE или STATIC_RESIDENTIAL.';
+  }
   return `Не удалось запустить верификацию входа: ${error || 'unknown error'}`;
 }
 
@@ -390,6 +393,12 @@ router.post('/import', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Слишком много записей за раз (максимум 500)' });
       return;
     }
+    if (!proxyId || proxyId === 'none') {
+      res.status(400).json({
+        error: 'Выберите прокси для импорта. Для проверки входа и любых задач к аккаунту должен быть привязан прокси: LTE_MOBILE или STATIC_RESIDENTIAL.',
+      });
+      return;
+    }
 
     const masterKey = Buffer.from(process.env.MASTER_KEY ?? '', 'base64');
     if (masterKey.length !== 32) {
@@ -714,14 +723,15 @@ router.post('/:id/retry-login', async (req: Request, res: Response) => {
     );
 
     if (result.error) {
+      const errMsg = loginDispatchErrorMessage(result.error);
       await prisma.socialAccount.update({
         where: { id: account.id },
         data: {
           status: previousStatus,
-          lastError: loginDispatchErrorMessage(result.error),
+          lastError: errMsg,
         },
       });
-      res.status(400).json({ error: `Не удалось запустить верификацию: ${result.error}` });
+      res.status(400).json({ error: errMsg });
       return;
     }
 
@@ -1261,10 +1271,8 @@ router.post('/warmup', async (req: Request, res: Response) => {
 
     if (dispatched === 0) {
       let error = 'Не удалось запустить прогрев: аккаунты не прошли pre-flight проверки';
-      if (failures.some(f => f.error === 'PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT')) {
-        error = 'Аккаунтам младше 30 дней нужен LTE_MOBILE прокси. Привяжите мобильный прокси той же страны и повторите запуск.';
-      } else if (failures.some(f => f.error === 'NO_PROXY')) {
-        error = 'Не удалось запустить прогрев: у аккаунтов нет привязанного прокси.';
+      if (failures.some(f => f.error === 'NO_PROXY')) {
+        error = 'Не удалось запустить прогрев: у аккаунтов нет привязанного прокси. Подходит LTE_MOBILE или STATIC_RESIDENTIAL.';
       } else if (failures.some(f => f.error === 'NO_COOKIES')) {
         error = 'Не удалось запустить прогрев: нет валидных cookies. Сначала выполните авторизацию или импорт cookies.';
       } else if (failures.some(f => f.error === 'NO_FINGERPRINT')) {
@@ -1351,6 +1359,30 @@ router.post('/cookies', async (req: Request, res: Response) => {
     );
 
     const dispatched = results.filter(r => r.jobId).length;
+    const failures = results.filter(r => !r.jobId);
+    if (dispatched === 0) {
+      let error = 'Не удалось запустить обновление cookies: аккаунты не прошли pre-flight проверки';
+      if (failures.some(f => f.error === 'NO_PROXY')) {
+        error = 'Не удалось запустить обновление cookies: к аккаунту должен быть привязан прокси. Подходит LTE_MOBILE или STATIC_RESIDENTIAL.';
+      } else if (failures.some(f => f.error === 'NO_FINGERPRINT')) {
+        error = 'Не удалось запустить обновление cookies: не сгенерирован fingerprint аккаунта.';
+      } else if (failures.some(f => f.error?.startsWith('ACCOUNT_BUSY'))) {
+        error = 'Аккаунт уже выполняет другую browser-задачу. Дождитесь завершения и повторите запуск.';
+      }
+
+      const failedTask = await prisma.task.update({
+        where: { id: task.id },
+        data: {
+          status: 'FAILED',
+          error,
+          completedAt: new Date(),
+          config: { accountIds: ids, threads: 3, dispatchedJobs: results } as any,
+        },
+      });
+      res.status(409).json({ error, task: failedTask, dispatched, skipped: failures.length, failures });
+      return;
+    }
+
     await prisma.task.update({
       where: { id: task.id },
       data: {
@@ -1360,7 +1392,7 @@ router.post('/cookies', async (req: Request, res: Response) => {
       },
     });
 
-    res.status(201).json({ task, dispatched, skipped: results.filter(r => !r.jobId).length });
+    res.status(201).json({ task, dispatched, skipped: failures.length, failures });
   } catch (err) {
     console.error('[Accounts] Quick cookies error:', err);
     res.status(500).json({ error: 'Ошибка при запуске обновления cookies' });

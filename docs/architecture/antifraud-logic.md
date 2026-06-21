@@ -34,11 +34,10 @@ model Proxy {
 }
 ```
 
-### 1.3. Четыре кода нарушений
+### 1.3. Коды нарушений
 
 | Код | Тип | Условие | Последствие |
 |-----|-----|---------|-------------|
-| `PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT` | Hard block, no override | Аккаунт < 30 дней + прокси НЕ `LTE_MOBILE` | BGP path scoring на свежих аккаунтах |
 | `COUNTRY_CHANGE_BLOCKED` | Hard block, no override | Смена страны прокси у аккаунта с историей сессий | Страна операций immutable |
 | `CARRIER_CHANGE_BLOCKED` | Hard block (TikTok only) | Смена carrier (напр. T-Mobile → Verizon) | Сброс 14-дневного окна, shadowban 14-21 день |
 | `PIN_WINDOW_ACTIVE` | Soft warn | Любая смена прокси в рамках 14 дней с последнего pin | Частые ротации сами по себе — сигнал |
@@ -50,19 +49,16 @@ model Proxy {
       oldProxy (carrier, country, type),
       newProxy (carrier, country, type)
 
-1. IF account.age < 30 дней:
-   IF newProxy.type !== LTE_MOBILE → return PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT
+1. IF oldProxy === null OR proxyPinnedAt === null → return null (первая привязка; `LTE_MOBILE` и `STATIC_RESIDENTIAL` разрешены)
 
-2. IF oldProxy === null OR proxyPinnedAt === null → return null (первая привязка)
+2. IF oldProxy.id === newProxy.id → return null (идемпотентность)
 
-3. IF oldProxy.id === newProxy.id → return null (идемпотентность)
-
-4. pinAgeDays = (now - proxyPinnedAt) / 86400000
+3. pinAgeDays = (now - proxyPinnedAt) / 86400000
    daysRemaining = ceil(14 - pinAgeDays)
 
-5. IF oldProxy.country !== newProxy.country → return COUNTRY_CHANGE_BLOCKED
+4. IF oldProxy.country !== newProxy.country → return COUNTRY_CHANGE_BLOCKED
 
-6. IF platform === TIKTOK AND oldProxy.carrier !== newProxy.carrier
+5. IF platform === TIKTOK AND oldProxy.carrier !== newProxy.carrier
    → return CARRIER_CHANGE_BLOCKED
 
 7. IF pinAgeDays < 14 → return PIN_WINDOW_ACTIVE
@@ -459,7 +455,7 @@ Glassmorphism (`backdrop-filter`) запрещён вне Header — это со
 | Смена страны | COUNTRY_CHANGE_BLOCKED (приоритет) |
 | Тот же carrier в окне 14д | PIN_WINDOW_ACTIVE |
 | Тот же carrier после 14д | null (разрешено) |
-| Datacenter/residential для молодого аккаунта | PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT |
+| STATIC_RESIDENTIAL для молодого аккаунта | null (разрешено, если это первая привязка или не нарушены country/pin rules) |
 | Residential для старого TikTok | null (разрешено) |
 | YouTube + смена carrier | PIN_WINDOW_ACTIVE (не CARRIER, т.к. YouTube) |
 

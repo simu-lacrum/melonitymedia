@@ -215,6 +215,13 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
   const requireCookies = opts.jobType !== 'login';
   let cookiesForContext: Awaited<ReturnType<typeof loadCookiesFromEncryptedStore>> = [];
 
+  if (!opts.proxyUrl) {
+    throw new Error(
+      `[Patchright] Refusing to launch ${opts.jobType ?? 'browser'} for ${opts.accountId}: ` +
+      `no pinned proxy. Pin an LTE_MOBILE or STATIC_RESIDENTIAL proxy first.`,
+    );
+  }
+
   // Soft validation: fatal issues block, stale issues warn and continue
   const issues = inspectFingerprintConsistency(fingerprint, getSystemChromeMajor());
   const fatal = issues.filter(i => i.severity === "fatal");
@@ -282,8 +289,6 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
       proxyConfig = { server: opts.proxyUrl };
       console.log(`[Patchright] Using proxy (raw) for account ${opts.accountId}`);
     }
-  } else {
-    console.log(`[Patchright] ⚠️ No proxy configured for account ${opts.accountId} — using direct connection`);
   }
 
 
