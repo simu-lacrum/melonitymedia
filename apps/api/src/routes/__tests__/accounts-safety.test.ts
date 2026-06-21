@@ -50,4 +50,11 @@ describe('account route safety guards', () => {
     expect(ACCOUNTS_SRC).toContain("extra: { mode, taskId: loginTask.id }");
     expect(ACCOUNTS_SRC).toContain("workspaceUrl: '/account/workspace'");
   });
+
+  it('does not report quick warmup as started when pre-flight dispatch fails for every account', () => {
+    expect(ACCOUNTS_SRC).toContain('dispatched === 0');
+    expect(ACCOUNTS_SRC).toContain('res.status(409).json');
+    expect(ACCOUNTS_SRC).toContain('PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT');
+    expect(ACCOUNTS_SRC).toContain('Аккаунтам младше 30 дней нужен LTE_MOBILE прокси');
+  });
 });

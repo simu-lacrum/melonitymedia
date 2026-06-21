@@ -84,6 +84,7 @@ describe('account interaction flow safety', () => {
     expect(WORKER_INDEX_SRC).toContain('collectTaskAccountIds');
     expect(WORKER_INDEX_SRC).toContain('warmingAccounts > 0');
     expect(WORKER_INDEX_SRC).toContain("status: 'WARMING_UP'");
-    expect(WORKER_INDEX_SRC).toContain("data: { status: 'RUNNING' }");
+    expect(WORKER_INDEX_SRC).toContain("status: 'RUNNING'");
+    expect(WORKER_INDEX_SRC).toContain("...(error ? { error } : {})");
   });
 });

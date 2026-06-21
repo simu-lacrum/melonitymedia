@@ -150,6 +150,10 @@ export async function editProfileHandler(job: Job<EditProfileJobData>): Promise<
     logger.info(`Редактирование профиля ${data.accountId}...`);
 
     // Resolve everything fresh from DB — never trust BullMQ payload
+    if (!data.changes.name && !data.changes.bio && !data.changes.avatarUrl) {
+      throw new Error('No profile changes requested');
+    }
+
     const ctxAcc = await loadAccountContext(data.accountId);
 
     ctx = await launchStealthContext({
@@ -194,8 +198,7 @@ export async function editProfileHandler(job: Job<EditProfileJobData>): Promise<
       } catch (dlErr) {
         const msg = dlErr instanceof Error ? dlErr.message : String(dlErr);
         logger.warn(`Не удалось загрузить аватар: ${msg}`);
-        // Continue without avatar — don't fail the whole job
-        avatarTmpPath = null;
+        throw new Error(`Avatar source unavailable: ${msg}`);
       }
     }
 
@@ -291,6 +294,7 @@ async function _editTikTokProfile(
       logger.info('Имя обновлено ✓');
     } catch {
       logger.warn('Не удалось обновить имя — селектор не найден');
+      throw new Error('TikTok profile name update failed: selector not found');
     }
   }
 
@@ -304,6 +308,7 @@ async function _editTikTokProfile(
       logger.info(`Био обновлено: ${data.changes.bio.substring(0, 50)}...`);
     } catch {
       logger.warn('Не удалось обновить био — селектор не найден');
+      throw new Error('TikTok bio update failed: selector not found');
     }
   }
 
@@ -328,6 +333,7 @@ async function _editTikTokProfile(
       logger.info('Аватар TikTok загружен ✓');
     } catch {
       logger.warn('Не удалось загрузить аватар TikTok — селектор не найден');
+      throw new Error('TikTok avatar upload failed: selector not found');
     }
   }
 
@@ -370,6 +376,7 @@ async function _editYouTubeProfile(
   // with src containing "profile-picture".
   if (avatarTmpPath && data.changes.avatarUrl) {
     try {
+      let avatarApplied = false;
       logger.info('Загружаю аватар YouTube через Google Account...');
       await page.goto('https://myaccount.google.com/personal-info', { waitUntil: 'load', timeout: 30_000 });
       await page.waitForTimeout(_randomDelay(3000, 5000));
@@ -427,6 +434,7 @@ async function _editYouTubeProfile(
                 await btn.click();
                 logger.info(`Clicked "${text}" — сохраняю аватар`);
                 await page.waitForTimeout(_randomDelay(5000, 8000));
+                avatarApplied = true;
                 break;
               }
             }
@@ -438,6 +446,7 @@ async function _editYouTubeProfile(
           if (await iframeFileInput.count().catch(() => 0) > 0) {
             await iframeFileInput.first().setInputFiles(avatarTmpPath);
             await page.waitForTimeout(_randomDelay(5000, 8000));
+            avatarApplied = true;
             logger.info('Аватар загружен через iframe file input ✓');
           } else {
             logger.warn('Не удалось найти кнопку загрузки в iframe');
@@ -446,9 +455,13 @@ async function _editYouTubeProfile(
       } else {
         logger.warn('Iframe профильного фото не найден');
       }
+      if (!avatarApplied) {
+        throw new Error('YouTube avatar upload flow did not reach a confirmed upload/save step');
+      }
     } catch (avatarErr) {
       const msg = avatarErr instanceof Error ? avatarErr.message : String(avatarErr);
       logger.warn(`Не удалось загрузить аватар YouTube: ${msg}`);
+      throw new Error(`YouTube avatar upload failed: ${msg}`);
     }
   }
 
@@ -630,6 +643,7 @@ async function _editYouTubeProfile(
           const pageTitle = await page.title();
           logger.info(`Page title: ${pageTitle}`);
         } catch { /* debug optional */ }
+        throw new Error('YouTube profile name update failed: selector not found');
       }
     }
 
@@ -659,6 +673,7 @@ async function _editYouTubeProfile(
           await page.screenshot({ path: '/tmp/yt-desc-fail.png', fullPage: true });
           logger.info('Desc fail screenshot: /tmp/yt-desc-fail.png');
         } catch { /* screenshot optional */ }
+        throw new Error('YouTube profile description update failed: selector not found');
       }
     }
 
@@ -711,8 +726,10 @@ async function _saveTikTokProfile(page: any, cursor: any, logger: SocketLogger):
     }
 
     logger.warn('Кнопка сохранения TikTok не найдена');
-  } catch {
+    throw new Error('TikTok profile save failed: save button not found');
+  } catch (err) {
     logger.warn('Не удалось сохранить профиль TikTok');
+    throw err instanceof Error ? err : new Error('TikTok profile save failed');
   }
 }
 
@@ -738,8 +755,10 @@ async function _saveYouTubeProfile(page: any, cursor: any, logger: SocketLogger)
     }
 
     logger.warn('Кнопка сохранения YouTube Studio не найдена');
-  } catch {
+    throw new Error('YouTube profile save failed: save button not found');
+  } catch (err) {
     logger.warn('Не удалось сохранить профиль YouTube');
+    throw err instanceof Error ? err : new Error('YouTube profile save failed');
   }
 }
 

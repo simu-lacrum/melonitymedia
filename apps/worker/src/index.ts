@@ -125,6 +125,11 @@ function getTaskId(job: Job<any>): string | null {
   return typeof taskId === 'string' && taskId.length > 0 ? taskId : null;
 }
 
+function getJobAccountId(job: Job<any>): string | null {
+  const accountId = asRecord(job.data).accountId;
+  return typeof accountId === 'string' && accountId.length > 0 ? accountId : null;
+}
+
 function collectTaskJobIds(task: { bullmqJobId: string | null; config: unknown }, fallbackJobId?: string): string[] {
   const jobIds = new Set<string>();
   if (task.bullmqJobId) jobIds.add(task.bullmqJobId);
@@ -233,8 +238,26 @@ async function refreshTaskAfterTerminalJob(job: Job<any>, error?: string) {
     return;
   }
 
-  if (!hasFailed && task.type === 'WARMUP') {
+  if (task.type === 'WARMUP') {
     const accountIds = collectTaskAccountIds(task);
+
+    if (hasFailed) {
+      const failedAccountId = getJobAccountId(job);
+      if (failedAccountId) {
+        await prisma.socialAccount.updateMany({
+          where: {
+            id: failedAccountId,
+            status: 'WARMING_UP',
+            warmupCompletedAt: null,
+          },
+          data: {
+            status: 'ALIVE',
+            lastError: error ?? 'Warmup job failed',
+          },
+        });
+      }
+    }
+
     const warmingAccounts = accountIds.length === 0
       ? 0
       : await prisma.socialAccount.count({
@@ -248,7 +271,10 @@ async function refreshTaskAfterTerminalJob(job: Job<any>, error?: string) {
     if (warmingAccounts > 0) {
       await prisma.task.update({
         where: { id: task.id },
-        data: { status: 'RUNNING' },
+        data: {
+          status: 'RUNNING',
+          ...(error ? { error } : {}),
+        },
       });
       return;
     }

@@ -6,6 +6,8 @@ const WORKER_ROOT = path.resolve(__dirname, '../..');
 const DOCKERFILE = fs.readFileSync(path.join(WORKER_ROOT, 'Dockerfile'), 'utf-8');
 const ENTRYPOINT = fs.readFileSync(path.join(WORKER_ROOT, 'entrypoint.sh'), 'utf-8');
 const PATCHRIGHT_LAUNCHER = fs.readFileSync(path.join(WORKER_ROOT, 'src/core/browser/patchright-launcher.ts'), 'utf-8');
+const WORKER_INDEX = fs.readFileSync(path.join(WORKER_ROOT, 'src/index.ts'), 'utf-8');
+const EDIT_PROFILE_HANDLER = fs.readFileSync(path.join(WORKER_ROOT, 'src/handlers/edit-profile.ts'), 'utf-8');
 
 // docker-compose is at repo root
 const COMPOSE = fs.readFileSync(path.join(WORKER_ROOT, '../../docker-compose.yml'), 'utf-8');
@@ -84,6 +86,27 @@ describe('dynamic GUI source verification', () => {
     expect(PATCHRIGHT_LAUNCHER).toContain("const requireCookies = opts.jobType !== 'login'");
     expect(PATCHRIGHT_LAUNCHER).toContain('empty cookie jar after disk cache and DB fallback');
     expect(PATCHRIGHT_LAUNCHER).not.toContain('Continue without cookies');
+  });
+});
+
+describe('task state truthfulness', () => {
+  it('does not leave a failed warmup account visually stuck in WARMING_UP', () => {
+    expect(WORKER_INDEX).toContain('function getJobAccountId');
+    expect(WORKER_INDEX).toContain("task.type === 'WARMUP'");
+    expect(WORKER_INDEX).toContain('if (hasFailed)');
+    expect(WORKER_INDEX).toContain("status: 'WARMING_UP'");
+    expect(WORKER_INDEX).toContain("status: 'ALIVE'");
+    expect(WORKER_INDEX).toContain("lastError: error ?? 'Warmup job failed'");
+  });
+
+  it('fails edit-profile jobs instead of reporting success after skipped changes', () => {
+    expect(EDIT_PROFILE_HANDLER).toContain('No profile changes requested');
+    expect(EDIT_PROFILE_HANDLER).toContain('Avatar source unavailable');
+    expect(EDIT_PROFILE_HANDLER).toContain('TikTok bio update failed');
+    expect(EDIT_PROFILE_HANDLER).toContain('TikTok profile save failed: save button not found');
+    expect(EDIT_PROFILE_HANDLER).toContain('YouTube avatar upload flow did not reach a confirmed upload/save step');
+    expect(EDIT_PROFILE_HANDLER).toContain('YouTube profile description update failed');
+    expect(EDIT_PROFILE_HANDLER).not.toContain("don't fail the whole job");
   });
 });
 

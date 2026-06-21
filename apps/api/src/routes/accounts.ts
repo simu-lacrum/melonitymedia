@@ -1257,6 +1257,38 @@ router.post('/warmup', async (req: Request, res: Response) => {
 
     const dispatched = results.filter(r => r.jobId).length;
     const dispatchedAccountIds = results.filter(r => r.jobId).map(r => r.accountId);
+    const failures = results.filter(r => !r.jobId);
+
+    if (dispatched === 0) {
+      let error = 'Не удалось запустить прогрев: аккаунты не прошли pre-flight проверки';
+      if (failures.some(f => f.error === 'PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT')) {
+        error = 'Аккаунтам младше 30 дней нужен LTE_MOBILE прокси. Привяжите мобильный прокси той же страны и повторите запуск.';
+      } else if (failures.some(f => f.error === 'NO_PROXY')) {
+        error = 'Не удалось запустить прогрев: у аккаунтов нет привязанного прокси.';
+      } else if (failures.some(f => f.error === 'NO_COOKIES')) {
+        error = 'Не удалось запустить прогрев: нет валидных cookies. Сначала выполните авторизацию или импорт cookies.';
+      } else if (failures.some(f => f.error === 'NO_FINGERPRINT')) {
+        error = 'Не удалось запустить прогрев: не сгенерирован fingerprint аккаунта.';
+      } else if (failures.some(f => f.error?.startsWith('ACCOUNT_BUSY'))) {
+        error = 'Аккаунт уже выполняет другую browser-задачу. Дождитесь завершения и повторите запуск.';
+      } else if (failures.some(f => f.error?.startsWith('ACCOUNT_'))) {
+        error = 'Аккаунт сейчас в статусе, который запрещает прогрев. Проверьте статус и последнюю ошибку аккаунта.';
+      }
+
+      const failedTask = await prisma.task.update({
+        where: { id: task.id },
+        data: {
+          status: 'FAILED',
+          error,
+          completedAt: new Date(),
+          config: { accountIds: ids, threads: 3, warmupDays: days, hashtags, comments, dispatchedJobs: results } as any,
+        },
+      });
+
+      res.status(409).json({ error, task: failedTask, dispatched, skipped: failures.length, failures });
+      return;
+    }
+
     if (dispatchedAccountIds.length > 0) {
       await prisma.socialAccount.updateMany({
         where: { id: { in: dispatchedAccountIds }, userId: req.user!.id },
@@ -1280,7 +1312,7 @@ router.post('/warmup', async (req: Request, res: Response) => {
       },
     });
 
-    res.status(201).json({ task, dispatched, skipped: results.filter(r => !r.jobId).length });
+    res.status(201).json({ task, dispatched, skipped: failures.length, failures });
   } catch (err) {
     console.error('[Accounts] Quick warmup error:', err);
     res.status(500).json({ error: 'Ошибка при запуске прогрева' });
