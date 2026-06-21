@@ -6,6 +6,7 @@ import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { sanitizeTaskConfig } from '../lib/task-sanitize.js';
+import { buildDailyDeltaSeries } from '../lib/analytics-series.js';
 
 const router = Router();
 router.use(authMiddleware);
@@ -55,13 +56,15 @@ router.get('/views-chart', async (req: Request, res: Response) => {
     const startDate = new Date();
     startDate.setHours(0, 0, 0, 0);
     startDate.setDate(startDate.getDate() - days + 1);
+    const queryStartDate = new Date(startDate);
+    queryStartDate.setDate(queryStartDate.getDate() - 1);
 
     // Fetch real snapshots aggregated by day across all accounts
     const snapshots = await prisma.dailySnapshot.groupBy({
       by: ['date'],
       where: {
         userId,
-        date: { gte: startDate },
+        date: { gte: queryStartDate },
       },
       _sum: {
         views: true,
@@ -71,29 +74,16 @@ router.get('/views-chart', async (req: Request, res: Response) => {
       orderBy: { date: 'asc' },
     });
 
-    // Build a complete date series (fill gaps with zeros)
-    const snapshotMap = new Map<string, { views: number; followers: number; likes: number }>();
-    for (const s of snapshots) {
-      const key = new Date(s.date).toISOString().slice(0, 10);
-      snapshotMap.set(key, {
+    const data = buildDailyDeltaSeries(
+      startDate,
+      days,
+      snapshots.map(s => ({
+        date: s.date,
         views: s._sum.views ?? 0,
         followers: s._sum.followers ?? 0,
         likes: s._sum.likes ?? 0,
-      });
-    }
-
-    const data: { date: string; views: number; followers: number; likes: number }[] = [];
-    for (let i = 0; i < days; i++) {
-      const d = new Date(startDate.getTime() + i * 86_400_000);
-      const key = d.toISOString().slice(0, 10);
-      const snap = snapshotMap.get(key);
-      data.push({
-        date: key,
-        views: snap?.views ?? 0,
-        followers: snap?.followers ?? 0,
-        likes: snap?.likes ?? 0,
-      });
-    }
+      })),
+    );
 
     res.json({ data, days });
   } catch (err) {

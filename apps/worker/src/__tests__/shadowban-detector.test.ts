@@ -37,6 +37,7 @@ describe('detectShadowbanForAccount', () => {
     status: 'ALIVE' as const,
     warmupCompletedAt: new Date('2026-05-01'),
   };
+  const refreshedAt = new Date('2026-06-20T12:00:00Z');
 
   it('returns flagged:false when account is not ALIVE', async () => {
     prismaMock.socialAccount.findUniqueOrThrow.mockResolvedValue({
@@ -62,8 +63,8 @@ describe('detectShadowbanForAccount', () => {
   it('returns flagged:false when fewer than 3 candidate videos exist', async () => {
     prismaMock.socialAccount.findUniqueOrThrow.mockResolvedValue(baseAccount as any);
     prismaMock.videoPublication.findMany.mockResolvedValue([
-      { id: 'vp1', videoId: 'v1', views: 5, uploadedAt: new Date() },
-      { id: 'vp2', videoId: 'v2', views: 8, uploadedAt: new Date() },
+      { id: 'vp1', videoId: 'v1', views: 5, uploadedAt: new Date(), viewsUpdatedAt: refreshedAt },
+      { id: 'vp2', videoId: 'v2', views: 8, uploadedAt: new Date(), viewsUpdatedAt: refreshedAt },
     ] as any);
 
     const result = await detectShadowbanForAccount('acc-1');
@@ -74,9 +75,9 @@ describe('detectShadowbanForAccount', () => {
   it('returns flagged:false when any video has >= 100 views', async () => {
     prismaMock.socialAccount.findUniqueOrThrow.mockResolvedValue(baseAccount as any);
     prismaMock.videoPublication.findMany.mockResolvedValue([
-      { id: 'vp1', videoId: 'v1', views: 5, uploadedAt: new Date() },
-      { id: 'vp2', videoId: 'v2', views: 150, uploadedAt: new Date() },
-      { id: 'vp3', videoId: 'v3', views: 8, uploadedAt: new Date() },
+      { id: 'vp1', videoId: 'v1', views: 5, uploadedAt: new Date(), viewsUpdatedAt: refreshedAt },
+      { id: 'vp2', videoId: 'v2', views: 150, uploadedAt: new Date(), viewsUpdatedAt: refreshedAt },
+      { id: 'vp3', videoId: 'v3', views: 8, uploadedAt: new Date(), viewsUpdatedAt: refreshedAt },
     ] as any);
 
     const result = await detectShadowbanForAccount('acc-1');
@@ -87,9 +88,9 @@ describe('detectShadowbanForAccount', () => {
   it('flags account and cancels PENDING upload tasks when 3 consecutive low-view videos exist', async () => {
     prismaMock.socialAccount.findUniqueOrThrow.mockResolvedValue(baseAccount as any);
     prismaMock.videoPublication.findMany.mockResolvedValue([
-      { id: 'vp1', videoId: 'v1', views: 5, uploadedAt: new Date() },
-      { id: 'vp2', videoId: 'v2', views: 12, uploadedAt: new Date() },
-      { id: 'vp3', videoId: 'v3', views: 3, uploadedAt: new Date() },
+      { id: 'vp1', videoId: 'v1', views: 5, uploadedAt: new Date(), viewsUpdatedAt: refreshedAt },
+      { id: 'vp2', videoId: 'v2', views: 12, uploadedAt: new Date(), viewsUpdatedAt: refreshedAt },
+      { id: 'vp3', videoId: 'v3', views: 3, uploadedAt: new Date(), viewsUpdatedAt: refreshedAt },
     ] as any);
     prismaMock.socialAccount.update.mockResolvedValue({} as any);
     prismaMock.task.updateMany.mockResolvedValue({ count: 2 } as any);
@@ -120,14 +121,18 @@ describe('detectShadowbanForAccount', () => {
     const where = findManyCall.where as any;
     expect(where.uploadedAt).toHaveProperty('lte');
     expect(where.uploadedAt).toHaveProperty('gte');
+    expect(where.viewsUpdatedAt).toHaveProperty('gte');
 
     const lte = where.uploadedAt.lte as Date;
     const gte = where.uploadedAt.gte as Date;
+    const viewsUpdatedGte = where.viewsUpdatedAt.gte as Date;
     const now = Date.now();
 
     // lte should be ~24h ago (within 5 sec of now-24h)
     expect(now - lte.getTime()).toBeGreaterThan(86_400_000 - 5000);
     expect(now - lte.getTime()).toBeLessThan(86_400_000 + 5000);
+    expect(now - viewsUpdatedGte.getTime()).toBeGreaterThan(86_400_000 - 5000);
+    expect(now - viewsUpdatedGte.getTime()).toBeLessThan(86_400_000 + 5000);
 
     // gte should be ~14 days ago
     expect(now - gte.getTime()).toBeGreaterThan(14 * 86_400_000 - 5000);

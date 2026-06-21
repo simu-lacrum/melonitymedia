@@ -76,6 +76,19 @@ async function main() {
       CREATE INDEX IF NOT EXISTS "DailySnapshot_userId_date_idx" ON "DailySnapshot"("userId", "date");
     `);
 
+    // Track whether VideoPublication.views was refreshed by analytics.
+    // Without this, a default 0 is indistinguishable from a real scraped 0 views.
+    await prisma.$executeRawUnsafe(`
+      DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'VideoPublication' AND column_name = 'viewsUpdatedAt'
+        ) THEN
+          ALTER TABLE "VideoPublication" ADD COLUMN "viewsUpdatedAt" TIMESTAMP(3);
+        END IF;
+      END $$;
+    `);
+
     // Create Banner table for video overlay banners
     await prisma.$executeRawUnsafe(`
       CREATE TABLE IF NOT EXISTS "Banner" (

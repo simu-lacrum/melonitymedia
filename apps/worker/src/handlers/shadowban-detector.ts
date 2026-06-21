@@ -156,6 +156,7 @@ export async function detectShadowbanForAccount(accountId: string): Promise<{
   // Fetch only videos that:
   //  1. Are at least 24h old (give TikTok time to ramp distribution).
   //  2. Are within the 14-day lookback window (older videos aren't representative).
+  //  3. Have a recent analytics refresh. Default DB zeros are not evidence.
   // Ordered newest-first so we evaluate the most recent N consecutive ones.
   const candidates = await prisma.videoPublication.findMany({
     where: {
@@ -166,10 +167,11 @@ export async function detectShadowbanForAccount(accountId: string): Promise<{
         lte: ageGateThreshold,   // CRITICAL: video must be >= 24h old
         gte: lookbackThreshold,
       },
+      viewsUpdatedAt: { gte: ageGateThreshold },
     },
     orderBy: { uploadedAt: "desc" },
     take: SHADOWBAN_CONSECUTIVE_VIDEOS,
-    select: { id: true, videoId: true, views: true, uploadedAt: true },
+    select: { id: true, videoId: true, views: true, uploadedAt: true, viewsUpdatedAt: true },
   });
 
   if (candidates.length < SHADOWBAN_CONSECUTIVE_VIDEOS) {

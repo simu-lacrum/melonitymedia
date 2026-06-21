@@ -22,7 +22,16 @@ import { emitWorkerError } from '../lib/error-classifier.js';
 import { loadAccountContext } from '../lib/account-context.js';
 import { prisma } from '../lib/prisma.js';
 import { acquireAccountLock, releaseAccountLock } from '../lib/account-lock.js';
+import {
+  extractTikTokViewCounts,
+  extractYouTubeViewCounts,
+  parseShortNumber,
+  sumViewCounts,
+  type ViewsSource,
+} from '../lib/view-stats.js';
 import type { Browser } from 'patchright';
+
+export { parseShortNumber } from '../lib/view-stats.js';
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -39,8 +48,10 @@ export interface ProfileStats {
   followers: number;
   following: number;
   views: number;
+  viewsSource: ViewsSource;
   likes: number;
   videos: number;
+  publicationViews: number[];
   snapshotAt: Date;
 }
 
@@ -207,8 +218,10 @@ async function _scrapeTikTokProfile(
     followers: 0,
     following: 0,
     views: 0,
+    viewsSource: 'unavailable',
     likes: 0,
     videos: 0,
+    publicationViews: [],
     snapshotAt: new Date(),
   };
 
@@ -232,8 +245,12 @@ async function _scrapeTikTokProfile(
     const videoItems = page.locator('[data-e2e="user-post-item"], [class*="DivItemContainer"]');
     stats.videos = await videoItems.count();
 
-    // TikTok doesn't show total views on profile — use likes as engagement proxy
-    stats.views = stats.likes;
+    stats.publicationViews = await _collectTikTokVisibleVideoViews(page, logger);
+    if (stats.publicationViews.length > 0) {
+      stats.views = sumViewCounts(stats.publicationViews);
+      stats.viewsSource = 'video_cards';
+      stats.videos = Math.max(stats.videos, stats.publicationViews.length);
+    }
 
     logger.info(`📊 TikTok: ${stats.followers} подписчиков, ${stats.likes} лайков`);
   } catch (err) {
@@ -247,7 +264,6 @@ async function _scrapeTikTokProfile(
         const likesMatch = bodyText.match(/(\d[\d.,KkMmBbтысмлн]*)\s*(?:Likes|лайк)/i);
         if (followersMatch) stats.followers = parseShortNumber(followersMatch[1]);
         if (likesMatch) stats.likes = parseShortNumber(likesMatch[1]);
-        stats.views = stats.likes;
       }
     } catch { /* last resort failed */ }
   }
@@ -266,8 +282,10 @@ async function _scrapeYouTubeProfile(
     followers: 0,
     following: 0,
     views: 0,
+    viewsSource: 'unavailable',
     likes: 0,
     videos: 0,
+    publicationViews: [],
     snapshotAt: new Date(),
   };
 
@@ -310,6 +328,7 @@ async function _scrapeYouTubeProfile(
 
     if (await viewsEl.count() > 0) {
       stats.views = parseShortNumber(await viewsEl.textContent() || '0');
+      stats.viewsSource = 'studio_total';
     }
 
     logger.info(`📊 YouTube Studio: ${stats.followers} подписчиков, ${stats.views} просмотров`);
@@ -317,10 +336,11 @@ async function _scrapeYouTubeProfile(
     logger.warn(`⚠️ Studio парсинг не удался: ${err instanceof Error ? err.message : err}`);
   }
 
-  // Fallback: YouTube channel page
-  if (stats.followers === 0) {
+  // Fallback: YouTube channel page. Also used to refresh per-video counters
+  // because Studio total views do not map back to VideoPublication rows.
+  if (stats.followers === 0 || stats.publicationViews.length === 0) {
     try {
-      await page.goto('https://www.youtube.com/@me', { waitUntil: 'load', timeout: 15000 });
+      await page.goto('https://www.youtube.com/@me/videos', { waitUntil: 'load', timeout: 15000 });
       await page.waitForTimeout(2000);
 
       const subEl = page.locator('#subscriber-count, yt-formatted-string#subscriber-count').first();
@@ -330,6 +350,11 @@ async function _scrapeYouTubeProfile(
 
       const videoEls = page.locator('ytd-rich-item-renderer, ytd-grid-video-renderer');
       stats.videos = await videoEls.count();
+      stats.publicationViews = await _collectYouTubeVisibleVideoViews(page, logger);
+      if (stats.viewsSource === 'unavailable' && stats.publicationViews.length > 0) {
+        stats.views = sumViewCounts(stats.publicationViews);
+        stats.viewsSource = 'video_cards';
+      }
 
       logger.info(`📊 YouTube Channel: ${stats.followers} подписчиков, ${stats.videos} видео`);
     } catch {
@@ -347,10 +372,53 @@ function _emptyStats(): ProfileStats {
     followers: 0,
     following: 0,
     views: 0,
+    viewsSource: 'unavailable',
     likes: 0,
     videos: 0,
+    publicationViews: [],
     snapshotAt: new Date(),
   };
+}
+
+async function _collectTikTokVisibleVideoViews(page: any, logger: SocketLogger): Promise<number[]> {
+  let best: number[] = [];
+
+  for (let i = 0; i < 5; i++) {
+    const directTexts = await page.locator(
+      '[data-e2e="video-views"], ' +
+      '[data-e2e="user-post-item"] strong, ' +
+      '[class*="DivPlayLine"] strong, ' +
+      '[class*="DivVideoCardContainer"] strong',
+    ).allTextContents().catch(() => [] as string[]);
+
+    const cardTexts = directTexts.length > 0
+      ? directTexts
+      : await page.locator('[data-e2e="user-post-item"], [class*="DivItemContainer"]')
+        .allTextContents()
+        .catch(() => [] as string[]);
+
+    const counts = extractTikTokViewCounts(cardTexts);
+    if (counts.length > best.length) best = counts;
+
+    await page.evaluate(() => window.scrollBy(0, window.innerHeight * 2)).catch(() => {});
+    await page.waitForTimeout(900 + Math.random() * 500).catch(() => {});
+  }
+
+  logger.info(`TikTok visible video views collected: ${best.length} cards`);
+  return best;
+}
+
+async function _collectYouTubeVisibleVideoViews(page: any, logger: SocketLogger): Promise<number[]> {
+  const texts = await page.locator(
+    'ytd-rich-grid-media #metadata-line span, ' +
+    'ytd-grid-video-renderer #metadata-line span, ' +
+    'ytd-video-renderer #metadata-line span, ' +
+    '#metadata-line span',
+  ).allTextContents().catch(() => [] as string[]);
+
+  const counts = extractYouTubeViewCounts(texts);
+  logger.info(`YouTube visible video views collected: ${counts.length} cards`);
+  return counts;
 }
 
 /**
@@ -363,14 +431,39 @@ async function _persistStats(
   logger: SocketLogger,
 ): Promise<void> {
   try {
+    const current = await prisma.socialAccount.findUnique({
+      where: { id: accountId },
+      select: { userId: true, views: true },
+    });
+    if (!current) throw new Error(`Account ${accountId} not found`);
+
+    const viewsToPersist = stats.viewsSource === 'unavailable'
+      ? current.views
+      : stats.views;
+
     const account = await prisma.socialAccount.update({
       where: { id: accountId },
       data: {
-        views: stats.views,
+        views: viewsToPersist,
         followers: stats.followers,
       },
       select: { userId: true },
     });
+
+    if (stats.publicationViews.length > 0) {
+      try {
+        await _persistPublicationViews(
+          accountId,
+          account.userId,
+          stats.publicationViews,
+          stats.snapshotAt,
+          logger,
+        );
+      } catch (publicationErr) {
+        const message = publicationErr instanceof Error ? publicationErr.message : String(publicationErr);
+        logger.warn(`Publication view counters were not saved: ${message}`);
+      }
+    }
 
     // Upsert daily snapshot for real time-series charts
     const today = new Date();
@@ -384,46 +477,54 @@ async function _persistStats(
         accountId,
         userId: account.userId,
         date: today,
-        views: stats.views,
+        views: viewsToPersist,
         followers: stats.followers,
         likes: stats.likes,
         videos: stats.videos,
       },
       update: {
-        views: stats.views,
+        views: viewsToPersist,
         followers: stats.followers,
         likes: stats.likes,
         videos: stats.videos,
       },
     });
 
-    logger.info(`💾 Статистика сохранена: views=${stats.views}, followers=${stats.followers}`);
+    logger.info(`Stats saved: views=${viewsToPersist}, followers=${stats.followers}, source=${stats.viewsSource}`);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     logger.warn(`⚠️ Не удалось сохранить статистику в БД: ${message}`);
   }
 }
 
-/**
- * Parse short numbers: "12.5K" → 12500, "1.2M" → 1200000
- */
-export function parseShortNumber(text: string): number {
-  if (!text) return 0;
-  const cleaned = text.trim().replace(/[, ]/g, '');
+async function _persistPublicationViews(
+  accountId: string,
+  userId: string,
+  publicationViews: number[],
+  viewsUpdatedAt: Date,
+  logger: SocketLogger,
+): Promise<void> {
+  const publications = await prisma.videoPublication.findMany({
+    where: {
+      accountId,
+      userId,
+      status: 'UPLOADED',
+      uploadedAt: { not: null },
+    },
+    orderBy: { uploadedAt: 'desc' },
+    take: publicationViews.length,
+    select: { id: true },
+  });
 
-  const multipliers: Record<string, number> = {
-    K: 1_000, k: 1_000,
-    M: 1_000_000, m: 1_000_000,
-    B: 1_000_000_000, b: 1_000_000_000,
-    'тыс': 1_000, 'млн': 1_000_000,
-  };
+  await Promise.all(publications.map((publication, index) =>
+    prisma.videoPublication.update({
+      where: { id: publication.id },
+      data: {
+        views: publicationViews[index],
+        viewsUpdatedAt,
+      },
+    }),
+  ));
 
-  for (const [suffix, multiplier] of Object.entries(multipliers)) {
-    if (cleaned.endsWith(suffix)) {
-      const num = parseFloat(cleaned.replace(suffix, ''));
-      return Math.round(num * multiplier);
-    }
-  }
-
-  return parseInt(cleaned, 10) || 0;
+  logger.info(`Updated publication views for ${publications.length}/${publicationViews.length} visible cards`);
 }

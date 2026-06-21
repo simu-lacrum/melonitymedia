@@ -285,6 +285,7 @@ model VideoPublication {
   status      VideoPublicationStatus @default(QUEUED)
   uploadedAt  DateTime?
   views       Int                    @default(0)
+  viewsUpdatedAt DateTime?
   error       String?
   createdAt   DateTime               @default(now())
   updatedAt   DateTime               @updatedAt

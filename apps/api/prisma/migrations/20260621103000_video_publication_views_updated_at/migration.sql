@@ -1,0 +1,2 @@
+ALTER TABLE "VideoPublication"
+ADD COLUMN IF NOT EXISTS "viewsUpdatedAt" TIMESTAMP(3);
