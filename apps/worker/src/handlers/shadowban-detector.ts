@@ -63,6 +63,7 @@ export async function shadowbanDetectorHandler(
     const accounts = await prisma.socialAccount.findMany({
       where: {
         status: 'ALIVE',
+        platform: 'TIKTOK',
         warmupCompletedAt: { not: null },
       },
       select: { id: true, userId: true },
@@ -137,10 +138,16 @@ export async function detectShadowbanForAccount(accountId: string): Promise<{
       id: true,
       userId: true,
       nickname: true,
+      platform: true,
       status: true,
       warmupCompletedAt: true,
     },
   });
+
+  // Shadowban detection here is intentionally TikTok-only. YouTube Shorts has
+  // different distribution/analytics semantics, so its low counters must not
+  // cancel upload queues through TikTok thresholds.
+  if (account.platform !== 'TIKTOK') return { flagged: false };
 
   // Only flag warmed-up accounts in a normal state.
   if (account.status !== "ALIVE") return { flagged: false };

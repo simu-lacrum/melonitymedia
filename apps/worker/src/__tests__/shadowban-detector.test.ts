@@ -18,26 +18,49 @@ vi.mock('../lib/socket-logger.js', () => ({
   }),
 }));
 
+vi.mock('../lib/bullmq.js', () => ({
+  addJob: vi.fn(),
+}));
+
+import { addJob } from '../lib/bullmq.js';
+
 let detectShadowbanForAccount: any;
+let shadowbanDetectorHandler: any;
 
 describe('detectShadowbanForAccount', () => {
   beforeAll(async () => {
     const module = await import('../handlers/shadowban-detector.js');
     detectShadowbanForAccount = module.detectShadowbanForAccount;
+    shadowbanDetectorHandler = module.shadowbanDetectorHandler;
   });
 
   beforeEach(() => {
     mockReset(prismaMock);
+    vi.mocked(addJob).mockReset();
   });
 
   const baseAccount = {
     id: 'acc-1',
     userId: 'user-1',
     nickname: '@melon',
+    platform: 'TIKTOK' as const,
     status: 'ALIVE' as const,
     warmupCompletedAt: new Date('2026-05-01'),
   };
   const refreshedAt = new Date('2026-06-20T12:00:00Z');
+
+  it('returns flagged:false for non-TikTok accounts without reading publications', async () => {
+    prismaMock.socialAccount.findUniqueOrThrow.mockResolvedValue({
+      ...baseAccount,
+      platform: 'YOUTUBE' as any,
+    } as any);
+
+    const result = await detectShadowbanForAccount('acc-1');
+    expect(result.flagged).toBe(false);
+    expect(prismaMock.videoPublication.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.socialAccount.update).not.toHaveBeenCalled();
+    expect(prismaMock.task.updateMany).not.toHaveBeenCalled();
+  });
 
   it('returns flagged:false when account is not ALIVE', async () => {
     prismaMock.socialAccount.findUniqueOrThrow.mockResolvedValue({
@@ -137,5 +160,37 @@ describe('detectShadowbanForAccount', () => {
     // gte should be ~14 days ago
     expect(now - gte.getTime()).toBeGreaterThan(14 * 86_400_000 - 5000);
     expect(now - gte.getTime()).toBeLessThan(14 * 86_400_000 + 5000);
+  });
+
+  it('cron dispatches only TikTok warmed-up alive accounts', async () => {
+    prismaMock.socialAccount.findMany.mockResolvedValue([
+      { id: 'acc-1', userId: 'user-1' },
+    ] as any);
+
+    const job = {
+      data: { _cron: true },
+      updateProgress: vi.fn(),
+    };
+
+    const result = await shadowbanDetectorHandler(job as any);
+
+    expect(prismaMock.socialAccount.findMany).toHaveBeenCalledWith({
+      where: {
+        status: 'ALIVE',
+        platform: 'TIKTOK',
+        warmupCompletedAt: { not: null },
+      },
+      select: { id: true, userId: true },
+    });
+    expect(addJob).toHaveBeenCalledWith(
+      'shadowban-check',
+      { userId: 'user-1', accountId: 'acc-1' },
+      { delay: 0, jobId: 'shadowban-acc-1' },
+    );
+    expect(result).toMatchObject({
+      accountId: 'cron-dispatch',
+      flagged: false,
+      reason: 'Dispatched 1 checks',
+    });
   });
 });
