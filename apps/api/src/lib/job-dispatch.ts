@@ -36,20 +36,22 @@ async function checkAccountLock(accountId: string): Promise<string | null> {
  * Build a proxy URL with real credentials for worker use.
  * NEVER log this string — credentials are inline.
  *
- * Output: http://user:pass@host:port  (or http://host:port if no auth)
+ * Output: http://user:pass@host:port / socks5://user:pass@host:port.
  */
 export function buildProxyUrlWithCreds(proxy: {
   host: string;
   port: number;
+  protocol?: string | null;
   username?: string | null;
   password?: string | null;
 }): string {
+  const scheme = proxy.protocol === 'SOCKS5' ? 'socks5' : 'http';
   if (proxy.username && proxy.password) {
     const u = encodeURIComponent(proxy.username);
     const p = encodeURIComponent(proxy.password);
-    return `http://${u}:${p}@${proxy.host}:${proxy.port}`;
+    return `${scheme}://${u}:${p}@${proxy.host}:${proxy.port}`;
   }
-  return `http://${proxy.host}:${proxy.port}`;
+  return `${scheme}://${proxy.host}:${proxy.port}`;
 }
 
 export interface DispatchedJob {

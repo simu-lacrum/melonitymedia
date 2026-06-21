@@ -1,6 +1,7 @@
 export function buildProxyUrl(p: {
   host?: string | null;
   port?: number | null;
+  protocol?: string | null;
   username?: string | null;
   password?: string | null;
 }): string {
@@ -9,7 +10,7 @@ export function buildProxyUrl(p: {
   }
   let hostStr = p.host.trim();
   
-  let protocol = 'http://';
+  let protocol = p.protocol === 'SOCKS5' ? 'socks5://' : 'http://';
   if (hostStr.startsWith('http://')) { protocol = 'http://'; hostStr = hostStr.slice(7); }
   else if (hostStr.startsWith('https://')) { protocol = 'https://'; hostStr = hostStr.slice(8); }
   else if (hostStr.startsWith('socks5://')) { protocol = 'socks5://'; hostStr = hostStr.slice(9); }

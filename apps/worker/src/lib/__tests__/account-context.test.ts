@@ -28,6 +28,7 @@ describe('loadAccountContext', () => {
       fingerprint: { /* whatever, opaque to the resolver */ } as any,
       pinnedProxy: {
         host: '1.2.3.4', port: 8000,
+        protocol: 'HTTP',
         username: 'u@me', password: 'p@ss',
         carrier: 'T-Mobile', country: 'US',
       },
@@ -37,6 +38,23 @@ describe('loadAccountContext', () => {
     const ctx = await loadAccountContext('a1');
     expect(ctx.proxyUrl).toBe('http://u%40me:p%40ss@1.2.3.4:8000');
     expect(ctx.carrier).toBe('T-Mobile');
+  });
+
+  it('preserves SOCKS5 proxy protocol from the pinned proxy', async () => {
+    (prismaMock.socialAccount.findUniqueOrThrow as any).mockResolvedValue({
+      id: 'a1', userId: 'u1', platform: 'TIKTOK',
+      fingerprint: {} as any,
+      pinnedProxy: {
+        host: '1.2.3.4', port: 1080,
+        protocol: 'SOCKS5',
+        username: 'u', password: 'p',
+        carrier: null, country: 'US',
+      },
+      warmupCompletedAt: new Date(), warmupStartedAt: new Date(), warmupDays: 10,
+      status: 'ALIVE',
+    });
+    const ctx = await loadAccountContext('a1');
+    expect(ctx.proxyUrl).toBe('socks5://u:p@1.2.3.4:1080');
   });
 
   it('returns proxyUrl=undefined when no proxy pinned', async () => {

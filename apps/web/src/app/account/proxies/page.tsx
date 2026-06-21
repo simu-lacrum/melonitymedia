@@ -22,6 +22,7 @@ interface Proxy {
   id: string
   host: string
   port: number
+  protocol?: "HTTP" | "SOCKS5"
   type: string
   carrier?: string
   country?: string
@@ -47,11 +48,11 @@ export default function ProxiesPage() {
 
   const [formHost, setFormHost] = React.useState("")
   const [formPort, setFormPort] = React.useState("")
+  const [formProtocol, setFormProtocol] = React.useState<"HTTP" | "SOCKS5">("HTTP")
   const [formUser, setFormUser] = React.useState("")
   const [formPass, setFormPass] = React.useState("")
   const [formType, setFormType] = React.useState("LTE_MOBILE")
   const [formCountry, setFormCountry] = React.useState("US")
-  const [formCarrier, setFormCarrier] = React.useState("")
   const [formRotationLink, setFormRotationLink] = React.useState("")
   const [formRotationCooldown, setFormRotationCooldown] = React.useState("900")
   const [bulkText, setBulkText] = React.useState("")
@@ -93,6 +94,15 @@ export default function ProxiesPage() {
   const filtered = proxies.filter((p) =>
     `${p.host}:${p.port} ${p.carrier || ""} ${p.country || ""}`.toLowerCase().includes(search.toLowerCase())
   )
+  const isMobileProxy = formType === "LTE_MOBILE"
+
+  const handleProxyTypeChange = (value: string) => {
+    setFormType(value)
+    if (value !== "LTE_MOBILE") {
+      setFormRotationLink("")
+      setFormRotationCooldown("900")
+    }
+  }
 
   const toggleAll = () => {
     setSelectedIds(selectedIds.length === filtered.length ? [] : filtered.map((p) => p.id))
@@ -124,13 +134,13 @@ export default function ProxiesPage() {
       const result = await api.post<{ proxy: Proxy }>("/api/proxies", {
         host: formHost.trim(),
         port: parseInt(formPort, 10),
+        protocol: formProtocol,
         username: formUser.trim() || undefined,
         password: formPass.trim() || undefined,
         type: formType,
         country: formCountry.trim() || undefined,
-        carrier: formCarrier.trim() || undefined,
-        rotationLink: formRotationLink.trim() || undefined,
-        rotationCooldown: parseInt(formRotationCooldown, 10) || 900,
+        rotationLink: isMobileProxy ? formRotationLink.trim() || undefined : undefined,
+        rotationCooldown: isMobileProxy ? parseInt(formRotationCooldown, 10) || 900 : undefined,
       })
 
       if (bindAccountIds.length > 0 && result.proxy?.id) {
@@ -147,7 +157,7 @@ export default function ProxiesPage() {
       toast.success("Прокси добавлен")
       setShowModal(false)
       setFormHost(""); setFormPort(""); setFormUser(""); setFormPass("")
-      setFormType("LTE_MOBILE"); setFormCountry("US"); setFormCarrier(""); setFormRotationLink(""); setFormRotationCooldown("900")
+      setFormProtocol("HTTP"); setFormType("LTE_MOBILE"); setFormCountry("US"); setFormRotationLink(""); setFormRotationCooldown("900")
       setBindAccountIds([])
       fetchProxies()
     } catch (err: any) {
@@ -165,9 +175,11 @@ export default function ProxiesPage() {
       const result = await api.post<{ created: number; ids: string[] }>("/api/proxies/import", {
         mode: "manual",
         data: bulkText.trim(),
+        protocol: formProtocol,
         type: formType,
         country: formCountry.trim() || undefined,
-        carrier: formCarrier.trim() || undefined,
+        rotationLink: undefined,
+        rotationCooldown: undefined,
       })
 
       if (bindAccountIds.length > 0 && result.ids?.length > 0) {
@@ -346,6 +358,7 @@ export default function ProxiesPage() {
                       />
                     </TableHead>
                     <TableHead>IP : Порт</TableHead>
+                    <TableHead>Протокол</TableHead>
                     <TableHead>Тип</TableHead>
                     <TableHead>Оператор</TableHead>
                     <TableHead>Страна</TableHead>
@@ -373,6 +386,7 @@ export default function ProxiesPage() {
                           </code>
                         </div>
                       </TableCell>
+                      <TableCell><Badge variant="outline">{proxy.protocol || "HTTP"}</Badge></TableCell>
                       <TableCell><Badge variant="secondary">{proxy.type}</Badge></TableCell>
                       <TableCell className="text-sm">{proxy.carrier || "—"}</TableCell>
                       <TableCell className="text-sm">{proxy.country || "—"}</TableCell>
@@ -426,6 +440,32 @@ export default function ProxiesPage() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="flex flex-col gap-2">
+                  <Label htmlFor="proxy-protocol">Протокол</Label>
+                  <Select value={formProtocol} onValueChange={(v) => setFormProtocol((v as "HTTP" | "SOCKS5") ?? "HTTP")}>
+                    <SelectTrigger id="proxy-protocol">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="HTTP">HTTP</SelectItem>
+                      <SelectItem value="SOCKS5">SOCKS5</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="proxy-type">Тип</Label>
+                  <Select value={formType} onValueChange={(v) => handleProxyTypeChange(v ?? "LTE_MOBILE")}>
+                    <SelectTrigger id="proxy-type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="LTE_MOBILE">LTE mobile</SelectItem>
+                      <SelectItem value="STATIC_RESIDENTIAL">Static residential</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-2">
                   <Label htmlFor="proxy-user">Логин</Label>
                   <Input id="proxy-user" placeholder="username" value={formUser}
                     onChange={(e) => setFormUser(e.target.value)} />
@@ -436,42 +476,27 @@ export default function ProxiesPage() {
                     onChange={(e) => setFormPass(e.target.value)} />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="proxy-type">Тип</Label>
-                  <Select value={formType} onValueChange={(v) => setFormType(v ?? "LTE_MOBILE")}>
-                    <SelectTrigger id="proxy-type">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="LTE_MOBILE">LTE mobile</SelectItem>
-                      <SelectItem value="STATIC_RESIDENTIAL">Static residential</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className={isMobileProxy ? "grid grid-cols-2 gap-4" : "grid grid-cols-1 gap-4"}>
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="proxy-country">Страна</Label>
                   <Input id="proxy-country" placeholder="US" value={formCountry}
                     onChange={(e) => setFormCountry(e.target.value.toUpperCase())} />
                 </div>
+                {isMobileProxy && (
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="proxy-cooldown">Cooldown, сек</Label>
+                    <Input id="proxy-cooldown" type="number" min={60} max={3600} value={formRotationCooldown}
+                      onChange={(e) => setFormRotationCooldown(e.target.value)} />
+                  </div>
+                )}
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              {isMobileProxy && (
                 <div className="flex flex-col gap-2">
-                  <Label htmlFor="proxy-carrier">Оператор</Label>
-                  <Input id="proxy-carrier" placeholder="T-Mobile" value={formCarrier}
-                    onChange={(e) => setFormCarrier(e.target.value)} />
+                  <Label htmlFor="proxy-rotation">Rotation link</Label>
+                  <Input id="proxy-rotation" placeholder="https://provider.example/rotate/slot" value={formRotationLink}
+                    onChange={(e) => setFormRotationLink(e.target.value)} />
                 </div>
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="proxy-cooldown">Cooldown, сек</Label>
-                  <Input id="proxy-cooldown" type="number" min={60} max={3600} value={formRotationCooldown}
-                    onChange={(e) => setFormRotationCooldown(e.target.value)} />
-                </div>
-              </div>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="proxy-rotation">Rotation link</Label>
-                <Input id="proxy-rotation" placeholder="https://provider.example/rotate/slot" value={formRotationLink}
-                  onChange={(e) => setFormRotationLink(e.target.value)} />
-              </div>
+              )}
               {renderAccountSelector()}
               <Button onClick={handleAddSingle} disabled={submitting || !formHost || !formPort} className="w-full active:scale-[0.97] transition-transform">
                 {submitting ? <><Loader2 className="size-4 mr-2 animate-spin" />Добавление...</> : "Добавить"}
@@ -485,18 +510,30 @@ export default function ProxiesPage() {
                   id="proxy-bulk"
                   rows={8}
                   className="font-mono text-sm resize-none"
-                  placeholder={"host:port:user:pass\nhost:port:user:pass\nhost:port"}
+                  placeholder={"host:port:user:pass\nsocks5://host:port:user:pass\nhttp://host:port"}
                   value={bulkText}
                   onChange={(e) => setBulkText(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Формат: host:port или host:port:user:pass — по одному на строку
+                  Формат: host:port, host:port:user:pass или URL с http:// / socks5://
                 </p>
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <div className="flex flex-col gap-2">
+                  <Label htmlFor="bulk-proxy-protocol">Протокол</Label>
+                  <Select value={formProtocol} onValueChange={(v) => setFormProtocol((v as "HTTP" | "SOCKS5") ?? "HTTP")}>
+                    <SelectTrigger id="bulk-proxy-protocol">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="HTTP">HTTP</SelectItem>
+                      <SelectItem value="SOCKS5">SOCKS5</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex flex-col gap-2">
                   <Label htmlFor="bulk-proxy-type">Тип</Label>
-                  <Select value={formType} onValueChange={(v) => setFormType(v ?? "LTE_MOBILE")}>
+                  <Select value={formType} onValueChange={(v) => handleProxyTypeChange(v ?? "LTE_MOBILE")}>
                     <SelectTrigger id="bulk-proxy-type">
                       <SelectValue />
                     </SelectTrigger>
@@ -510,11 +547,6 @@ export default function ProxiesPage() {
                   <Label htmlFor="bulk-proxy-country">Страна</Label>
                   <Input id="bulk-proxy-country" placeholder="US" value={formCountry}
                     onChange={(e) => setFormCountry(e.target.value.toUpperCase())} />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="bulk-proxy-carrier">Оператор</Label>
-                  <Input id="bulk-proxy-carrier" placeholder="T-Mobile" value={formCarrier}
-                    onChange={(e) => setFormCarrier(e.target.value)} />
                 </div>
               </div>
               {renderAccountSelector()}

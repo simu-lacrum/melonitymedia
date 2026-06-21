@@ -32,6 +32,7 @@ export async function loadAccountContext(accountId: string): Promise<AccountCont
         select: {
           host: true,
           port: true,
+          protocol: true,
           username: true,
           password: true,
           carrier: true,

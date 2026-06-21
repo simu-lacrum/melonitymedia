@@ -54,11 +54,11 @@ export function LiveTerminal({ taskId }: { taskId?: string }) {
     <motion.div
       layout
       className={`liquid-glass flex flex-col overflow-hidden transition-[height,border-radius] duration-[280ms] ease-[cubic-bezier(0.32,0.72,0,1)] ${
-        expanded ? "fixed inset-4 z-50 rounded-2xl" : "h-[400px] rounded-card-base"
+        expanded ? "fixed inset-4 z-[100] h-[calc(100dvh-2rem)] rounded-2xl" : "h-[400px] rounded-card-base"
       }`}
     >
-      <div className="flex items-center justify-between p-4 border-b border-white/10 bg-white/5">
-        <div className="flex items-center space-x-3">
+      <div className="flex items-center justify-between gap-3 p-4 border-b border-white/10 bg-white/5">
+        <div className="flex min-w-0 items-center space-x-3">
           <Terminal className="w-5 h-5 text-white/70" />
           <h3 className="font-medium">Live Terminal</h3>
           <div className="flex items-center space-x-2">
@@ -71,7 +71,7 @@ export function LiveTerminal({ taskId }: { taskId?: string }) {
             <span className="text-caption text-text-muted">{connected ? "Connected" : "Offline"}</span>
           </div>
         </div>
-        <div className="flex items-center space-x-2">
+        <div className="flex shrink-0 items-center space-x-2">
           <Button variant="ghost" size="icon" onClick={() => clearLogs()} className="w-8 h-8 hover:bg-white/10" title="Очистить логи">
             <Trash2 className="w-4 h-4" />
           </Button>
@@ -99,4 +99,3 @@ export function LiveTerminal({ taskId }: { taskId?: string }) {
     </motion.div>
   )
 }
-

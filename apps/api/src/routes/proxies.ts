@@ -25,6 +25,7 @@ const createProxySchema = z.object({
   name: z.string().optional(),
   host: z.string().min(1, 'Хост обязателен'),
   port: z.number().int().min(1).max(65535),
+  protocol: z.enum(['HTTP', 'SOCKS5']).optional(),
   username: z.string().optional(),
   password: z.string().optional(),
   rotationLink: z.string().url().optional().or(z.literal('')),
@@ -41,6 +42,7 @@ const updateProxySchema = z.object({
   name: z.string().optional(),
   host: z.string().min(1).optional(),
   port: z.number().int().min(1).max(65535).optional(),
+  protocol: z.enum(['HTTP', 'SOCKS5']).optional(),
   username: z.string().optional(),
   password: z.string().optional(),
   rotationLink: z.string().url().optional().or(z.literal('')).or(z.null()),
@@ -50,21 +52,61 @@ const updateProxySchema = z.object({
   rotationCooldown: z.number().int().min(60).max(3600).optional(),
 }).strict(); // .strict() rejects unknown keys like userId, id, status
 
+type ProxyProtocolInput = 'HTTP' | 'SOCKS5';
+
+function normalizeProtocol(protocol?: string | null): ProxyProtocolInput {
+  return protocol === 'SOCKS5' ? 'SOCKS5' : 'HTTP';
+}
+
+function protocolToScheme(protocol?: string | null): 'http' | 'socks5' {
+  return normalizeProtocol(protocol) === 'SOCKS5' ? 'socks5' : 'http';
+}
+
+function stripProtocolFromHost(
+  host: string,
+  fallback: ProxyProtocolInput = 'HTTP',
+): { host: string; protocol: ProxyProtocolInput } {
+  const trimmed = host.trim();
+  const match = trimmed.match(/^(https?|socks5):\/\//i);
+  if (!match) return { host: trimmed, protocol: fallback };
+
+  const protocol = match[1].toLowerCase() === 'socks5' ? 'SOCKS5' : 'HTTP';
+  return {
+    host: trimmed.slice(match[0].length),
+    protocol,
+  };
+}
+
 // Helper: compose address from parts for DB storage
-function composeAddress(host: string, port: number, username?: string, password?: string): string {
+function composeAddress(
+  host: string,
+  port: number,
+  username?: string | null,
+  password?: string | null,
+  protocol: ProxyProtocolInput = 'HTTP',
+): string {
+  const scheme = protocolToScheme(protocol);
   if (username && password) {
-    return `${username}:${password}@${host}:${port}`;
+    return `${scheme}://${username}:${password}@${host}:${port}`;
   }
-  return `${host}:${port}`;
+  return `${scheme}://${host}:${port}`;
 }
 
 // Helper: decompose address back to parts for API response
-function decomposeAddress(address: string) {
+function decomposeAddress(address: string): {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  protocol: ProxyProtocolInput;
+} {
   let host = '', port = 0, username = '', password = '';
-  if (address.includes('@')) {
-    const atIdx = address.lastIndexOf('@');
-    const auth = address.substring(0, atIdx);
-    const hostPort = address.substring(atIdx + 1);
+  const stripped = stripProtocolFromHost(address);
+  const cleanAddress = stripped.host;
+  if (cleanAddress.includes('@')) {
+    const atIdx = cleanAddress.lastIndexOf('@');
+    const auth = cleanAddress.substring(0, atIdx);
+    const hostPort = cleanAddress.substring(atIdx + 1);
     const colonIdx = auth.indexOf(':');
     username = colonIdx >= 0 ? auth.substring(0, colonIdx) : auth;
     password = colonIdx >= 0 ? auth.substring(colonIdx + 1) : '';
@@ -72,23 +114,65 @@ function decomposeAddress(address: string) {
     host = hpParts[0];
     port = parseInt(hpParts[1] || '0', 10);
   } else {
-    const parts = address.split(':');
+    const parts = cleanAddress.split(':');
     host = parts[0];
     port = parseInt(parts[1] || '0', 10);
   }
-  return { host, port, username, password };
+  return { host, port, username, password, protocol: stripped.protocol };
+}
+
+function parseProxyLine(line: string, defaultProtocol: ProxyProtocolInput): {
+  host: string;
+  port: number;
+  username: string | null;
+  password: string | null;
+  protocol: ProxyProtocolInput;
+} | null {
+  const stripped = stripProtocolFromHost(line, defaultProtocol);
+  let hostPortAndAuth = stripped.host;
+  let host = '';
+  let port = 0;
+  let username: string | null = null;
+  let password: string | null = null;
+
+  if (hostPortAndAuth.includes('@')) {
+    const atIdx = hostPortAndAuth.lastIndexOf('@');
+    const auth = hostPortAndAuth.slice(0, atIdx);
+    hostPortAndAuth = hostPortAndAuth.slice(atIdx + 1);
+    const authParts = auth.split(':');
+    username = authParts[0] || null;
+    password = authParts.slice(1).join(':') || null;
+  }
+
+  const parts = hostPortAndAuth.split(':');
+  if (parts.length < 2) return null;
+
+  host = parts[0];
+  port = parseInt(parts[1], 10);
+  if (!username && parts.length >= 3) username = parts[2] || null;
+  if (!password && parts.length >= 4) password = parts.slice(3).join(':') || null;
+  if (!host || Number.isNaN(port)) return null;
+
+  return {
+    host,
+    port,
+    username,
+    password,
+    protocol: stripped.protocol,
+  };
 }
 
 // Helper: enrich proxy record with decomposed fields for frontend
 function enrichProxy(proxy: any) {
   const decomposed = proxy.host && proxy.port
-    ? { host: proxy.host, port: proxy.port, username: proxy.username ?? '', password: proxy.password ?? '' }
+    ? { host: proxy.host, port: proxy.port, username: proxy.username ?? '', password: proxy.password ?? '', protocol: normalizeProtocol(proxy.protocol) }
     : decomposeAddress(proxy.address);
   return {
     ...proxy,
     name: proxy.label || '',
     host: decomposed.host,
     port: decomposed.port,
+    protocol: proxy.protocol ?? decomposed.protocol ?? 'HTTP',
     username: undefined,
     password: undefined,
     isActive: proxy.status === 'ACTIVE',
@@ -127,34 +211,51 @@ router.post('/', async (req: Request, res: Response) => {
       return;
     }
 
-    const { name, host, port, username, password, rotationLink, type, country, carrier, dma, rotationCooldown } = parsed.data;
+    const {
+      name,
+      host,
+      port,
+      username,
+      password,
+      rotationLink,
+      type,
+      country,
+      dma,
+      rotationCooldown,
+    } = parsed.data;
+    const normalizedType = type ?? 'LTE_MOBILE';
+    const hostParts = stripProtocolFromHost(host, normalizeProtocol(parsed.data.protocol));
+    const normalizedHost = hostParts.host;
+    const normalizedProtocol = hostParts.protocol;
+    const supportsRotation = normalizedType === 'LTE_MOBILE';
 
     // M-8 FIX: Prevent duplicate proxies with same host:port for this user
     const existing = await prisma.proxy.findFirst({
-      where: { host, port, userId: req.user!.id },
+      where: { host: normalizedHost, port, protocol: normalizedProtocol, userId: req.user!.id },
     });
     if (existing) {
-      res.status(409).json({ error: `Прокси ${host}:${port} уже существует`, existingId: existing.id });
+      res.status(409).json({ error: `Прокси ${protocolToScheme(normalizedProtocol)}://${normalizedHost}:${port} уже существует`, existingId: existing.id });
       return;
     }
 
-    const address = composeAddress(host, port, username, password);
-    const isRotating = !!rotationLink;
+    const address = composeAddress(normalizedHost, port, username, password, normalizedProtocol);
+    const isRotating = supportsRotation && !!rotationLink;
 
     const proxy = await prisma.proxy.create({
       data: {
-        host,
+        host: normalizedHost,
         port,
+        protocol: normalizedProtocol,
         username: username || null,
         password: password || null,
         address,
         label: name || null,
-        type: type ?? 'LTE_MOBILE',
+        type: normalizedType,
         isRotating,
-        rotationLink: rotationLink || null,
-        rotationCooldown: rotationCooldown ?? 900,
+        rotationLink: supportsRotation ? rotationLink || null : null,
+        rotationCooldown: supportsRotation ? rotationCooldown ?? 900 : 900,
         country: country ?? 'US',
-        carrier: carrier || null,
+        carrier: null,
         dma: dma || null,
         userId: req.user!.id,
       },
@@ -196,27 +297,41 @@ router.patch('/:id', async (req: Request, res: Response) => {
     // Handle host/port/username/password changes — recalculate address
     // even on partial updates (BUG-9 fix: previously required both host AND port)
     const hasConnectionChange = input.host !== undefined || input.port !== undefined
-      || input.username !== undefined || input.password !== undefined;
+      || input.protocol !== undefined || input.username !== undefined || input.password !== undefined;
     if (hasConnectionChange) {
-      const finalHost = input.host ?? existing.host;
+      const hostParts = input.host
+        ? stripProtocolFromHost(input.host, normalizeProtocol(input.protocol ?? existing.protocol))
+        : { host: existing.host, protocol: normalizeProtocol(input.protocol ?? existing.protocol) };
+      const finalHost = hostParts.host;
       const finalPort = input.port ?? existing.port;
+      const finalProtocol = hostParts.protocol;
       const finalUser = input.username !== undefined ? input.username : (existing.username ?? undefined);
       const finalPass = input.password !== undefined ? input.password : (existing.password ?? undefined);
 
-      if (input.host !== undefined) updateData.host = input.host;
+      updateData.host = finalHost;
+      updateData.protocol = finalProtocol;
       if (input.port !== undefined) updateData.port = input.port;
       if (input.username !== undefined) updateData.username = input.username || null;
       if (input.password !== undefined) updateData.password = input.password || null;
-      updateData.address = composeAddress(finalHost, finalPort, finalUser || undefined, finalPass || undefined);
+      updateData.address = composeAddress(finalHost, finalPort, finalUser || undefined, finalPass || undefined, finalProtocol);
     }
     if (input.name !== undefined) updateData.label = input.name;
+    const finalType = input.type ?? existing.type;
+    const supportsRotation = finalType === 'LTE_MOBILE';
     if (input.rotationLink !== undefined) {
-      updateData.rotationLink = input.rotationLink || null;
-      updateData.isRotating = !!input.rotationLink;
+      updateData.rotationLink = supportsRotation ? input.rotationLink || null : null;
+      updateData.isRotating = supportsRotation && !!input.rotationLink;
     }
-    if (input.type !== undefined) updateData.type = input.type;
+    if (input.type !== undefined) {
+      updateData.type = input.type;
+      if (!supportsRotation) {
+        updateData.rotationLink = null;
+        updateData.isRotating = false;
+        updateData.carrier = null;
+      }
+    }
     if (input.country !== undefined) updateData.country = input.country;
-    if (input.carrier !== undefined) updateData.carrier = input.carrier;
+    if (input.carrier !== undefined && finalType === 'LTE_MOBILE') updateData.carrier = input.carrier;
     if (input.rotationCooldown !== undefined) updateData.rotationCooldown = input.rotationCooldown;
 
     const proxy = await prisma.proxy.update({
@@ -286,9 +401,10 @@ router.post('/:id/test', async (req: Request, res: Response) => {
     // Real connectivity test via HTTP request through the proxy
     let testResult = { reachable: false, latencyMs: 0, externalIp: '' };
     try {
+      const scheme = protocolToScheme(proxy.protocol);
       const proxyUrl = proxy.username && proxy.password
-        ? `http://${encodeURIComponent(proxy.username)}:${encodeURIComponent(proxy.password)}@${proxy.host}:${proxy.port}`
-        : `http://${proxy.host}:${proxy.port}`;
+        ? `${scheme}://${encodeURIComponent(proxy.username)}:${encodeURIComponent(proxy.password)}@${proxy.host}:${proxy.port}`
+        : `${scheme}://${proxy.host}:${proxy.port}`;
 
       const start = Date.now();
       const { ProxyAgent } = await import('undici');
@@ -346,6 +462,7 @@ const importProxySchema = z.object({
   data: z.string().optional(),
   raw: z.string().optional(),
   apiKey: z.string().optional(),
+  protocol: z.enum(['HTTP', 'SOCKS5']).default('HTTP'),
   type: z.enum(['LTE_MOBILE', 'STATIC_RESIDENTIAL']).default('LTE_MOBILE'),
   country: z.string().optional(),
   carrier: z.string().optional(),
@@ -364,8 +481,9 @@ router.post('/import', async (req: Request, res: Response) => {
       return;
     }
 
-    const { mode, data, raw, apiKey, type, country, carrier, rotationLink, rotationCooldown } = parsed.data;
+    const { mode, data, raw, apiKey, protocol, type, country, rotationLink, rotationCooldown } = parsed.data;
     const importText = data || raw || '';
+    const supportsRotation = type === 'LTE_MOBILE';
     let added = 0;
     let skipped = 0;
     const ids: string[] = [];
@@ -377,18 +495,13 @@ router.post('/import', async (req: Request, res: Response) => {
       }
       const lines = importText.split('\n').map(l => l.trim()).filter(Boolean);
       for (const line of lines) {
-        // expect ip:port:user:pass or host:port
-        const parts = line.split(':');
-        if (parts.length < 2) continue;
-        const host = parts[0];
-        const port = parseInt(parts[1], 10);
-        if (isNaN(port)) continue;
-        const username = parts.length >= 3 ? parts[2] : null;
-        const password = parts.length >= 4 ? parts[3] : null;
+        const parsedProxy = parseProxyLine(line, normalizeProtocol(protocol));
+        if (!parsedProxy) continue;
+        const { host, port, username, password, protocol: proxyProtocol } = parsedProxy;
 
         // Skip duplicates (same host:port for this user)
         const existingProxy = await prisma.proxy.findFirst({
-          where: { host, port, userId: req.user!.id },
+          where: { host, port, protocol: proxyProtocol, userId: req.user!.id },
         });
         if (existingProxy) {
           skipped++;
@@ -400,15 +513,16 @@ router.post('/import', async (req: Request, res: Response) => {
             userId: req.user!.id,
             host,
             port,
+            protocol: proxyProtocol,
             username,
             password,
-            address: composeAddress(host, port, username || undefined, password || undefined),
+            address: composeAddress(host, port, username || undefined, password || undefined, proxyProtocol),
             type,
-            isRotating: !!rotationLink,
-            rotationLink: rotationLink || null,
-            rotationCooldown: rotationCooldown ?? 900,
+            isRotating: supportsRotation && !!rotationLink,
+            rotationLink: supportsRotation ? rotationLink || null : null,
+            rotationCooldown: supportsRotation ? rotationCooldown ?? 900 : 900,
             country: country ?? 'US',
-            carrier: carrier || null,
+            carrier: null,
           },
         });
         ids.push(proxy.id);
@@ -460,9 +574,10 @@ router.post('/import', async (req: Request, res: Response) => {
              userId: req.user!.id,
              host,
              port,
+             protocol: 'HTTP',
              username,
              password,
-             address: composeAddress(host, port, username, password),
+             address: composeAddress(host, port, username, password, 'HTTP'),
              type: proxyType,
              label: `Proxys.io #${p.id || host}`,
            }
@@ -583,9 +698,10 @@ router.post('/import/provider', async (req: Request, res: Response) => {
           providerApiKeyTag: apiAuthTag ? new Uint8Array(apiAuthTag) : null,
           host: p.host,
           port: p.port,
+          protocol: 'HTTP',
           username: p.username ?? null,
           password: p.password ?? null,
-          address: composeAddress(p.host, p.port, p.username, p.password),
+          address: composeAddress(p.host, p.port, p.username, p.password, 'HTTP'),
           type: 'LTE_MOBILE',
           isRotating: true,
           carrier: p.carrier ?? null,
