@@ -55,13 +55,14 @@ describe('account route safety guards', () => {
     expect(ACCOUNTS_SRC).toContain('dispatched === 0');
     expect(ACCOUNTS_SRC).toContain('res.status(409).json');
     expect(ACCOUNTS_SRC).toContain("f.error === 'NO_PROXY'");
-    expect(ACCOUNTS_SRC).toContain('Подходит LTE_MOBILE или STATIC_RESIDENTIAL');
+    expect(ACCOUNTS_SRC).toContain('нет привязанного рабочего прокси');
+    expect(ACCOUNTS_SRC).not.toContain('Подходит LTE_MOBILE или STATIC_RESIDENTIAL');
     expect(ACCOUNTS_SRC).not.toContain('PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT');
   });
 
   it('requires selecting a proxy before import starts login verification jobs', () => {
     expect(ACCOUNTS_SRC).toContain("proxyId === 'none'");
     expect(ACCOUNTS_SRC).toContain('Выберите прокси для импорта');
-    expect(ACCOUNTS_SRC).toContain('Для проверки входа и любых задач к аккаунту должен быть привязан прокси');
+    expect(ACCOUNTS_SRC).toContain('Для проверки входа и любых задач к аккаунту должен быть привязан рабочий прокси');
   });
 });

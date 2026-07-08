@@ -181,6 +181,19 @@ export function classifyError(
   }
 
   // ── Network ───────────────────────────────────────────────
+  if (
+    msg.includes('socks proxy authentication is not supported') ||
+    msg.includes('socks5 proxy authentication') ||
+    (msg.includes('socks') && msg.includes('authentication') && msg.includes('not supported'))
+  ) {
+    return {
+      code: 'PROXY_ERROR',
+      title: 'Прокси несовместим с браузером',
+      message: 'SOCKS-прокси с логином и паролем не поддерживается браузерным запуском.',
+      advice: 'Можно использовать любой привязанный прокси, но для SOCKS нужен вариант без авторизации. Если у провайдера есть HTTP endpoint этого же прокси, привяжите HTTP endpoint и повторите вход.',
+    };
+  }
+
   if (msg.includes('econnrefused') || msg.includes('enotfound') || msg.includes('etimedout') || msg.includes('proxy')) {
     return {
       code: 'PROXY_ERROR',

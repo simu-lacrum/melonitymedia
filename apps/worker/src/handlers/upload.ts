@@ -162,7 +162,7 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
     if (!proxyUrl) {
       throw new Error(
         `Account ${data.accountId} has no pinned proxy. ` +
-        `Pin an LTE_MOBILE or STATIC_RESIDENTIAL proxy via /account/accounts before uploading.`,
+        `Pin a working proxy via /account/accounts before uploading.`,
       );
     }
 

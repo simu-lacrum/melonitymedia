@@ -60,6 +60,14 @@ describe('account UI safety copy', () => {
     expect(WORKSPACE_PAGE_SRC).toContain('title="VNC monitor"');
   });
 
+  it('exposes account-row VNC monitor controls during login verification', () => {
+    expect(ACCOUNTS_PAGE_SRC).toContain('fetchAccountMonitors');
+    expect(ACCOUNTS_PAGE_SRC).toContain('/api/workspace/jobs');
+    expect(ACCOUNTS_PAGE_SRC).toContain('renderAccountMonitorLink');
+    expect(ACCOUNTS_PAGE_SRC).toContain('Открыть монитор');
+    expect(ACCOUNTS_PAGE_SRC).toContain('window.setTimeout(fetchAccountMonitors, 2500)');
+  });
+
   it('keeps proxy add form focused on protocol/type instead of manual carrier for static proxies', () => {
     expect(PROXIES_PAGE_SRC).toContain('formProtocol');
     expect(PROXIES_PAGE_SRC).toContain('SOCKS5');
@@ -71,7 +79,9 @@ describe('account UI safety copy', () => {
 
   it('requires a proxy for imports and surfaces backend pre-flight errors', () => {
     expect(ACCOUNTS_PAGE_SRC).toContain('Выберите прокси для импорта');
-    expect(ACCOUNTS_PAGE_SRC).toContain('LTE mobile или Static residential');
+    expect(ACCOUNTS_PAGE_SRC).toContain('рабочий прокси');
+    expect(ACCOUNTS_PAGE_SRC).toContain('Тип прокси не блокирует старт задачи');
+    expect(ACCOUNTS_PAGE_SRC).not.toContain('LTE mobile или Static residential');
     expect(ACCOUNTS_PAGE_SRC).toContain('Прокси для аккаунта *');
     expect(ACCOUNTS_PAGE_SRC).toContain('err instanceof ApiError ? err.message : "Ошибка запуска"');
     expect(ACCOUNTS_PAGE_SRC).not.toContain('Привязать прокси (опционально)');

@@ -16,7 +16,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Search, Plus, Trash2, RefreshCw, MoreVertical, Loader2, Shield, KeyRound, RotateCcw, Clock, AlertCircle } from "lucide-react"
+import { Search, Plus, Trash2, RefreshCw, MoreVertical, Loader2, Shield, KeyRound, RotateCcw, Clock, AlertCircle, Monitor, ExternalLink } from "lucide-react"
 import { api, ApiError, getApiOrigin } from "@/lib/api"
 import { toast } from "sonner"
 import { io, Socket } from "socket.io-client"
@@ -48,8 +48,31 @@ interface ProxyItem {
   type: "LTE_MOBILE" | "STATIC_RESIDENTIAL" | "DATACENTER_DEPRECATED"
 }
 
+interface AccountVncSession {
+  id: string
+  taskId: string
+  taskType: string
+  taskStatus: string
+  jobId: string
+  accountId: string
+  status: string
+  startedAt: string
+  updatedAt: string
+  monitorUrl: string
+  accountLabel: string
+  platform: string
+}
+
+interface WorkspaceTask {
+  id: string
+  type: string
+  status: string
+  vncSessions?: Array<Omit<AccountVncSession, "taskId" | "taskType" | "taskStatus">>
+}
+
 export default function AccountsPage() {
   const [accounts, setAccounts] = React.useState<SocialAccount[]>([])
+  const [accountMonitors, setAccountMonitors] = React.useState<Record<string, AccountVncSession>>({})
   const [loading, setLoading] = React.useState(true)
   const [selectedIds, setSelectedIds] = React.useState<string[]>([])
   const [search, setSearch] = React.useState("")
@@ -105,35 +128,72 @@ export default function AccountsPage() {
     }
   }, [])
 
+  const fetchAccountMonitors = React.useCallback(async () => {
+    try {
+      const data = await api.get<{ tasks: WorkspaceTask[] }>("/api/workspace/jobs")
+      const next: Record<string, AccountVncSession> = {}
+
+      for (const task of data.tasks || []) {
+        for (const session of task.vncSessions || []) {
+          if (!session.accountId || session.status !== "ACTIVE") continue
+
+          const monitor: AccountVncSession = {
+            ...session,
+            taskId: task.id,
+            taskType: task.type,
+            taskStatus: task.status,
+          }
+          const current = next[session.accountId]
+          const shouldPreferLogin = task.type === "LOGIN" && current?.taskType !== "LOGIN"
+          const isNewer = current
+            ? new Date(session.startedAt).getTime() > new Date(current.startedAt).getTime()
+            : true
+
+          if (!current || shouldPreferLogin || isNewer) {
+            next[session.accountId] = monitor
+          }
+        }
+      }
+
+      setAccountMonitors(next)
+    } catch {
+      // Workspace monitor data is optional for the account list.
+    }
+  }, [])
+
   // Ref to always access latest accounts inside socket handlers
   const accountsRef = React.useRef(accounts)
   React.useEffect(() => { accountsRef.current = accounts }, [accounts])
 
   React.useEffect(() => {
     fetchAccounts()
-  }, [fetchAccounts])
+    fetchAccountMonitors()
+  }, [fetchAccounts, fetchAccountMonitors])
 
   // ── Auto-polling: refresh when accounts are in transitional states ──
   React.useEffect(() => {
     const hasTransitional = accounts.some(a =>
       ['VERIFYING', 'WARMING_UP'].includes(a.status)
     )
-    if (!hasTransitional) return
+    const hasActiveMonitor = Object.keys(accountMonitors).length > 0
+    if (!hasTransitional && !hasActiveMonitor) return
 
     // Poll every 5s while accounts are verifying/warming
     const interval = setInterval(() => {
       fetchAccounts()
+      fetchAccountMonitors()
     }, 5000)
     return () => clearInterval(interval)
-  }, [accounts, fetchAccounts])
+  }, [accounts, accountMonitors, fetchAccounts, fetchAccountMonitors])
 
   // ── Background polling fallback (every 30s) ──
   React.useEffect(() => {
     const interval = setInterval(() => {
       fetchAccounts()
+      fetchAccountMonitors()
     }, 30000)
     return () => clearInterval(interval)
-  }, [fetchAccounts])
+  }, [fetchAccounts, fetchAccountMonitors])
 
   React.useEffect(() => {
     if (importOpen || proxyBindOpen) {
@@ -156,6 +216,7 @@ export default function AccountsPage() {
       // Remove from 2FA queue if present
       setTwoFAQueue(prev => prev.filter(r => r.accountId !== data.accountId))
       fetchAccounts()
+      fetchAccountMonitors()
     })
 
     socket.on("login:failed", (data: { accountId: string; code: string; message: string }) => {
@@ -164,6 +225,7 @@ export default function AccountsPage() {
       // Remove from 2FA queue if present
       setTwoFAQueue(prev => prev.filter(r => r.accountId !== data.accountId))
       fetchAccounts()
+      fetchAccountMonitors()
     })
 
     socket.on("login:2fa_required", (data: { accountId: string; type: string; hint: string; timeoutSeconds: number; platform?: string; maskedContact?: string; challengeNumber?: string }) => {
@@ -206,7 +268,7 @@ export default function AccountsPage() {
     return () => {
       socket.disconnect()
     }
-  }, [fetchAccounts])
+  }, [fetchAccounts, fetchAccountMonitors])
 
   // 2FA countdown timer — tracks current request's deadline
   React.useEffect(() => {
@@ -262,7 +324,7 @@ export default function AccountsPage() {
     if (!importText.trim()) return
     if (!importProxyId || importProxyId === "none") {
       toast.error("Выберите прокси для импорта", {
-        description: "Для проверки входа и любых задач к аккаунту должен быть привязан прокси. Подходит LTE mobile или Static residential.",
+        description: "Для проверки входа и любых задач к аккаунту должен быть привязан рабочий прокси.",
       })
       return
     }
@@ -390,6 +452,8 @@ export default function AccountsPage() {
       )
       setVerifyErrors(prev => { const n = { ...prev }; delete n[id]; return n })
       fetchAccounts()
+      fetchAccountMonitors()
+      window.setTimeout(fetchAccountMonitors, 2500)
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Ошибка повторного входа")
     }
@@ -442,6 +506,41 @@ export default function AccountsPage() {
     PAUSED: "Проверьте причину паузы и включайте аккаунт только осознанно.",
   }
 
+  const monitorTaskLabels: Record<string, string> = {
+    LOGIN: "вход",
+    WARMUP: "прогрев",
+    COOKIES: "cookies",
+    UPLOAD: "залив",
+    EDIT_PROFILE: "профиль",
+  }
+
+  const renderAccountMonitorLink = (acc: SocialAccount) => {
+    const monitor = accountMonitors[acc.id]
+    if (!monitor) return null
+
+    const taskLabel = monitorTaskLabels[monitor.taskType] || monitor.taskType
+
+    return (
+      <a
+        href={monitor.monitorUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex h-6 items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-2 text-[11px] font-medium text-primary transition-colors hover:bg-primary/15"
+        title={`Открыть VNC-монитор: ${taskLabel}`}
+      >
+        <Monitor className="size-3" />
+        <span>Монитор</span>
+        <ExternalLink className="size-3" />
+      </a>
+    )
+  }
+
+  const openAccountMonitor = (acc: SocialAccount) => {
+    const monitor = accountMonitors[acc.id]
+    if (!monitor) return
+    window.open(monitor.monitorUrl, "_blank", "noopener,noreferrer")
+  }
+
   const renderStatus = (acc: SocialAccount) => {
     const status = acc.status
     const map: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
@@ -461,10 +560,13 @@ export default function AccountsPage() {
 
     if (status === "VERIFYING") {
       return (
-        <Badge variant={cfg.variant} className="animate-pulse gap-1.5">
-          <Loader2 className="size-3 animate-spin" />
-          {cfg.label}{warmupProgress}
-        </Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={cfg.variant} className="animate-pulse gap-1.5">
+            <Loader2 className="size-3 animate-spin" />
+            {cfg.label}{warmupProgress}
+          </Badge>
+          {renderAccountMonitorLink(acc)}
+        </div>
       )
     }
 
@@ -481,6 +583,7 @@ export default function AccountsPage() {
               <AlertCircle className="size-3" />
               {cfg.label}{warmupProgress}
             </Badge>
+            {renderAccountMonitorLink(acc)}
             {["AUTH_NEEDED", "EXPIRED_COOKIES"].includes(status) && (
               <button
                 onClick={() => handleRetryLogin(acc.id, status)}
@@ -503,7 +606,12 @@ export default function AccountsPage() {
       )
     }
 
-    return <Badge variant={cfg.variant}>{cfg.label}{warmupProgress}</Badge>
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant={cfg.variant}>{cfg.label}{warmupProgress}</Badge>
+        {renderAccountMonitorLink(acc)}
+      </div>
+    )
   }
 
   return (
@@ -641,6 +749,11 @@ export default function AccountsPage() {
                               <MoreVertical className="size-4 text-muted-foreground" />
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
+                              {accountMonitors[acc.id] && (
+                                <DropdownMenuItem onClick={() => openAccountMonitor(acc)}>
+                                  <Monitor className="size-4 mr-2" />Открыть монитор
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuItem onClick={() => handleBindProxy(acc.id)}>
                                 <Shield className="size-4 mr-2" />Привязать прокси
                               </DropdownMenuItem>
@@ -771,7 +884,7 @@ export default function AccountsPage() {
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Любая browser-задача требует привязанный прокси. Можно использовать LTE mobile или Static residential.
+                Любая browser-задача требует привязанный рабочий прокси. Тип прокси не блокирует старт задачи.
               </p>
             </div>
           </div>

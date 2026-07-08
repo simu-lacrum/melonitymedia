@@ -57,7 +57,7 @@ function buildLoginTaskConfig(
 
 function loginDispatchErrorMessage(error?: string) {
   if (error === 'NO_PROXY') {
-    return 'Не удалось запустить проверку входа: к аккаунту должен быть привязан прокси. Подходит LTE_MOBILE или STATIC_RESIDENTIAL.';
+    return 'Не удалось запустить проверку входа: к аккаунту должен быть привязан рабочий прокси.';
   }
   return `Не удалось запустить верификацию входа: ${error || 'unknown error'}`;
 }
@@ -395,7 +395,7 @@ router.post('/import', async (req: Request, res: Response) => {
     }
     if (!proxyId || proxyId === 'none') {
       res.status(400).json({
-        error: 'Выберите прокси для импорта. Для проверки входа и любых задач к аккаунту должен быть привязан прокси: LTE_MOBILE или STATIC_RESIDENTIAL.',
+        error: 'Выберите прокси для импорта. Для проверки входа и любых задач к аккаунту должен быть привязан рабочий прокси.',
       });
       return;
     }
@@ -1272,7 +1272,7 @@ router.post('/warmup', async (req: Request, res: Response) => {
     if (dispatched === 0) {
       let error = 'Не удалось запустить прогрев: аккаунты не прошли pre-flight проверки';
       if (failures.some(f => f.error === 'NO_PROXY')) {
-        error = 'Не удалось запустить прогрев: у аккаунтов нет привязанного прокси. Подходит LTE_MOBILE или STATIC_RESIDENTIAL.';
+        error = 'Не удалось запустить прогрев: у аккаунтов нет привязанного рабочего прокси.';
       } else if (failures.some(f => f.error === 'NO_COOKIES')) {
         error = 'Не удалось запустить прогрев: нет валидных cookies. Сначала выполните авторизацию или импорт cookies.';
       } else if (failures.some(f => f.error === 'NO_FINGERPRINT')) {
@@ -1363,7 +1363,7 @@ router.post('/cookies', async (req: Request, res: Response) => {
     if (dispatched === 0) {
       let error = 'Не удалось запустить обновление cookies: аккаунты не прошли pre-flight проверки';
       if (failures.some(f => f.error === 'NO_PROXY')) {
-        error = 'Не удалось запустить обновление cookies: к аккаунту должен быть привязан прокси. Подходит LTE_MOBILE или STATIC_RESIDENTIAL.';
+        error = 'Не удалось запустить обновление cookies: к аккаунту должен быть привязан рабочий прокси.';
       } else if (failures.some(f => f.error === 'NO_FINGERPRINT')) {
         error = 'Не удалось запустить обновление cookies: не сгенерирован fingerprint аккаунта.';
       } else if (failures.some(f => f.error?.startsWith('ACCOUNT_BUSY'))) {

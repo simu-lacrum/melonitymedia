@@ -613,7 +613,7 @@ router.post('/launch', async (req: Request, res: Response) => {
         const label = BUSY_TASK_LABELS[runningTask] || runningTask;
         errorMsg = `Аккаунт(ы) заняты — сейчас выполняется: ${label}. Дождитесь завершения.`;
       } else if (failures.some(f => f.error === 'NO_PROXY')) {
-        errorMsg = 'К аккаунту должен быть привязан прокси перед запуском задачи. Подходит LTE_MOBILE или STATIC_RESIDENTIAL.';
+        errorMsg = 'К аккаунту должен быть привязан рабочий прокси перед запуском задачи.';
       } else if (failures.some(f => f.error === 'NO_COOKIES')) {
         errorMsg = 'У аккаунта нет валидных cookies. Выполните вход или импорт cookies, затем повторите запуск.';
       } else if (failures.some(f => f.error === 'NO_FINGERPRINT')) {

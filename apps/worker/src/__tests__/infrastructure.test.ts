@@ -90,8 +90,15 @@ describe('dynamic GUI source verification', () => {
 
   it('refuses to launch browser jobs without a pinned proxy', () => {
     expect(PATCHRIGHT_LAUNCHER).toContain('no pinned proxy');
-    expect(PATCHRIGHT_LAUNCHER).toContain('LTE_MOBILE or STATIC_RESIDENTIAL');
+    expect(PATCHRIGHT_LAUNCHER).toContain('Pin a proxy first');
+    expect(PATCHRIGHT_LAUNCHER).not.toContain('Pin an LTE_MOBILE or STATIC_RESIDENTIAL proxy first');
     expect(PATCHRIGHT_LAUNCHER).not.toContain('using direct connection');
+  });
+
+  it('fails SOCKS proxy auth before browser launch with a specific error', () => {
+    expect(PATCHRIGHT_LAUNCHER).toContain('function assertProxySupportedByBrowser');
+    expect(PATCHRIGHT_LAUNCHER).toContain('SOCKS proxy authentication is not supported');
+    expect(PATCHRIGHT_LAUNCHER).toContain('use SOCKS without username/password');
   });
 });
 

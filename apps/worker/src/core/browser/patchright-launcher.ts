@@ -101,6 +101,28 @@ function createVncPassword(): string {
   return crypto.randomBytes(12).toString('base64url').slice(0, 8);
 }
 
+function assertProxySupportedByBrowser(opts: LaunchOptions): void {
+  if (!opts.proxyUrl) return;
+
+  try {
+    const url = new URL(opts.proxyUrl);
+    const isSocksProxy = url.protocol.toLowerCase().startsWith('socks');
+    const hasAuth = Boolean(url.username || url.password);
+
+    if (isSocksProxy && hasAuth) {
+      throw new Error(
+        `[Patchright] SOCKS proxy authentication is not supported by Chromium/Patchright ` +
+        `for ${opts.jobType ?? 'browser'} jobs. Use an HTTP endpoint for this proxy, ` +
+        `or use SOCKS without username/password.`,
+      );
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('SOCKS proxy authentication is not supported')) {
+      throw err;
+    }
+  }
+}
+
 function buildVncUrl(webPort: number, opts: LaunchOptions): string {
   const identity = getVncSessionIdentity(opts);
   if (identity) {
@@ -218,9 +240,10 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
   if (!opts.proxyUrl) {
     throw new Error(
       `[Patchright] Refusing to launch ${opts.jobType ?? 'browser'} for ${opts.accountId}: ` +
-      `no pinned proxy. Pin an LTE_MOBILE or STATIC_RESIDENTIAL proxy first.`,
+      `no pinned proxy. Pin a proxy first.`,
     );
   }
+  assertProxySupportedByBrowser(opts);
 
   // Soft validation: fatal issues block, stale issues warn and continue
   const issues = inspectFingerprintConsistency(fingerprint, getSystemChromeMajor());
