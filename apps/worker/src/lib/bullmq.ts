@@ -6,7 +6,17 @@
 // maintain a single shared instance per queue name.
 // ─────────────────────────────────────────────────────────────
 
-import { Queue } from 'bullmq';
+import { Queue, type JobsOptions } from 'bullmq';
+
+const SELF_SCHEDULED_JOB_OPTIONS: JobsOptions = {
+  removeOnComplete: { count: 100 },
+  removeOnFail: { count: 50 },
+  attempts: 2,
+  backoff: {
+    type: 'exponential',
+    delay: 30_000,
+  },
+};
 
 // Parse Redis connection from REDIS_URL env var
 function getRedisOpts() {
@@ -14,6 +24,7 @@ function getRedisOpts() {
   return {
     host: url.hostname,
     port: parseInt(url.port || '6379'),
+    username: url.username || undefined,
     password: url.password || undefined,
   };
 }
@@ -37,11 +48,13 @@ function getQueue(name: string): Queue {
 export async function addJob(
   queueName: string,
   data: Record<string, unknown>,
-  opts?: { delay?: number; jobId?: string },
+  opts?: JobsOptions,
 ): Promise<string | undefined> {
   const queue = getQueue(queueName);
-  const job = await queue.add(opts?.jobId ?? queueName, data, {
-    delay: opts?.delay,
+  const job = await queue.add(queueName, data, {
+    ...SELF_SCHEDULED_JOB_OPTIONS,
+    ...opts,
+    backoff: opts?.backoff ?? SELF_SCHEDULED_JOB_OPTIONS.backoff,
   });
   return job.id;
 }

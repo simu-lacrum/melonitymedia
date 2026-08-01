@@ -76,7 +76,7 @@ export async function shadowbanDetectorHandler(
       await addJob(
         'shadowban-check',
         { userId: acc.userId, accountId: acc.id },
-        { delay: dispatched * 3_000, jobId: `shadowban-${acc.id}` },
+        { delay: dispatched * 3_000, jobId: `shadowban-${acc.id}-${job.timestamp}` },
       );
       dispatched++;
     }

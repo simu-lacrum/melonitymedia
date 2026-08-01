@@ -252,7 +252,6 @@ async function refreshTaskAfterTerminalJob(job: Job<any>, error?: string) {
           },
           data: {
             status: 'ALIVE',
-            lastError: error ?? 'Warmup job failed',
           },
         });
       }

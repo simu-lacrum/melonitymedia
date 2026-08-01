@@ -108,7 +108,7 @@ export async function analyticsHandler(job: Job<any>): Promise<ProfileStats | { 
           nickname: acc.nickname,
         }, {
           delay: dispatched * 10_000, // 10s stagger (browser is heavier than curl)
-          jobId: `analytics-${acc.id}`,
+          jobId: `analytics-${acc.id}-${job.timestamp}`,
         });
         dispatched++;
       }

@@ -36,4 +36,16 @@ describe('classifyError', () => {
     expect(result.advice).toContain('любой привязанный прокси');
     expect(result.advice).toContain('HTTP endpoint');
   });
+
+  it('explains that a failed warmup keeps completed session progress', () => {
+    const result = classifyError(
+      'Warmup navigation failed after 3 attempts: page.goto: Timeout 30000ms exceeded',
+      'warmup',
+    );
+
+    expect(result.code).toBe('PAGE_TIMEOUT');
+    expect(result.title).toBe('Прогрев остановлен');
+    expect(result.message).toContain('Завершённые дни и сессии сохранены');
+    expect(result.advice).toContain('с сохранённого дня');
+  });
 });

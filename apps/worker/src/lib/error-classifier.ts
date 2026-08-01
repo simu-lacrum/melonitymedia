@@ -171,6 +171,14 @@ export function classifyError(
   }
 
   if (msg.includes('timeout') || msg.includes('navigation timeout') || msg.includes('waitforurl')) {
+    if (handler === 'warmup') {
+      return {
+        code: 'PAGE_TIMEOUT',
+        title: 'Прогрев остановлен',
+        message: 'Платформа или прокси не ответили после автоматических повторов. Завершённые дни и сессии сохранены.',
+        advice: 'Проверьте доступность привязанного прокси и повторно запустите прогрев: он продолжится с сохранённого дня.',
+      };
+    }
     return {
       code: 'PAGE_TIMEOUT',
       title: 'Страница не загрузилась',

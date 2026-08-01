@@ -70,5 +70,21 @@ describe('warmup handler source verification', () => {
       expect(WARMUP_SRC).toContain('comments: data.comments');
       expect(WARMUP_SRC).toContain('taskId: data.taskId');
     });
+
+    it('scopes continuation job ids to the parent task', () => {
+      expect(WARMUP_SRC).toContain('warmup-${data.taskId ?? data.accountId}-${data.accountId}');
+    });
+  });
+
+  describe('navigation recovery', () => {
+    it('does not terminate a warmup on the first YouTube navigation timeout', () => {
+      expect(WARMUP_SRC).toContain("import { navigateForWarmup }");
+      expect(WARMUP_SRC).toContain("navigateForWarmup(page, 'https://www.youtube.com', logger)");
+      expect(WARMUP_SRC).toContain("navigateForWarmup(page, 'https://www.youtube.com/shorts', logger)");
+    });
+
+    it('clears a transient error after a successful session', () => {
+      expect(WARMUP_SRC).toContain('data: { lastError: null }');
+    });
   });
 });

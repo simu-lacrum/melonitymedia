@@ -169,6 +169,7 @@ describe('detectShadowbanForAccount', () => {
 
     const job = {
       data: { _cron: true },
+      timestamp: 1_785_585_600_000,
       updateProgress: vi.fn(),
     };
 
@@ -185,7 +186,7 @@ describe('detectShadowbanForAccount', () => {
     expect(addJob).toHaveBeenCalledWith(
       'shadowban-check',
       { userId: 'user-1', accountId: 'acc-1' },
-      { delay: 0, jobId: 'shadowban-acc-1' },
+      { delay: 0, jobId: 'shadowban-acc-1-1785585600000' },
     );
     expect(result).toMatchObject({
       accountId: 'cron-dispatch',

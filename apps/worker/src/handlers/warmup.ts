@@ -25,6 +25,7 @@ import { emitWorkerError } from '../lib/error-classifier.js';
 import { prisma } from '../lib/prisma.js';
 import { loadAccountContext } from '../lib/account-context.js';
 import { acquireAccountLock, releaseAccountLock } from '../lib/account-lock.js';
+import { navigateForWarmup } from '../lib/warmup-navigation.js';
 import type { Browser, Page } from 'patchright';
 import type { GhostCursor } from 'ghost-cursor';
 
@@ -194,6 +195,11 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     const ctxAcc = await loadAccountContext(data.accountId);
     const totalDays = _normalizeWarmupDays(data.warmupDays, ctxAcc.warmupDays || 10);
 
+    await prisma.socialAccount.updateMany({
+      where: { id: data.accountId, status: 'WARMING_UP' },
+      data: { lastError: null },
+    });
+
     if (!ctxAcc.warmupStartedAt) {
       // Auto-initialize warmup — don't require a separate API call
       logger.info('Warmup не был инициализирован — автоматическая инициализация...');
@@ -280,11 +286,11 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
       // YouTube — Shorts feed or search via search bar
       if (mergedHashtags.length > 0) {
         const startTag = mergedHashtags[Math.floor(Math.random() * mergedHashtags.length)];
-        await page.goto('https://www.youtube.com', { waitUntil: 'domcontentloaded' });
+        await navigateForWarmup(page, 'https://www.youtube.com', logger);
         await page.waitForTimeout(_randomDelay(2000, 3000));
         await _navigateToYoutubeSearch(page, cursor, startTag, logger);
       } else {
-        await page.goto('https://www.youtube.com/shorts', { waitUntil: 'domcontentloaded' });
+        await navigateForWarmup(page, 'https://www.youtube.com/shorts', logger);
       }
     }
 
@@ -357,6 +363,10 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     }
 
     logger.info(`✅ Прогрев День ${warmupDay}/${totalDays}, сессия ${sessionInDay + 1}/${sessionsPerDay} завершена`);
+    await prisma.socialAccount.update({
+      where: { id: data.accountId },
+      data: { lastError: null },
+    });
 
     // ── Self-reschedule: multi-session per day + sleep ────────
     // Real user behavior:
@@ -375,7 +385,7 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
       // 🎉 All done — warmup complete
       await prisma.socialAccount.update({
         where: { id: data.accountId },
-        data: { warmupCompletedAt: new Date(), status: 'ALIVE', lastWarmupDay: warmupDay },
+        data: { warmupCompletedAt: new Date(), status: 'ALIVE', lastWarmupDay: warmupDay, lastError: null },
       });
       logger.info(`🎉 Прогрев завершён! Аккаунт ${data.accountId} готов к загрузкам.`);
 
@@ -402,7 +412,7 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
         sessionInDay: 0, // reset to first session of new day
       }, {
         delay: sleepDelay,
-        jobId: `warmup-${data.accountId}-day${warmupDay + 1}-s0`,
+        jobId: `warmup-${data.taskId ?? data.accountId}-${data.accountId}-day${warmupDay + 1}-s0`,
       });
       logger.info(`💤 Сон ~${sleepHours}ч. Следующий день прогрева (${warmupDay + 1}/${totalDays}) запланирован`);
 
@@ -427,7 +437,7 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
         sessionInDay: nextSession,
       }, {
         delay: breakDelay,
-        jobId: `warmup-${data.accountId}-day${warmupDay}-s${nextSession}`,
+        jobId: `warmup-${data.taskId ?? data.accountId}-${data.accountId}-day${warmupDay}-s${nextSession}`,
       });
       logger.info(`☕ Перерыв ~${breakMins} мин. Сессия ${nextSession + 1}/${sessionsPerDay} запланирована`);
     }
@@ -442,7 +452,7 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     }).then((account) => {
       if (!account) return null;
       const updateData: Record<string, unknown> = {
-        lastError: classified.message,
+        lastError: `${classified.title}: ${classified.message}`,
       };
 
       if (account.status === 'WARMING_UP' && account.warmupCompletedAt) {

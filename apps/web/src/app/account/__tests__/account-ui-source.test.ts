@@ -39,6 +39,12 @@ describe('account UI safety copy', () => {
     expect(ACCOUNTS_PAGE_SRC).toContain('Прогрев');
   });
 
+  it('does not label a terminally failed warmup as a healthy account', () => {
+    expect(ACCOUNTS_PAGE_SRC).toContain('warmupStopped');
+    expect(ACCOUNTS_PAGE_SRC).toContain('Прогрев остановлен');
+    expect(ACCOUNTS_PAGE_SRC).toContain('warmupCompletedAt');
+  });
+
   it('warns that hourly warmup is faster but riskier upload readiness', () => {
     expect(WORKSPACE_PAGE_SRC).toContain('Ускоренный (часы)');
     expect(WORKSPACE_PAGE_SRC).toContain('откроет заливы');

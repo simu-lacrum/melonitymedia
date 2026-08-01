@@ -8,6 +8,7 @@ const ENTRYPOINT = fs.readFileSync(path.join(WORKER_ROOT, 'entrypoint.sh'), 'utf
 const PATCHRIGHT_LAUNCHER = fs.readFileSync(path.join(WORKER_ROOT, 'src/core/browser/patchright-launcher.ts'), 'utf-8');
 const WORKER_INDEX = fs.readFileSync(path.join(WORKER_ROOT, 'src/index.ts'), 'utf-8');
 const EDIT_PROFILE_HANDLER = fs.readFileSync(path.join(WORKER_ROOT, 'src/handlers/edit-profile.ts'), 'utf-8');
+const WARMUP_HANDLER = fs.readFileSync(path.join(WORKER_ROOT, 'src/handlers/warmup.ts'), 'utf-8');
 
 // docker-compose is at repo root
 const COMPOSE = fs.readFileSync(path.join(WORKER_ROOT, '../../docker-compose.yml'), 'utf-8');
@@ -109,7 +110,8 @@ describe('task state truthfulness', () => {
     expect(WORKER_INDEX).toContain('if (hasFailed)');
     expect(WORKER_INDEX).toContain("status: 'WARMING_UP'");
     expect(WORKER_INDEX).toContain("status: 'ALIVE'");
-    expect(WORKER_INDEX).toContain("lastError: error ?? 'Warmup job failed'");
+    expect(WORKER_INDEX).not.toContain("lastError: error ?? 'Warmup job failed'");
+    expect(WARMUP_HANDLER).toContain('lastError: `${classified.title}: ${classified.message}`');
   });
 
   it('fails edit-profile jobs instead of reporting success after skipped changes', () => {

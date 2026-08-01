@@ -32,6 +32,8 @@ interface SocialAccount {
   lastError?: string | null
   warmupDay?: number | null
   warmupDays?: number | null
+  warmupStartedAt?: string | null
+  warmupCompletedAt?: string | null
   pinnedProxy?: {
     id: string
     host: string
@@ -543,6 +545,10 @@ export default function AccountsPage() {
 
   const renderStatus = (acc: SocialAccount) => {
     const status = acc.status
+    const warmupStopped = ["ALIVE", "ACTIVE"].includes(status)
+      && Boolean(acc.warmupStartedAt)
+      && !acc.warmupCompletedAt
+      && Boolean(acc.lastError)
     const map: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
       ALIVE: { label: "Живой ✅", variant: "default" },
       AUTH_NEEDED: { label: "Ошибка входа", variant: "destructive" },
@@ -553,8 +559,10 @@ export default function AccountsPage() {
       PAUSED: { label: "Пауза", variant: "secondary" },
       VERIFYING: { label: "Проверка...", variant: "secondary" },
     }
-    const cfg = map[status] || { label: status, variant: "secondary" as const }
-    const warmupProgress = status === "WARMING_UP" && acc.warmupDay
+    const cfg = warmupStopped
+      ? { label: "Прогрев остановлен", variant: "destructive" as const }
+      : map[status] || { label: status, variant: "secondary" as const }
+    const warmupProgress = (status === "WARMING_UP" || warmupStopped) && acc.warmupDay
       ? ` ${acc.warmupDay}/${acc.warmupDays || "?"}`
       : ""
 
