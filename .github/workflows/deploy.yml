@@ -64,7 +64,9 @@ jobs:
             # SIGTERM + stop_grace_period lets a race-window job finish safely.
             docker compose stop worker
             docker compose up -d --no-deps worker
-            docker compose up -d --remove-orphans
+
+            # Keep service updates targeted. A full `compose up` after `--no-deps`
+            # changes the worker config hash and starts a redundant 10-minute replacement.
 
             echo "══════ Ensuring infrastructure is running ══════"
             docker compose up -d db redis
