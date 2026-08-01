@@ -37,17 +37,34 @@ jobs:
             sed -i "s|REDIS_URL=redis://localhost:6379|REDIS_URL=redis://:${REDIS_PASS}@redis:6379|" .env
             # Add REDIS_PASSWORD if missing
             grep -q '^REDIS_PASSWORD=' .env || echo "REDIS_PASSWORD=${REDIS_PASS}" >> .env
-            echo "  REDIS_URL=$(grep REDIS_URL .env | head -1)"
+            echo "  Redis connection settings updated"
 
-            echo "══════ Force-removing app containers ══════"
-            # Force-remove by container name to prevent "name already in use" conflicts.
-            # db and redis are NOT touched — they persist data.
-            docker rm -f melonitymedia-api-1 melonitymedia-worker-1 melonitymedia-web-1 2>/dev/null || true
+            echo "Building replacement images while current containers stay available"
+            docker compose up -d db redis
+            docker compose build api worker web
+            docker compose up -d --no-deps api web
 
-            echo "══════ Building & starting app containers ══════"
-            # Only rebuild app services — not DB/Redis (they persist data)
-            # web MUST be included — nginx depends on upstream "web:3000"
-            docker compose up -d --build --remove-orphans --force-recreate api worker web
+            ACTIVE_JOBS=0
+            for ATTEMPT in $(seq 1 30); do
+              ACTIVE_JOBS=0
+              for QUEUE in upload warmup cookies edit-profile login analytics-cron shadowban-check cleanup; do
+                COUNT=$(docker compose exec -T redis redis-cli -a "${REDIS_PASS}" --no-auth-warning LLEN "bull:${QUEUE}:active" | tr -d '\r')
+                ACTIVE_JOBS=$((ACTIVE_JOBS + COUNT))
+              done
+              if [ "$ACTIVE_JOBS" -eq 0 ]; then break; fi
+              echo "${ACTIVE_JOBS} active job(s); waiting 20s before worker update"
+              sleep 20
+            done
+
+            if [ "$ACTIVE_JOBS" -ne 0 ]; then
+              echo "Worker update deferred: ${ACTIVE_JOBS} job(s) are still active. Existing work was not interrupted."
+              exit 1
+            fi
+
+            # SIGTERM + stop_grace_period lets a race-window job finish safely.
+            docker compose stop worker
+            docker compose up -d --no-deps worker
+            docker compose up -d --remove-orphans
 
             echo "══════ Ensuring infrastructure is running ══════"
             docker compose up -d db redis

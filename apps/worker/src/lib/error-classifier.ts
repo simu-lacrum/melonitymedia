@@ -134,6 +134,28 @@ export function classifyError(
   }
 
   // ── Browser & Page ────────────────────────────────────────
+  if (handler === 'upload' && msg.includes('youtube studio не подтвердил публикацию')) {
+    return {
+      code: 'UPLOAD_TIMEOUT',
+      title: 'Публикация не подтверждена',
+      message: 'YouTube Studio не показал надёжное подтверждение публикации.',
+      advice: 'Откройте YouTube Studio и проверьте список Shorts. Не запускайте тот же ролик повторно, пока не убедитесь, что публикации нет.',
+    };
+  }
+
+  if (
+    handler === 'upload' &&
+    msg.includes('youtube studio') &&
+    /заголов|кнопк|аудитори|видимост|upload dialog|окн|не сохранил/.test(msg)
+  ) {
+    return {
+      code: 'SELECTOR_NOT_FOUND',
+      title: 'Интерфейс YouTube Studio не готов',
+      message: rawMessage.slice(0, 200),
+      advice: 'Откройте VNC-монитор задачи. Закройте приветственное или системное окно YouTube Studio и повторите залив один раз.',
+    };
+  }
+
   if (msg.includes('captcha') || msg.includes('verify.*human')) {
     const captchaAdvice = handler === 'upload'
       ? 'Попробуйте: 1) Поменять прокси на мобильный (меньше капчи). 2) Подождать 15-30 минут и повторить. 3) Зайти вручную через мобильное приложение, чтобы «прогреть» IP.'
@@ -166,7 +188,13 @@ export function classifyError(
     };
   }
 
-  if (msg.includes('locator') || msg.includes('selector') || msg.includes('not found') || msg.includes('element')) {
+  if (
+    msg.includes('locator') ||
+    msg.includes('selector') ||
+    msg.includes('not found') ||
+    msg.includes('не найден') ||
+    msg.includes('element')
+  ) {
     const selectorAdvice = handler === 'edit-profile'
       ? 'Платформа могла обновить интерфейс. Попробуйте позже или отредактируйте профиль вручную через приложение.'
       : handler === 'upload'

@@ -87,6 +87,20 @@ describe('account UI safety copy', () => {
     expect(ACCOUNTS_PAGE_SRC).not.toContain('Привязать прокси (опционально)');
   });
 
+  it('prevents upload selection for accounts whose warmup is incomplete', () => {
+    expect(WORKSPACE_PAGE_SRC).toContain('isUploadReady');
+    expect(WORKSPACE_PAGE_SRC).toContain('warmupCompletedAt');
+    expect(WORKSPACE_PAGE_SRC).toContain('disabled={uploadUnavailable}');
+    expect(WORKSPACE_PAGE_SRC).toContain('Прогрев идёт');
+    expect(WORKSPACE_PAGE_SRC).toContain('Нужен прогрев');
+  });
+
+  it('surfaces partial launch failures and duplicate-safe skips', () => {
+    expect(WORKSPACE_PAGE_SRC).toContain('result.warning');
+    expect(WORKSPACE_PAGE_SRC).toContain('result.alreadyUploaded');
+    expect(WORKSPACE_PAGE_SRC).toContain('Повторный залив не создан');
+  });
+
   it('highlights interactive dropdown rows and uses pointer cursor', () => {
     expect(SELECT_SRC).toContain('cursor-pointer');
     expect(SELECT_SRC).toContain('data-highlighted:bg-primary/10');

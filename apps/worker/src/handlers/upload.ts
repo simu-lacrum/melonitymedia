@@ -13,7 +13,7 @@
 // NEVER import puppeteer, selenium, or undetected-chromedriver.
 // ─────────────────────────────────────────────────────────────
 
-import { Job } from 'bullmq';
+import { Job, UnrecoverableError } from 'bullmq';
 import fs from 'node:fs';
 import { launchStealthContext, closeBrowser } from '../core/browser/patchright-launcher.js';
 import { validateCookies } from '../core/auth/session-validator.js';
@@ -41,15 +41,92 @@ async function _getVisibleSelector(page: Page, selectors: string, prefix: string
   for (let i = 0; i < count; i++) {
     const el = locator.nth(i);
     if (await el.isVisible().catch(() => false)) {
-      const id = `${prefix}-${Date.now()}-${i}`;
-      await el.evaluate((node, assignedId) => {
-        if (!node.id) node.id = assignedId;
-      }, id);
-      const actualId = await el.getAttribute('id');
-      return `#${actualId}`;
+      const marker = `${prefix}-${Date.now()}-${i}`;
+      await el.evaluate((node, value) => {
+        node.setAttribute('data-melonity-target', value);
+      }, marker);
+      return `[data-melonity-target="${marker}"]`;
     }
   }
   return null;
+}
+
+async function _waitForVisibleSelector(
+  page: Page,
+  selectors: string,
+  prefix: string,
+  timeoutMs: number,
+): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const selector = await _getVisibleSelector(page, selectors, prefix);
+    if (selector) return selector;
+    await page.waitForTimeout(500);
+  }
+  return null;
+}
+
+async function _waitForEnabledSelector(
+  page: Page,
+  selectors: string,
+  prefix: string,
+  timeoutMs: number,
+): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const selector = await _getVisibleSelector(page, selectors, prefix);
+    if (selector) {
+      const enabled = await page.locator(selector).evaluate((node) =>
+        !node.hasAttribute('disabled') && node.getAttribute('aria-disabled') !== 'true',
+      ).catch(() => false);
+      if (enabled) return selector;
+    }
+    await page.waitForTimeout(750);
+  }
+  return null;
+}
+
+async function _dismissYouTubeStudioWelcome(
+  page: Page,
+  cursor: Awaited<ReturnType<typeof createPageCursor>>,
+  logger: SocketLogger,
+): Promise<boolean> {
+  const dialogs = page.locator('ytcp-dialog, tp-yt-paper-dialog, [role="dialog"]');
+  const count = await dialogs.count();
+
+  for (let index = 0; index < count; index++) {
+    const dialog = dialogs.nth(index);
+    if (!await dialog.isVisible().catch(() => false)) continue;
+
+    const text = await dialog.textContent().catch(() => '') || '';
+    if (!/Welcome to YouTube Studio|Добро пожаловать в YouTube Studio/i.test(text)) continue;
+
+    const actions = dialog.locator('button, ytcp-button, tp-yt-paper-button, [role="button"]');
+    const actionCount = await actions.count();
+    for (let actionIndex = 0; actionIndex < actionCount; actionIndex++) {
+      const action = actions.nth(actionIndex);
+      const actionText = (await action.textContent().catch(() => '') || '').trim();
+      if (!/^(Continue|Продолжить)$/i.test(actionText)) continue;
+      if (!await action.isVisible().catch(() => false)) continue;
+
+      const marker = `melonity-youtube-welcome-${Date.now()}-${actionIndex}`;
+      await action.evaluate((node, value) => node.setAttribute('data-melonity-target', value), marker);
+      await humanClick(page, cursor, `[data-melonity-target="${marker}"]`, { postClickDelay: 500 });
+      await dialog.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => {});
+      logger.info('Закрыто приветственное окно YouTube Studio');
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function _buildYouTubeTitle(title: string): string {
+  const normalized = title.trim();
+  if (/#shorts/i.test(normalized)) return normalized.slice(0, 100).trim();
+
+  const suffix = ' #Shorts';
+  return `${normalized.slice(0, 100 - suffix.length).trimEnd()}${suffix}`;
 }
 
 
@@ -617,7 +694,7 @@ async function _uploadToTikTok(
   const confirmed = await _waitForTikTokPublishConfirmation(page);
   if (!confirmed) {
     await page.screenshot({ path: `/app/screenshots/tiktok_publish_unconfirmed_${Date.now()}.png`, fullPage: true }).catch(() => {});
-    throw new Error(
+    throw new UnrecoverableError(
       'TikTok не подтвердил публикацию видео. Задача остановлена, чтобы не пометить аккаунт как успешно загруженный без доказательства публикации.',
     );
   }
@@ -652,7 +729,7 @@ async function _waitForTikTokPublishConfirmation(page: Page): Promise<boolean> {
     }
 
     return false;
-  }, { timeout: 90_000, polling: 2000 }).then(() => true).catch(() => false);
+  }, undefined, { timeout: 90_000, polling: 2000 }).then(() => true).catch(() => false);
 }
 
 async function _ensureTikTokPublicVisibility(page: Page, logger: SocketLogger): Promise<void> {
@@ -748,7 +825,7 @@ async function _uploadToYouTube(
     try {
       await page.waitForFunction(() => {
         return window.location.hostname.includes('youtube.com');
-      }, { timeout: 180_000, polling: 2000 });
+      }, undefined, { timeout: 180_000, polling: 2000 });
       logger.info('Успешный вход после ручного подтверждения ✓');
       currentUrl = page.url();
     } catch {
@@ -790,16 +867,9 @@ async function _uploadToYouTube(
     }
   }
 
-  // BUG-11 fix: Dismiss "Welcome to YouTube Studio" popup that appears on first visit
-  try {
-    const welcomeSelectors = 'button:has-text("Continue"), button:has-text("Продолжить")';
-    const welcomeBtn = page.locator(welcomeSelectors).first();
-    if (await welcomeBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await humanClick(page, cursor, welcomeSelectors, { postClickDelay: 500 });
-      logger.info('Dismissed Welcome to YouTube Studio popup');
-      await page.waitForTimeout(_randomDelay(1500, 2500));
-    }
-  } catch { /* no welcome popup — normal */ }
+  // First-time channels receive a web-component onboarding dialog. Its action
+  // is often <ytcp-button>, not a native <button>.
+  await _dismissYouTubeStudioWelcome(page, cursor, logger).catch(() => false);
 
   await job.updateProgress(45);
 
@@ -855,6 +925,10 @@ async function _uploadToYouTube(
   await fileInput.setInputFiles(videoPath);
   logger.info('Файл загружен в Studio...');
 
+  // The onboarding dialog can appear lazily after the upload has started.
+  await page.waitForTimeout(750);
+  await _dismissYouTubeStudioWelcome(page, cursor, logger).catch(() => false);
+
   // BUG-8 fix: Wait for YouTube Studio to finish processing the video
   // Studio shows a progress bar during upload/processing. Clicking Publish
   // before completion will be blocked by Studio or fail silently.
@@ -869,6 +943,7 @@ async function _uploadToYouTube(
         return /Upload complete|Загрузка завершена|Checks complete|Проверки завершены/i.test(body)
           || document.querySelector('#next-button:not([disabled])');
       },
+      undefined,
       { timeout: 120_000 },  // 2 minute timeout for large videos
     );
     logger.info('Обработка видео завершена ✓');
@@ -877,25 +952,18 @@ async function _uploadToYouTube(
   }
   await job.updateProgress(60);
 
-  // Wait for the title input to be ready (Studio dialog opens automatically after file upload)
-  try {
-    await page.waitForSelector('#textbox[aria-label*="title" i], #textbox[contenteditable="true"]', { timeout: 30_000 });
-  } catch {
-    throw new Error('YouTube Studio upload dialog не появился');
-  }
-
   // Fill title with #Shorts appended
-  const titleWithShorts = /#shorts/i.test(data.title) ? data.title : `${data.title} #Shorts`;
+  const titleWithShorts = _buildYouTubeTitle(data.title);
   try {
-    // BUG-14 fix: Dismiss any potential "What's new" or "Reuse details" modals covering the screen
-    logger.info('Dismissing potential overlays before filling details...');
-    await page.keyboard.press('Escape').catch(() => {});
-    await page.waitForTimeout(300);
-    await page.keyboard.press('Escape').catch(() => {});
-    await page.waitForTimeout(500);
-
-    const titleSelectors = '#textbox[aria-label*="title" i], #textbox[contenteditable="true"]';
-    const visibleTitleSel = await _getVisibleSelector(page, titleSelectors, 'melonity-title');
+    await _dismissYouTubeStudioWelcome(page, cursor, logger).catch(() => false);
+    const titleSelectors = [
+      'ytcp-uploads-dialog #title-textarea #textbox[contenteditable="true"]',
+      'ytcp-video-metadata-editor #title-textarea #textbox[contenteditable="true"]',
+      '#title-textarea #textbox[contenteditable="true"]',
+      '[aria-label*="Add a title" i][contenteditable="true"]',
+      '[aria-label*="title" i][contenteditable="true"]',
+    ].join(', ');
+    const visibleTitleSel = await _waitForVisibleSelector(page, titleSelectors, 'melonity-title', 30_000);
     
     if (visibleTitleSel) {
       await humanClick(page, cursor, visibleTitleSel, { postClickDelay: 300 });
@@ -906,19 +974,22 @@ async function _uploadToYouTube(
       // BUG-15 fix: Guarantee title is set via evaluate in case focus was intercepted by overlay
       await page.evaluate((data) => {
         const el = document.querySelector(data.sel) as HTMLElement;
-        if (el && !el.innerText.includes(data.text)) {
+        if (el && el.innerText.trim() !== data.text) {
           el.innerText = data.text;
           el.dispatchEvent(new Event('input', { bubbles: true }));
           el.dispatchEvent(new Event('change', { bubbles: true }));
         }
       }, { sel: visibleTitleSel, text: titleWithShorts });
+
+      const savedTitle = await page.locator(visibleTitleSel).innerText().catch(() => '');
+      if (savedTitle.trim() !== titleWithShorts) {
+        throw new Error('YouTube Studio не сохранил введённый заголовок');
+      }
       
       logger.info(`Заголовок (с #Shorts): "${titleWithShorts.slice(0, 60)}..."`);
 
-      // BUG-12 fix: Dismiss hashtag suggestions dropdown that appears after typing #Shorts.
-      // Without this, the dropdown intercepts clicks on the description field below.
-      await page.waitForTimeout(800);
-      await page.keyboard.press('Escape', { delay: Math.random() * 50 + 50 });
+      // Do not press Escape here: in Studio it opens the destructive
+      // "Cancel upload" dialog. Clicking the next field closes suggestions.
       await page.waitForTimeout(500);
     } else {
       await page.screenshot({ path: `/app/screenshots/title_missing_${Date.now()}.png`, fullPage: true }).catch(() => {});
@@ -931,8 +1002,14 @@ async function _uploadToYouTube(
 
   // Fill description + hashtags
   try {
-    const descSelectors = '#textbox[aria-label*="description" i], div[aria-label*="Tell viewers"]';
-    const visibleDescSel = await _getVisibleSelector(page, descSelectors, 'melonity-desc');
+    const descSelectors = [
+      'ytcp-uploads-dialog #description-textarea #textbox[contenteditable="true"]',
+      'ytcp-video-metadata-editor #description-textarea #textbox[contenteditable="true"]',
+      '#description-textarea #textbox[contenteditable="true"]',
+      '[aria-label*="Tell viewers" i][contenteditable="true"]',
+      '[aria-label*="description" i][contenteditable="true"]',
+    ].join(', ');
+    const visibleDescSel = await _waitForVisibleSelector(page, descSelectors, 'melonity-desc', 10_000);
     
     if (visibleDescSel) {
       await humanClick(page, cursor, visibleDescSel, { postClickDelay: 300 });
@@ -980,7 +1057,7 @@ async function _uploadToYouTube(
   // Step 1: "Made for kids?" — select "No, it's not made for kids"
   logger.info('Шаг 1: Выбор "Not made for kids"...');
   try {
-    await page.evaluate(() => {
+    const audienceSelected = await page.evaluate(() => {
       // Try multiple selectors for the "Not made for kids" radio
       const selectors = [
         'tp-yt-paper-radio-button[name="VIDEO_MADE_FOR_KIDS_NOT_MFK"]',
@@ -997,17 +1074,14 @@ async function _uploadToYouTube(
           }
         }
       }
-      // Fallback: just click second radio button (usually "No")
-      const radios = document.querySelectorAll('tp-yt-paper-radio-button');
-      if (radios.length >= 2) {
-        (radios[1] as HTMLElement).click();
-        return true;
-      }
       return false;
     });
+    if (!audienceSelected) {
+      throw new Error('Не найден вариант «Нет, видео не для детей»');
+    }
     logger.info('"Not made for kids" выбрано ✓');
-  } catch {
-    logger.warn('"Not made for kids" не найден — продолжаем');
+  } catch (error) {
+    throw new Error(`Не удалось выбрать аудиторию YouTube: ${errorMessage(error)}`);
   }
   await page.waitForTimeout(_randomDelay(1000, 2000));
 
@@ -1015,39 +1089,16 @@ async function _uploadToYouTube(
   for (let step = 0; step < 3; step++) {
     const stepNames = ['Elements', 'Checks', 'Visibility'];
     logger.info(`Шаг 2.${step + 1}: Переход на "${stepNames[step]}"...`);
-    try {
-      // Wait for Next button to be clickable
-      const clicked = await page.evaluate(() => {
-        // YouTube Studio Next button variants
-        const btn = document.querySelector('#next-button') as HTMLElement
-          || document.querySelector('ytcp-button#next-button') as HTMLElement;
-        if (btn && !btn.hasAttribute('disabled')) {
-          btn.scrollIntoView({ block: 'center' });
-          btn.click();
-          return true;
-        }
-        // Try finding by aria-label
-        const ariaBtn = document.querySelector('button[aria-label="Next"]') as HTMLElement
-          || document.querySelector('button[aria-label="Далее"]') as HTMLElement;
-        if (ariaBtn && !ariaBtn.hasAttribute('disabled')) {
-          ariaBtn.click();
-          return true;
-        }
-        return false;
-      });
-
-      if (!clicked) {
-        logger.warn(`Next button step ${step} не кликабельна`);
-        // Try Playwright selector as fallback
-        try {
-          await page.click('#next-button', { timeout: 5000 });
-        } catch {
-          logger.warn(`Fallback click also failed for step ${step}`);
-        }
-      }
-    } catch {
-      logger.warn(`Next button step ${step} error — continuing`);
+    const nextSelector = await _waitForEnabledSelector(
+      page,
+      'ytcp-uploads-dialog #next-button, ytcp-video-upload-progress #next-button, #next-button',
+      `melonity-youtube-next-${step}`,
+      60_000,
+    );
+    if (!nextSelector) {
+      throw new Error(`YouTube Studio не открыл шаг «${stepNames[step]}»: кнопка «Далее» недоступна`);
     }
+    await humanClick(page, cursor, nextSelector, { postClickDelay: 500 });
     // Wait for page transition
     await page.waitForTimeout(_randomDelay(2000, 3500));
   }
@@ -1084,10 +1135,10 @@ async function _uploadToYouTube(
     if (publicSelected) {
       logger.info(`Видимость "Public" установлена (${publicSelected}) ✓`);
     } else {
-      logger.warn('Radio "Public" не найден — возможно уже выбран по умолчанию');
+      throw new Error('Radio «Открытый доступ / Public» не найден');
     }
-  } catch {
-    logger.warn('Ошибка при выборе Public — продолжаем');
+  } catch (error) {
+    throw new Error(`Не удалось выбрать публичную видимость YouTube: ${errorMessage(error)}`);
   }
   await page.waitForTimeout(_randomDelay(1500, 3000));
 
@@ -1098,47 +1149,25 @@ async function _uploadToYouTube(
   const ts = Date.now();
   await page.screenshot({ path: `/app/screenshots/1_pre_publish_${ts}.png`, fullPage: true }).catch(() => {});
 
-  let published = false;
-  try {
-    published = await page.evaluate(() => {
-      // Primary: #done-button (YouTube Studio's publish button)
-      const doneBtn = document.querySelector('#done-button') as HTMLElement;
-      if (doneBtn && !doneBtn.hasAttribute('disabled')) {
-        doneBtn.scrollIntoView({ block: 'center' });
-        doneBtn.click();
-        return true;
-      }
-      // Fallback: look for Publish button by text
-      const buttons = document.querySelectorAll('ytcp-button, button');
-      for (const btn of buttons) {
-        const text = (btn.textContent || '').trim();
-        if (/^(Publish|Опубликовать|Done|Готово)$/i.test(text) && !btn.hasAttribute('disabled')) {
-          (btn as HTMLElement).click();
-          return true;
-        }
-      }
-      return false;
-    });
-  } catch {
-    published = false;
+  const publishSelector = await _waitForEnabledSelector(
+    page,
+    [
+      'ytcp-uploads-dialog #done-button',
+      'ytcp-video-upload-progress #done-button',
+      'ytcp-uploads-dialog ytcp-button:has-text("Publish")',
+      'ytcp-uploads-dialog ytcp-button:has-text("Опубликовать")',
+      'ytcp-uploads-dialog ytcp-button:has-text("Save")',
+      'ytcp-uploads-dialog ytcp-button:has-text("Сохранить")',
+    ].join(', '),
+    'melonity-youtube-publish',
+    120_000,
+  );
+  if (!publishSelector) {
+    await page.screenshot({ path: `/app/screenshots/youtube_publish_button_missing_${ts}.png`, fullPage: true }).catch(() => {});
+    throw new Error('Не найдена активная кнопка «Опубликовать / Сохранить» в окне загрузки YouTube Studio');
   }
 
-  if (!published) {
-    // Last resort: try Playwright click
-    try {
-      await page.click('#done-button', { timeout: 10_000 });
-      published = true;
-    } catch {
-      // Try via keyboard shortcut
-      try {
-        await page.keyboard.press('Enter');
-        published = true;
-        logger.warn('Publish через Enter');
-      } catch {
-        throw new Error('Не найдена кнопка публикации Shorts');
-      }
-    }
-  }
+  await humanClick(page, cursor, publishSelector, { postClickDelay: 700 });
 
   logger.info('Нажата кнопка публикации ✓');
 
@@ -1152,33 +1181,39 @@ async function _uploadToYouTube(
   // TAKE SCREENSHOT AFTER WAITING
   await page.screenshot({ path: `/app/screenshots/3_after_wait_${ts}.png`, fullPage: true }).catch(() => {});
 
-  // Verify success — look for share dialog or "Video published" text
+  // Verify success only inside Studio's publication/share UI. Body-wide text
+  // and keyboard fallbacks can produce false positives on the video player.
   let success = false;
   try {
     success = await page.waitForFunction(() => {
-      const text = document.body?.textContent || '';
-      if (/published|опубликовано|video uploaded|share a link/i.test(text)) return true;
-      
-      const dialog = document.querySelector('ytcp-video-share-dialog, ytcp-dialog');
-      if (dialog && /published|опубликовано|share/i.test(dialog.textContent || '')) return true;
+      const dialogs = document.querySelectorAll(
+        'ytcp-video-share-dialog, ytcp-dialog, tp-yt-paper-dialog, [role="dialog"]',
+      );
+      for (const dialog of dialogs) {
+        const element = dialog as HTMLElement;
+        const visible = Boolean(element.offsetWidth || element.offsetHeight || element.getClientRects().length);
+        if (!visible) continue;
 
-      const titleElements = document.querySelectorAll('h1, h2, h3, h4');
-      for (const el of titleElements) {
-        if (/published|опубликовано|video uploaded/i.test(el.textContent || '')) return true;
+        const text = element.textContent || '';
+        const hasPublishedText = /video published|published successfully|видео опубликовано|успешно опубликовано/i.test(text);
+        const hasShareLink = Boolean(
+          element.querySelector('a[href*="youtube.com/watch"], a[href*="youtube.com/shorts"], input[value*="youtu"]'),
+        );
+        if (hasPublishedText && hasShareLink) return true;
       }
       return false;
-    }, { timeout: 30_000 }).then(() => true).catch(() => false);
+    }, undefined, { timeout: 45_000 }).then(() => true).catch(() => false);
   } catch {
     success = false;
   }
 
   if (!success) {
     await page.screenshot({ path: `/app/screenshots/4_failed_confirm_${ts}.png`, fullPage: true }).catch(() => {});
-    throw new Error(
-      'YouTube Studio не подтвердил публикацию Shorts. Задача остановлена, чтобы не пометить видео как опубликованное без подтверждения.',
+    throw new UnrecoverableError(
+      'YouTube Studio не подтвердил публикацию Shorts. Повторный автоматический залив отключён, чтобы не создать дубликат. Проверьте ролик в YouTube Studio.',
     );
   } else {
-    logger.info('Успешная публикация подтверждена (найден текст published/опубликовано/share)');
+    logger.info('Успешная публикация подтверждена окном YouTube Studio и ссылкой на видео');
   }
 
   logger.info('✅ Видео имеет валидные параметры Shorts и было успешно опубликовано.');

@@ -14,6 +14,7 @@ import crypto from 'crypto';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { dispatchAccountJob } from '../lib/job-dispatch.js';
+import { describeDispatchFailure, describeDispatchFailures } from '../lib/dispatch-failure-message.js';
 import {
   analyticsCronQueue,
   cleanupQueue,
@@ -594,37 +595,30 @@ router.post('/launch', async (req: Request, res: Response) => {
     const failures = results.filter(r => !r.jobId);
     const successfulAccountIds = results.filter(r => r.jobId).map(r => r.accountId);
 
+    if (type === 'UPLOAD' && failures.length > 0) {
+      const videoId = (baseExtra as Record<string, unknown>).videoId as string;
+      await Promise.all(failures.map((failure) =>
+        prisma.videoPublication.updateMany({
+          where: { videoId, accountId: failure.accountId, taskId: task.id },
+          data: {
+            status: 'FAILED',
+            error: describeDispatchFailure(failure.error),
+          },
+        }),
+      ));
+    }
+
     // If everything failed pre-flight, no point in keeping the task record.
     if (successCount === 0) {
-      await prisma.task.update({
+      const errorMsg = describeDispatchFailures(failures);
+      const failedTask = await prisma.task.update({
         where: { id: task.id },
-        data: { status: 'FAILED', error: 'All accounts failed pre-flight checks' },
+        data: { status: 'FAILED', error: errorMsg, completedAt: new Date() },
       });
-
-      // Build a human-readable error message based on failure reasons
-      const BUSY_TASK_LABELS: Record<string, string> = {
-        upload: 'залив', warmup: 'прогрев', login: 'логин',
-        'edit-profile': 'редактирование профиля', cookies: 'сбор cookies',
-      };
-      const busyFailures = failures.filter(f => f.error?.startsWith('ACCOUNT_BUSY'));
-      let errorMsg: string;
-      if (busyFailures.length > 0) {
-        const runningTask = busyFailures[0].error?.split(':')[1] || 'задача';
-        const label = BUSY_TASK_LABELS[runningTask] || runningTask;
-        errorMsg = `Аккаунт(ы) заняты — сейчас выполняется: ${label}. Дождитесь завершения.`;
-      } else if (failures.some(f => f.error === 'NO_PROXY')) {
-        errorMsg = 'К аккаунту должен быть привязан рабочий прокси перед запуском задачи.';
-      } else if (failures.some(f => f.error === 'NO_COOKIES')) {
-        errorMsg = 'У аккаунта нет валидных cookies. Выполните вход или импорт cookies, затем повторите запуск.';
-      } else if (failures.some(f => f.error === 'NO_FINGERPRINT')) {
-        errorMsg = 'У аккаунта нет fingerprint. Переимпортируйте аккаунт или пересоздайте fingerprint до запуска задачи.';
-      } else {
-        errorMsg = "Все аккаунты заблокированы pre-flight проверками";
-      }
 
       res.status(409).json({
         error: errorMsg,
-        task,
+        task: failedTask,
         failures,
       });
       return;
@@ -661,6 +655,7 @@ router.post('/launch', async (req: Request, res: Response) => {
       skipped: failures.length + alreadyUploadedCount,
       alreadyUploaded: alreadyUploadedCount,
       failures,
+      warning: failures.length > 0 ? describeDispatchFailures(failures) : null,
     });
   } catch (err) {
     console.error('[Workspace] Launch error:', err);

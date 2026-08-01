@@ -113,6 +113,24 @@ interface VideoFile {
   hashtags?: string[]
 }
 
+interface WorkspaceAccount {
+  id: string
+  username: string
+  platform: string
+  status: string
+  warmupCompletedAt?: string | null
+}
+
+interface WorkspaceLaunchResponse {
+  dispatched: number
+  skipped: number
+  alreadyUploaded?: number
+  warning?: string | null
+}
+
+const isUploadReady = (account: WorkspaceAccount) =>
+  ["ALIVE", "ACTIVE"].includes(account.status) && Boolean(account.warmupCompletedAt)
+
 interface BannerFile {
   id: string
   originalName: string
@@ -169,7 +187,7 @@ export default function WorkspacePage() {
   const [statusMsg, setStatusMsg] = React.useState("")
   const [presets, setPresets] = React.useState<Preset[]>([])
   const [selectedPresetId, setSelectedPresetId] = React.useState<string>("")
-  const [accounts, setAccounts] = React.useState<{id: string; username: string; platform: string; status: string}[]>([])
+  const [accounts, setAccounts] = React.useState<WorkspaceAccount[]>([])
   const [selectedAccountIds, setSelectedAccountIds] = React.useState<Set<string>>(new Set())
 
   const [warmup, setWarmup] = React.useState<WarmupConfig>({ ...DEFAULT_CONFIGS.WARMUP })
@@ -191,6 +209,13 @@ export default function WorkspacePage() {
     task: WorkspaceTask
     session: WorkspaceVncSession
   } | null>(null)
+
+  const selectableAccounts = React.useMemo(
+    () => mode === "UPLOAD" ? accounts.filter(isUploadReady) : accounts,
+    [accounts, mode],
+  )
+  const allSelectableAccountsSelected = selectableAccounts.length > 0
+    && selectableAccounts.every((account) => selectedAccountIds.has(account.id))
 
   const activeMonitors = React.useMemo(
     () => jobs.flatMap((task) =>
@@ -268,6 +293,16 @@ export default function WorkspacePage() {
         .catch(() => {})
     }
   }, [mode])
+
+  React.useEffect(() => {
+    if (mode !== "UPLOAD") return
+    setSelectedAccountIds((selected) => new Set(
+      [...selected].filter((accountId) => {
+        const account = accounts.find((candidate) => candidate.id === accountId)
+        return account ? isUploadReady(account) : false
+      }),
+    ))
+  }, [accounts, mode])
 
   const getActiveConfig = (): Record<string, unknown> => {
     switch (mode) {
@@ -347,7 +382,7 @@ export default function WorkspacePage() {
     try {
       const config = getActiveConfig()
       const concurrency = getConcurrency()
-      await api.post("/api/workspace/launch", {
+      const result = await api.post<WorkspaceLaunchResponse>("/api/workspace/launch", {
         type: mode,
         accountIds: Array.from(selectedAccountIds),
         applyToAll: false,
@@ -357,8 +392,18 @@ export default function WorkspacePage() {
         delayMax: 8000,
       })
       setLaunchStatus("success")
-      toast.success("Задача запущена!")
-      setStatusMsg("Задача запущена!")
+      if (result.dispatched === 0 && (result.alreadyUploaded || 0) > 0) {
+        const msg = "Ролик уже загружен на выбранные аккаунты. Повторный залив не создан."
+        toast.info(msg)
+        setStatusMsg(msg)
+      } else if (result.warning) {
+        const msg = `Запущено: ${result.dispatched}. Пропущено: ${result.skipped}. ${result.warning}`
+        toast.warning(msg)
+        setStatusMsg(msg)
+      } else {
+        toast.success("Задача запущена!")
+        setStatusMsg("Задача запущена!")
+      }
       fetchJobs()
       setTimeout(() => setLaunchStatus("idle"), 3000)
     } catch (err) {
@@ -965,14 +1010,15 @@ export default function WorkspacePage() {
                     size="sm"
                     className="h-7 text-xs"
                     onClick={() => {
-                      if (selectedAccountIds.size === accounts.length) {
+                      if (allSelectableAccountsSelected) {
                         setSelectedAccountIds(new Set())
                       } else {
-                        setSelectedAccountIds(new Set(accounts.map(a => a.id)))
+                        setSelectedAccountIds(new Set(selectableAccounts.map(a => a.id)))
                       }
                     }}
+                    disabled={selectableAccounts.length === 0}
                   >
-                    {selectedAccountIds.size === accounts.length ? "Снять все" : "Выбрать все"}
+                    {allSelectableAccountsSelected ? "Снять все" : "Выбрать доступные"}
                   </Button>
                 </div>
                 <div className="text-xs text-muted-foreground">
@@ -982,23 +1028,38 @@ export default function WorkspacePage() {
                   {accounts.length === 0 ? (
                     <div className="text-xs text-muted-foreground text-center py-4">Нет аккаунтов</div>
                   ) : (
-                    accounts.map(acc => (
-                      <label key={acc.id} className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent/50 cursor-pointer transition-colors duration-150">
-                        <Checkbox
-                          checked={selectedAccountIds.has(acc.id)}
-                          onCheckedChange={(checked) => {
-                            const next = new Set(selectedAccountIds)
-                            if (checked) next.add(acc.id)
-                            else next.delete(acc.id)
-                            setSelectedAccountIds(next)
-                          }}
-                        />
-                        <span className="text-sm truncate flex-1">{acc.username || acc.id.slice(0, 8)}</span>
-                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                          {acc.platform === 'TIKTOK' ? 'TT' : 'YT'}
-                        </Badge>
-                      </label>
-                    ))
+                    accounts.map(acc => {
+                      const uploadUnavailable = mode === "UPLOAD" && !isUploadReady(acc)
+                      return (
+                        <label
+                          key={acc.id}
+                          className={`flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors duration-150 ${
+                            uploadUnavailable ? "cursor-not-allowed opacity-60" : "hover:bg-accent/50 cursor-pointer"
+                          }`}
+                          title={uploadUnavailable ? "Сначала завершите прогрев аккаунта" : undefined}
+                        >
+                          <Checkbox
+                            checked={selectedAccountIds.has(acc.id)}
+                            disabled={uploadUnavailable}
+                            onCheckedChange={(checked) => {
+                              const next = new Set(selectedAccountIds)
+                              if (checked) next.add(acc.id)
+                              else next.delete(acc.id)
+                              setSelectedAccountIds(next)
+                            }}
+                          />
+                          <span className="text-sm truncate flex-1">{acc.username || acc.id.slice(0, 8)}</span>
+                          {uploadUnavailable && (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                              {acc.status === "WARMING_UP" ? "Прогрев идёт" : "Нужен прогрев"}
+                            </Badge>
+                          )}
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                            {acc.platform === 'TIKTOK' ? 'TT' : 'YT'}
+                          </Badge>
+                        </label>
+                      )
+                    })
                   )}
                 </div>
               </div>

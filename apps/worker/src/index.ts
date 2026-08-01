@@ -324,7 +324,8 @@ for (const config of QUEUE_CONFIGS) {
     console.error(`[Worker:${config.name}] Job ${job?.id} FAILED:`, err.message);
     if (!job) return;
     const maxAttempts = typeof job.opts.attempts === 'number' ? job.opts.attempts : 1;
-    if (job.attemptsMade >= maxAttempts) {
+    const isUnrecoverable = err.name === 'UnrecoverableError';
+    if (isUnrecoverable || job.attemptsMade >= maxAttempts) {
       refreshTaskAfterTerminalJob(job, err.message)
         .catch(trackErr => console.error(`[Worker:${config.name}] Task status update failed:`, trackErr));
     }
