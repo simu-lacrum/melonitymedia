@@ -241,7 +241,9 @@ async function refreshTaskAfterTerminalJob(job: Job<any>, error?: string) {
   if (task.type === 'WARMUP') {
     const accountIds = collectTaskAccountIds(task);
 
-    if (hasFailed) {
+    // Only the job that just failed may stop its account. Historical failed
+    // jobs remain in BullMQ for diagnostics and must not poison a recovered run.
+    if (error) {
       const failedAccountId = getJobAccountId(job);
       if (failedAccountId) {
         await prisma.socialAccount.updateMany({
@@ -255,6 +257,28 @@ async function refreshTaskAfterTerminalJob(job: Job<any>, error?: string) {
           },
         });
       }
+    }
+
+    const completedAccounts = accountIds.length === 0
+      ? 0
+      : await prisma.socialAccount.count({
+          where: {
+            id: { in: accountIds },
+            warmupCompletedAt: { not: null },
+          },
+        });
+
+    if (accountIds.length > 0 && completedAccounts === accountIds.length) {
+      await prisma.task.update({
+        where: { id: task.id },
+        data: {
+          status: 'COMPLETED',
+          progress: 100,
+          error: null,
+          completedAt: new Date(),
+        },
+      });
+      return;
     }
 
     const warmingAccounts = accountIds.length === 0

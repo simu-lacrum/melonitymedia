@@ -22,6 +22,11 @@ import type { Browser, BrowserContext, Page } from 'patchright';
 import { loadCookiesFromEncryptedStore } from '../auth/cookie-store.js';
 import { applyFingerprint, inspectFingerprintConsistency, getSystemChromeMajor, type AccountFingerprint } from './fingerprint-manager.js';
 import { prisma } from '../../lib/prisma.js';
+import {
+  acquireProxyLock,
+  releaseProxyLock,
+  type ProxyLockLease,
+} from '../../lib/account-lock.js';
 import crypto from 'crypto';
 import { spawn, type ChildProcess } from 'child_process';
 import net from 'net';
@@ -56,9 +61,21 @@ export interface StealthContext {
 
 type DisplayConfig = { display: number; vncPort: number; webPort: number };
 type VncSessionIdentity = { taskId: string; jobId: string };
+const reservedDisplays = new Set<number>();
+
+function releaseDisplayReservation(config: DisplayConfig | null): void {
+  if (config) reservedDisplays.delete(config.display);
+}
 
 async function getFreePortAndDisplay(): Promise<DisplayConfig> {
   for (let webPort = 6000; webPort <= 6020; webPort++) {
+    const display = webPort - 5900; // e.g. webPort 6005 -> display 105
+    const vncPortCandidate = webPort - 100; // e.g. 5905
+    if (reservedDisplays.has(display)) continue;
+
+    // Reserve before asynchronous port checks so concurrent launches cannot
+    // observe and claim the same display in the same worker process.
+    reservedDisplays.add(display);
     try {
       // Check if webPort is free
       await new Promise<void>((resolve, reject) => {
@@ -68,9 +85,6 @@ async function getFreePortAndDisplay(): Promise<DisplayConfig> {
         server.listen(webPort, () => server.close(() => resolve()));
       });
 
-      const display = webPort - 5900; // e.g. webPort 6005 -> display 105
-      const vncPortCandidate = webPort - 100; // e.g. 5905
-      
       // Check if vncPortCandidate is free
       await new Promise<void>((resolve, reject) => {
         const server = net.createServer();
@@ -81,11 +95,13 @@ async function getFreePortAndDisplay(): Promise<DisplayConfig> {
 
       // Check if display lock exists
       if (fs.existsSync(`/tmp/.X11-unix/X${display}`) || fs.existsSync(`/tmp/.X${display}-lock`)) {
+        reservedDisplays.delete(display);
         continue;
       }
 
       return { display, vncPort: vncPortCandidate, webPort };
-    } catch (e) {
+    } catch {
+      reservedDisplays.delete(display);
       continue;
     }
   }
@@ -234,6 +250,7 @@ const STEALTH_ARGS = [
  */
 export async function launchStealthContext(opts: LaunchOptions): Promise<StealthContext> {
   const { fingerprint } = opts;
+  let proxyLease: ProxyLockLease | null = null;
   const requireCookies = opts.jobType !== 'login';
   let cookiesForContext: Awaited<ReturnType<typeof loadCookiesFromEncryptedStore>> = [];
 
@@ -314,6 +331,10 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
     }
   }
 
+  proxyLease = await acquireProxyLock(
+    opts.proxyUrl,
+    `${opts.jobType ?? 'browser'}:${opts.accountId}`,
+  );
 
   // Trigger rotation if proxy is configured for per-session mode
   if (opts.proxyUrl) {
@@ -377,6 +398,9 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
     const xvfb = spawn('Xvfb', [`:${displayConfig.display}`, '-screen', '0', '1920x1080x24', '-ac'], { stdio: 'ignore' });
     guiProcesses.push(xvfb);
     await new Promise(r => setTimeout(r, 1000)); // wait for Xvfb to init
+    if (xvfb.exitCode !== null) {
+      throw new Error(`Xvfb exited before display :${displayConfig.display} became ready`);
+    }
 
     // Start fluxbox
     const fluxbox = spawn('fluxbox', ['-display', `:${displayConfig.display}`], { stdio: 'ignore' });
@@ -409,6 +433,7 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
     console.warn(`[Patchright] Failed to start dynamic GUI:`, e);
     // Cleanup if partially started
     for (const p of guiProcesses) p.kill();
+    releaseDisplayReservation(displayConfig);
     displayConfig = null;
   }
 
@@ -436,6 +461,10 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
     await closeVncSession(vncIdentity).catch(closeErr => {
       console.warn('[Patchright] Failed to close VNC session after launch error:', closeErr);
     });
+    releaseDisplayReservation(displayConfig);
+    await releaseProxyLock(proxyLease).catch(lockError => {
+      console.warn('[Patchright] Failed to release proxy lock after launch error:', lockError);
+    });
     throw err;
   }
 
@@ -445,6 +474,10 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
     for (const p of guiProcesses) {
       try { p.kill(); } catch (e) {}
     }
+    releaseDisplayReservation(displayConfig);
+    void releaseProxyLock(proxyLease).catch(err => {
+      console.warn('[Patchright] Failed to release proxy lock:', err);
+    });
     void closeVncSession(vncIdentity).catch(err => {
       console.warn('[Patchright] Failed to close VNC session:', err);
     });
@@ -452,6 +485,7 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
 
   const isMobileDevice = fingerprint.deviceClass === 'mobile';
 
+  try {
   const context = await browser.newContext({
     viewport: fingerprint.viewport,
     locale: fingerprint.locale,
@@ -476,13 +510,17 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
 
   const shouldExposeVncUrl = Boolean(displayConfig && (!vncIdentity || vncSessionRegistered));
 
-  return { 
+  return {
     browser, 
     context, 
     page,
     vncPort: displayConfig?.webPort,
-    vncUrl: shouldExposeVncUrl && displayConfig ? buildVncUrl(displayConfig.webPort, opts) : undefined
+    vncUrl: shouldExposeVncUrl && displayConfig ? buildVncUrl(displayConfig.webPort, opts) : undefined,
   };
+  } catch (error) {
+    await browser.close().catch(() => {});
+    throw error;
+  }
 }
 
 

@@ -8,6 +8,7 @@ interface WarmupNavigationOptions {
   attempts?: number;
   timeoutMs?: number;
   retryDelayMs?: number;
+  referer?: string;
 }
 
 const CLOSED_PAGE_ERROR = /(?:target|page|context|browser).*(?:closed|crash|disconnect)/i;
@@ -56,7 +57,11 @@ export async function navigateForWarmup(
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
-      await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+      await page.goto(targetUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: timeoutMs,
+        ...(options.referer ? { referer: options.referer } : {}),
+      });
       return;
     } catch (error) {
       lastError = error;

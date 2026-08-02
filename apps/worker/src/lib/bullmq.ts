@@ -11,10 +11,10 @@ import { Queue, type JobsOptions } from 'bullmq';
 const SELF_SCHEDULED_JOB_OPTIONS: JobsOptions = {
   removeOnComplete: { count: 100 },
   removeOnFail: { count: 50 },
-  attempts: 2,
+  attempts: 4,
   backoff: {
     type: 'exponential',
-    delay: 30_000,
+    delay: 120_000,
   },
 };
 

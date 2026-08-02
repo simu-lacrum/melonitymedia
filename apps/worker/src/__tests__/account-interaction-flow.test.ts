@@ -80,9 +80,12 @@ describe('account interaction flow safety', () => {
   });
 
   it('keeps parent warmup tasks running while self-rescheduled sessions remain', () => {
+    expect(WARMUP_SRC).toContain('_trackNextWarmupJob(data.taskId, nextJobId)');
+    expect(WARMUP_SRC).toContain('bullmqJobId: jobId');
     expect(WORKER_INDEX_SRC).toContain("task.type === 'WARMUP'");
     expect(WORKER_INDEX_SRC).toContain('collectTaskAccountIds');
     expect(WORKER_INDEX_SRC).toContain('warmingAccounts > 0');
+    expect(WORKER_INDEX_SRC).toContain('completedAccounts === accountIds.length');
     expect(WORKER_INDEX_SRC).toContain("status: 'WARMING_UP'");
     expect(WORKER_INDEX_SRC).toContain("status: 'RUNNING'");
     expect(WORKER_INDEX_SRC).toContain("...(error ? { error } : {})");

@@ -34,7 +34,14 @@ export const uploadQueue = new Queue('upload', {
 /** Warm up accounts: scroll, like, comment */
 export const warmupQueue = new Queue('warmup', {
   connection: redis,
-  defaultJobOptions: DEFAULT_JOB_OPTIONS,
+  defaultJobOptions: {
+    ...DEFAULT_JOB_OPTIONS,
+    attempts: 4,
+    backoff: {
+      type: 'exponential',
+      delay: 120_000,
+    },
+  },
 });
 
 /** Farm cookies on donor websites */

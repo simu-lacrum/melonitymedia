@@ -9,6 +9,7 @@ const PATCHRIGHT_LAUNCHER = fs.readFileSync(path.join(WORKER_ROOT, 'src/core/bro
 const WORKER_INDEX = fs.readFileSync(path.join(WORKER_ROOT, 'src/index.ts'), 'utf-8');
 const EDIT_PROFILE_HANDLER = fs.readFileSync(path.join(WORKER_ROOT, 'src/handlers/edit-profile.ts'), 'utf-8');
 const WARMUP_HANDLER = fs.readFileSync(path.join(WORKER_ROOT, 'src/handlers/warmup.ts'), 'utf-8');
+const UPLOAD_HANDLER = fs.readFileSync(path.join(WORKER_ROOT, 'src/handlers/upload.ts'), 'utf-8');
 
 // docker-compose is at repo root
 const COMPOSE = fs.readFileSync(path.join(WORKER_ROOT, '../../docker-compose.yml'), 'utf-8');
@@ -65,6 +66,8 @@ describe('dynamic GUI source verification', () => {
   it('starts Xvfb per browser job', () => {
     expect(PATCHRIGHT_LAUNCHER).toContain("spawn('Xvfb'");
     expect(PATCHRIGHT_LAUNCHER).toContain('displayConfig.display');
+    expect(PATCHRIGHT_LAUNCHER).toContain('reservedDisplays.add(display)');
+    expect(PATCHRIGHT_LAUNCHER).toContain('releaseDisplayReservation(displayConfig)');
   });
 
   it('starts x11vnc without daemonizing away from the tracked process', () => {
@@ -96,6 +99,13 @@ describe('dynamic GUI source verification', () => {
     expect(PATCHRIGHT_LAUNCHER).not.toContain('using direct connection');
   });
 
+  it('runs headed Chrome through the configured proxy and serializes shared endpoints', () => {
+    expect(PATCHRIGHT_LAUNCHER).toContain('headless: false');
+    expect(PATCHRIGHT_LAUNCHER).toContain('proxy: proxyConfig');
+    expect(PATCHRIGHT_LAUNCHER).toContain('await acquireProxyLock(');
+    expect(PATCHRIGHT_LAUNCHER).toContain('releaseProxyLock(proxyLease)');
+  });
+
   it('fails SOCKS proxy auth before browser launch with a specific error', () => {
     expect(PATCHRIGHT_LAUNCHER).toContain('function assertProxySupportedByBrowser');
     expect(PATCHRIGHT_LAUNCHER).toContain('SOCKS proxy authentication is not supported');
@@ -103,11 +113,28 @@ describe('dynamic GUI source verification', () => {
   });
 });
 
+describe('humanized content flows', () => {
+  it('does not leave required hashtag search for a generic feed', () => {
+    expect(WARMUP_HANDLER).toContain('queueNicheResults(');
+    expect(WARMUP_HANDLER).toContain('_openNextNicheResult(');
+    expect(WARMUP_HANDLER).not.toContain('Не удалось открыть #${hashtag} — переход на FYP');
+    expect(WARMUP_HANDLER).not.toContain('Не удалось использовать поиск YouTube — переход на Shorts');
+  });
+
+  it('moves the cursor before both TikTok and YouTube upload navigation', () => {
+    const idleMoves = UPLOAD_HANDLER.match(/await humanIdleMove\(page, cursor\)/g) ?? [];
+    expect(idleMoves.length).toBeGreaterThanOrEqual(2);
+    expect(UPLOAD_HANDLER).toContain('короткий естественный просмотр перед загрузкой TikTok');
+    expect(UPLOAD_HANDLER).toContain('мини-прогрев перед загрузкой');
+  });
+});
+
 describe('task state truthfulness', () => {
   it('does not leave a failed warmup account visually stuck in WARMING_UP', () => {
     expect(WORKER_INDEX).toContain('function getJobAccountId');
     expect(WORKER_INDEX).toContain("task.type === 'WARMUP'");
-    expect(WORKER_INDEX).toContain('if (hasFailed)');
+    expect(WORKER_INDEX).toContain('if (error)');
+    expect(WORKER_INDEX).toContain('completedAccounts === accountIds.length');
     expect(WORKER_INDEX).toContain("status: 'WARMING_UP'");
     expect(WORKER_INDEX).toContain("status: 'ALIVE'");
     expect(WORKER_INDEX).not.toContain("lastError: error ?? 'Warmup job failed'");

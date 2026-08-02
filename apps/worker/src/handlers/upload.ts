@@ -528,6 +528,19 @@ async function _uploadToTikTok(
   proxyUrl?: string,
   fingerprint?: any
 ): Promise<void> {
+  logger.info('Выполняю короткий естественный просмотр перед загрузкой TikTok...');
+  await humanIdleMove(page, cursor).catch(() => {});
+  try {
+    await page.goto('https://www.tiktok.com/foryou', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page.waitForTimeout(_randomDelay(2000, 4000));
+    await randomMouseWander(page, cursor, _randomDelay(1500, 2800));
+    await humanScroll(page, _randomDelay(180, 360), 'down');
+    await page.waitForTimeout(_randomDelay(2500, 5000));
+    await humanIdleMove(page, cursor);
+  } catch (error) {
+    logger.warn(`Короткий просмотр TikTok недоступен, продолжаю загрузку: ${(error as Error).message}`);
+  }
+
   // Navigate to TikTok Studio upload (2025+) — fallback to legacy /upload
   logger.info('Переход на страницу загрузки TikTok Studio...');
   await page.goto('https://www.tiktok.com/tiktokstudio/upload', { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -791,6 +804,7 @@ async function _uploadToYouTube(
 
   // ── Mini-warmup (Phantom mouse & scrolls) ──────────────────
   logger.info('Выполняю мини-прогрев перед загрузкой (Phantom mouse/scrolls)...');
+  await humanIdleMove(page, cursor).catch(() => {});
   try {
     await page.goto('https://www.youtube.com/shorts', { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(_randomDelay(2000, 4000));

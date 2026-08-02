@@ -73,4 +73,19 @@ describe('navigateForWarmup', () => {
       .rejects.toThrow('Target page, context or browser has been closed');
     expect(targetAttempts).toBe(1);
   });
+
+  it('preserves the niche search page as the navigation referer', async () => {
+    const { page, goto, logger } = createPage(async () => null);
+
+    await navigateForWarmup(page, 'https://www.youtube.com/shorts/abc', logger, {
+      referer: 'https://www.youtube.com/results?search_query=%23dota2',
+    });
+
+    expect(goto).toHaveBeenCalledWith(
+      'https://www.youtube.com/shorts/abc',
+      expect.objectContaining({
+        referer: 'https://www.youtube.com/results?search_query=%23dota2',
+      }),
+    );
+  });
 });

@@ -26,6 +26,13 @@ import { prisma } from '../lib/prisma.js';
 import { loadAccountContext } from '../lib/account-context.js';
 import { acquireAccountLock, releaseAccountLock } from '../lib/account-lock.js';
 import { navigateForWarmup } from '../lib/warmup-navigation.js';
+import {
+  createNicheContentState,
+  normalizeWarmupHashtags,
+  queueNicheResults,
+  takeNextNicheVideo,
+  type NicheContentState,
+} from '../lib/niche-content.js';
 import type { Browser, Page } from 'patchright';
 import type { GhostCursor } from 'ghost-cursor';
 
@@ -57,6 +64,7 @@ interface WarmupPhaseContext {
   platform: 'TIKTOK' | 'YOUTUBE';
   hashtags: string[];
   comments: string[];
+  nicheState: NicheContentState;
 }
 
 function _normalizeWarmupDays(value: unknown, fallback: number): number {
@@ -196,8 +204,11 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     const totalDays = _normalizeWarmupDays(data.warmupDays, ctxAcc.warmupDays || 10);
 
     await prisma.socialAccount.updateMany({
-      where: { id: data.accountId, status: 'WARMING_UP' },
-      data: { lastError: null },
+      where: {
+        id: data.accountId,
+        status: { in: ['ALIVE', 'ACTIVE', 'WARMING_UP'] },
+      },
+      data: { status: 'WARMING_UP', lastError: null },
     });
 
     if (!ctxAcc.warmupStartedAt) {
@@ -255,9 +266,7 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     const lightEnd = Math.max(passiveEnd + 1, Math.ceil(totalDays * 0.6));
 
     // Use user-provided hashtags for niche-focused warmup
-    const mergedHashtags = Array.isArray(data.hashtags) && data.hashtags.length > 0
-      ? [...new Set(data.hashtags)]
-      : [];  // No hashtags = pure FYP browsing, which is also valid
+    const mergedHashtags = normalizeWarmupHashtags(data.hashtags);
     const mergedComments = _normalizeWarmupComments(data.comments);
 
     const phaseCtx: WarmupPhaseContext = {
@@ -267,6 +276,7 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
       platform: ctxAcc.platform,
       hashtags: mergedHashtags,
       comments: mergedComments,
+      nicheState: createNicheContentState(),
     };
     if (mergedComments.length === 0) {
       logger.info('Комментарии отключены: список комментариев пуст.');
@@ -278,7 +288,7 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     if (ctxAcc.platform === 'TIKTOK') {
       if (mergedHashtags.length > 0) {
         const startTag = mergedHashtags[Math.floor(Math.random() * mergedHashtags.length)];
-        await _navigateToHashtagSearch(page, cursor, startTag, logger);
+        await _navigateToHashtagSearch(page, cursor, startTag, logger, phaseCtx.nicheState);
       } else {
         await page.goto('https://www.tiktok.com/foryou', { waitUntil: 'domcontentloaded' });
       }
@@ -288,7 +298,7 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
         const startTag = mergedHashtags[Math.floor(Math.random() * mergedHashtags.length)];
         await navigateForWarmup(page, 'https://www.youtube.com', logger);
         await page.waitForTimeout(_randomDelay(2000, 3000));
-        await _navigateToYoutubeSearch(page, cursor, startTag, logger);
+        await _navigateToYoutubeSearch(page, cursor, startTag, logger, phaseCtx.nicheState);
       } else {
         await navigateForWarmup(page, 'https://www.youtube.com/shorts', logger);
       }
@@ -399,7 +409,7 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
         data: { lastWarmupDay: warmupDay },
       });
 
-      await addJob('warmup' as any, {
+      const nextJobId = await addJob('warmup' as any, {
         userId: data.userId,
         taskId: data.taskId,
         accountId: data.accountId,
@@ -414,6 +424,9 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
         delay: sleepDelay,
         jobId: `warmup-${data.taskId ?? data.accountId}-${data.accountId}-day${warmupDay + 1}-s0`,
       });
+      await _trackNextWarmupJob(data.taskId, nextJobId).catch((error) => {
+        logger.warn(`Следующая сессия создана, но не записана в карточку задачи: ${_errorMessage(error)}`);
+      });
       logger.info(`💤 Сон ~${sleepHours}ч. Следующий день прогрева (${warmupDay + 1}/${totalDays}) запланирован`);
 
     } else {
@@ -423,7 +436,7 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
       const nextSession = sessionInDay + 1;
 
       // Don't increment warmupDay yet — still same day
-      await addJob('warmup' as any, {
+      const nextJobId = await addJob('warmup' as any, {
         userId: data.userId,
         taskId: data.taskId,
         accountId: data.accountId,
@@ -439,12 +452,28 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
         delay: breakDelay,
         jobId: `warmup-${data.taskId ?? data.accountId}-${data.accountId}-day${warmupDay}-s${nextSession}`,
       });
+      await _trackNextWarmupJob(data.taskId, nextJobId).catch((error) => {
+        logger.warn(`Следующая сессия создана, но не записана в карточку задачи: ${_errorMessage(error)}`);
+      });
       logger.info(`☕ Перерыв ~${breakMins} мин. Сессия ${nextSession + 1}/${sessionsPerDay} запланирована`);
     }
 
     await job.updateProgress(100);
 
   } catch (err: unknown) {
+    const maxAttempts = typeof job.opts.attempts === 'number' ? job.opts.attempts : 1;
+    const hasRetryRemaining = job.attemptsMade + 1 < maxAttempts;
+    const isTransientNavigation = /Warmup navigation failed|Timeout .* exceeded|ERR_(?:TIMED_OUT|CONNECTION|PROXY)/i
+      .test(_errorMessage(err));
+
+    if (hasRetryRemaining && isTransientNavigation) {
+      logger.warn(
+        `Сеть или платформа временно не ответили. Автоматический повтор ` +
+        `${job.attemptsMade + 2}/${maxAttempts} будет выполнен с увеличенной паузой.`,
+      );
+      throw err;
+    }
+
     const classified = emitWorkerError(logger, data.accountId, 'warmup', err);
     await prisma.socialAccount.findUnique({
       where: { id: data.accountId },
@@ -501,71 +530,107 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
 // Opens TikTok, clicks search bar, types hashtag manually, clicks search.
 // This is how real users find niche content — NOT via direct URL.
 
+async function _openNextNicheResult(
+  page: Page,
+  cursor: Awaited<ReturnType<typeof createPageCursor>>,
+  platform: 'TIKTOK' | 'YOUTUBE',
+  logger: SocketLogger,
+  state: NicheContentState,
+): Promise<void> {
+  let videoUrl = takeNextNicheVideo(state);
+
+  while (videoUrl) {
+    try {
+      await randomMouseWander(page, cursor, _randomDelay(600, 1400));
+      await navigateForWarmup(page, videoUrl, logger, {
+        attempts: 2,
+        timeoutMs: 25_000,
+        retryDelayMs: 2_000,
+        referer: state.sourceUrl ?? undefined,
+      });
+      await page.waitForTimeout(_randomDelay(1800, 3200));
+
+      const finalUrl = page.url();
+      const isVideo = platform === 'YOUTUBE'
+        ? /youtube\.com\/(?:watch\?|shorts\/)/i.test(finalUrl)
+        : /tiktok\.com\/@[^/]+\/video\/\d+/i.test(finalUrl);
+      if (!isVideo) throw new Error(`Search result redirected to ${new URL(finalUrl).hostname}`);
+
+      const format = platform === 'YOUTUBE' && finalUrl.includes('/shorts/') ? 'Shorts ' : '';
+      logger.info(`  ▶ Открыто ${format}видео из выдачи #${state.currentHashtag}`);
+      return;
+    } catch (error) {
+      logger.warn(`  Результат #${state.currentHashtag} не открылся, пробую следующий: ${_errorMessage(error)}`);
+      videoUrl = takeNextNicheVideo(state);
+    }
+  }
+
+  throw new Error(`No usable niche videos remained for #${state.currentHashtag ?? 'unknown'}`);
+}
+
 async function _navigateToHashtagSearch(
   page: Page,
   cursor: Awaited<ReturnType<typeof createPageCursor>>,
   hashtag: string,
   logger: SocketLogger,
+  state: NicheContentState,
 ): Promise<void> {
   logger.info(`🔍 Поиск #${hashtag} в TikTok (через поисковую строку)...`);
 
   // Make sure we're on TikTok first
   const currentUrl = page.url();
   if (!/tiktok\.com/i.test(currentUrl)) {
-    await page.goto('https://www.tiktok.com/foryou', { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await navigateForWarmup(page, 'https://www.tiktok.com/foryou', logger);
     await page.waitForTimeout(_randomDelay(2000, 3000));
   }
 
-  // Method 1: Click search bar, type hashtag, press Enter
+  let sourceUrl = '';
+  let candidates: string[] = [];
+
   try {
-    // Click search icon/bar in header
     await humanClick(page, cursor, SEL.TIKTOK.SEARCH_INPUT, { postClickDelay: 800 });
     await page.waitForTimeout(_randomDelay(500, 1000));
-
-    // Clear any existing text and type the hashtag query
     await page.keyboard.press('Control+A');
     await page.waitForTimeout(_randomDelay(200, 400));
-    const query = `#${hashtag}`;
-    await humanType(page, SEL.TIKTOK.SEARCH_INPUT, query);
+    await humanType(page, SEL.TIKTOK.SEARCH_INPUT, `#${hashtag}`);
     await page.waitForTimeout(_randomDelay(800, 1500));
-
-    // Press Enter to search (more human than clicking search button)
     await humanPressEnter(page);
     await page.waitForTimeout(_randomDelay(3000, 5000));
 
-    // Try to click on a video from search results
-    try {
-      await humanClick(page, cursor, SEL.TIKTOK.VIDEO_CARD, { postClickDelay: 2000 });
-      logger.info(`  ▶ Открыто видео из поиска #${hashtag}`);
-      return;
-    } catch {
-      // No video cards — maybe we're on a tab, try scrolling
+    sourceUrl = page.url();
+    candidates = await page.evaluate(() => Array.from(
+      document.querySelectorAll('a[href*="/video/"]'),
+      (link) => (link as HTMLAnchorElement).href,
+    ));
+
+    if (candidates.length === 0) {
       await humanScroll(page, _randomDelay(300, 500));
       await page.waitForTimeout(_randomDelay(1000, 2000));
-      try {
-        await humanClick(page, cursor, SEL.TIKTOK.VIDEO_CARD, { postClickDelay: 2000 });
-        logger.info(`  ▶ Открыто видео из поиска #${hashtag} (после скролла)`);
-        return;
-      } catch { /* fallback below */ }
+      candidates = await page.evaluate(() => Array.from(
+        document.querySelectorAll('a[href*="/video/"]'),
+        (link) => (link as HTMLAnchorElement).href,
+      ));
     }
-  } catch {
-    logger.warn(`  ⚠️ Не удалось ввести запрос в поиск — пробую страницу хештега`);
+  } catch (error) {
+    logger.warn(`  Поисковая строка TikTok недоступна, открываю страницу #${hashtag}: ${_errorMessage(error)}`);
   }
 
-  // Method 2 (fallback): Direct tag page
-  try {
-    await page.goto(
-      `https://www.tiktok.com/tag/${encodeURIComponent(hashtag)}`,
-      { waitUntil: 'domcontentloaded', timeout: 15000 },
-    );
+  if (candidates.length === 0) {
+    const tagUrl = `https://www.tiktok.com/tag/${encodeURIComponent(hashtag)}`;
+    await navigateForWarmup(page, tagUrl, logger);
     await page.waitForTimeout(_randomDelay(2000, 3000));
-    await humanClick(page, cursor, SEL.TIKTOK.VIDEO_CARD, { postClickDelay: 2000 });
-    logger.info(`  ▶ Открыто видео со страницы #${hashtag}`);
-  } catch {
-    // Fallback to FYP
-    logger.warn(`  ⚠️ Не удалось открыть #${hashtag} — переход на FYP`);
-    await page.goto('https://www.tiktok.com/foryou', { waitUntil: 'domcontentloaded' });
+    sourceUrl = page.url();
+    candidates = await page.evaluate(() => Array.from(
+      document.querySelectorAll('a[href*="/video/"]'),
+      (link) => (link as HTMLAnchorElement).href,
+    ));
   }
+
+  const queued = queueNicheResults(state, 'TIKTOK', hashtag, sourceUrl, candidates);
+  if (queued === 0) {
+    throw new Error(`TikTok returned no unviewed videos for required hashtag #${hashtag}`);
+  }
+  await _openNextNicheResult(page, cursor, 'TIKTOK', logger, state);
 }
 
 
@@ -578,72 +643,126 @@ async function _navigateToYoutubeSearch(
   cursor: Awaited<ReturnType<typeof createPageCursor>>,
   hashtag: string,
   logger: SocketLogger,
+  state: NicheContentState,
 ): Promise<void> {
   logger.info(`🔍 Поиск #${hashtag} в YouTube (через поисковую строку)...`);
 
   // Make sure we're on YouTube first
   const currentUrl = page.url();
   if (!/youtube\.com/i.test(currentUrl)) {
-    await page.goto('https://www.youtube.com', { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await navigateForWarmup(page, 'https://www.youtube.com', logger);
     await page.waitForTimeout(_randomDelay(2000, 3000));
   }
 
+  let sourceUrl = '';
+  let candidates: string[] = [];
+
   try {
-    // Click YouTube search bar
     const ytSearchSel = 'input#search, input[name="search_query"], ' +
       'input[aria-label*="Search" i], input[placeholder*="Search" i]';
     await humanClick(page, cursor, ytSearchSel, { postClickDelay: 800 });
     await page.waitForTimeout(_randomDelay(500, 1000));
-
-    // Clear and type
     await page.keyboard.press('Control+A');
     await page.waitForTimeout(_randomDelay(200, 400));
-    const query = `#${hashtag}`;
-    await humanType(page, ytSearchSel, query);
+    await humanType(page, ytSearchSel, `#${hashtag}`);
     await page.waitForTimeout(_randomDelay(800, 1500));
-
-    // Press Enter to search
     await humanPressEnter(page);
     await page.waitForTimeout(_randomDelay(3000, 5000));
 
-    // Extract video URLs from search results via DOM evaluation
-    const videoUrl = await page.evaluate(() => {
-      // Collect all Shorts links
-      const shortsLinks = Array.from(document.querySelectorAll('a[href*="/shorts/"]')) as HTMLAnchorElement[];
-      // Collect all regular video links
-      const videoLinks = Array.from(document.querySelectorAll('a#video-title, ytd-video-renderer a#thumbnail')) as HTMLAnchorElement[];
-      
-      const shorts: string[] = [];
-      const regular: string[] = [];
-      for (const a of shortsLinks) {
-        if (a.href && a.href.includes('/shorts/')) shorts.push(a.href);
-      }
-      for (const a of videoLinks) {
-        if (a.href && a.href.includes('/watch?')) regular.push(a.href);
-      }
-      
-      // Mix: 70% chance Shorts, 30% chance regular video
-      // Real users watch both formats
-      const useRegular = regular.length > 0 && Math.random() < 0.3;
-      const pool = useRegular ? regular.slice(0, 5) : (shorts.length > 0 ? shorts.slice(0, 5) : regular.slice(0, 5));
-      return pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
-    });
-
-    if (videoUrl) {
-      await page.goto(videoUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-      await page.waitForTimeout(_randomDelay(2000, 3000));
-      const isShort = videoUrl.includes('/shorts/');
-      logger.info(`  ▶ Открыто ${isShort ? 'Shorts' : ''} видео из поиска #${hashtag}`);
-    } else {
-      // No results — fallback to Shorts feed  
-      logger.warn(`  ⚠️ Не удалось найти видео по #${hashtag} — переход на Shorts ленту`);
-      await page.goto('https://www.youtube.com/shorts', { waitUntil: 'domcontentloaded' });
-    }
-  } catch {
-    // Fallback: go to Shorts feed
-    logger.warn(`  ⚠️ Не удалось использовать поиск YouTube — переход на Shorts`);
-    await page.goto('https://www.youtube.com/shorts', { waitUntil: 'domcontentloaded' });
+    sourceUrl = page.url();
+    candidates = await page.evaluate(() => Array.from(
+      document.querySelectorAll('a#video-title, a[href*="/shorts/"], ytd-video-renderer a#thumbnail'),
+      (link) => (link as HTMLAnchorElement).href,
+    ));
+  } catch (error) {
+    logger.warn(`  Поисковая строка YouTube недоступна, открываю ту же выдачу напрямую: ${_errorMessage(error)}`);
   }
+
+  if (candidates.length === 0) {
+    const resultsUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(`#${hashtag}`)}`;
+    await navigateForWarmup(page, resultsUrl, logger);
+    await page.waitForTimeout(_randomDelay(2500, 4500));
+    sourceUrl = page.url();
+    candidates = await page.evaluate(() => Array.from(
+      document.querySelectorAll('a#video-title, a[href*="/shorts/"], ytd-video-renderer a#thumbnail'),
+      (link) => (link as HTMLAnchorElement).href,
+    ));
+  }
+
+  const queued = queueNicheResults(state, 'YOUTUBE', hashtag, sourceUrl, candidates);
+  if (queued === 0) {
+    throw new Error(`YouTube returned no unviewed videos for required hashtag #${hashtag}`);
+  }
+  await _openNextNicheResult(page, cursor, 'YOUTUBE', logger, state);
+}
+
+async function _navigateToNextWarmupVideo(
+  page: Page,
+  cursor: Awaited<ReturnType<typeof createPageCursor>>,
+  data: WarmupPhaseContext,
+  logger: SocketLogger,
+  index: number,
+): Promise<void> {
+  await humanIdleMove(page, cursor);
+
+  if (data.hashtags.length > 0) {
+    if (data.nicheState.pendingVideoUrls.length > 0) {
+      await _openNextNicheResult(page, cursor, data.platform, logger, data.nicheState);
+    } else {
+      const tags = [...data.hashtags].sort(() => Math.random() - 0.5);
+      let lastError: unknown;
+
+      for (const tag of tags) {
+        try {
+          if (data.platform === 'TIKTOK') {
+            await _navigateToHashtagSearch(page, cursor, tag, logger, data.nicheState);
+          } else {
+            await _navigateToYoutubeSearch(page, cursor, tag, logger, data.nicheState);
+          }
+          lastError = null;
+          break;
+        } catch (error) {
+          lastError = error;
+          logger.warn(`  В выдаче #${tag} нет нового видео, пробую другой заданный хештег.`);
+        }
+      }
+
+      if (lastError) {
+        throw new Error(`No new videos found for the required hashtags: ${_errorMessage(lastError)}`);
+      }
+    }
+
+    await page.waitForTimeout(_randomDelay(1500, 3000));
+    return;
+  }
+
+  if (data.platform === 'YOUTUBE') {
+    const url = page.url();
+    if (url.includes('/shorts/')) {
+      await page.waitForTimeout(_randomDelay(200, 500));
+      await page.keyboard.press('ArrowDown');
+    } else {
+      if (Math.random() < 0.3) await humanScroll(page, _randomDelay(50, 150), 'up');
+      await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10_000 }).catch(() => {});
+      await page.waitForTimeout(_randomDelay(1500, 3000));
+      const nextUrl = await page.evaluate((offset: number) => {
+        const links = Array.from(document.querySelectorAll(
+          'a#video-title, a[href*="/shorts/"], ytd-video-renderer a#thumbnail',
+        )) as HTMLAnchorElement[];
+        const valid = links.filter((link) => link.href && (
+          link.href.includes('/watch?') || link.href.includes('/shorts/')
+        ));
+        return valid.length > 0 ? valid[offset % valid.length].href : null;
+      }, index + 1);
+      if (nextUrl) {
+        await navigateForWarmup(page, nextUrl, logger, { attempts: 2, timeoutMs: 20_000 });
+      }
+    }
+  } else {
+    await humanScroll(page, _randomDelay(300, 600));
+  }
+
+  await page.waitForTimeout(_randomDelay(1500, 3000));
 }
 
 
@@ -666,16 +785,6 @@ async function _passiveWatching(
   const maxLikes = _randomDelay(0, 2); // 0-2 likes per passive session
 
   for (let i = 0; i < watchCount; i++) {
-    // Occasionally switch to a different hashtag (niche training)
-    if (data.hashtags.length > 0 && Math.random() < 0.15 && i > 0) {
-      const tag = data.hashtags[Math.floor(Math.random() * data.hashtags.length)];
-      if (data.platform === 'TIKTOK') {
-        await _navigateToHashtagSearch(page, cursor, tag, logger);
-      } else {
-        await _navigateToYoutubeSearch(page, cursor, tag, logger);
-      }
-    }
-
     // Watch each video for 15-60 seconds (like a real user watching full videos)
     const watchTime = _randomDelay(15000, 60000);
     // Screenshot every 3rd video or first video
@@ -722,37 +831,9 @@ async function _passiveWatching(
       } catch { /* element not found */ }
     }
 
-    // Navigate to next video (ArrowDown for YouTube Shorts, goBack for regular)
-    // Human-like: move mouse before navigating
-    await humanIdleMove(page, cursor);
-    if (data.platform === 'YOUTUBE') {
-      const url = page.url();
-      if (url.includes('/shorts/')) {
-        // Shorts: ArrowDown switches to next Short — this works correctly
-        await page.waitForTimeout(_randomDelay(200, 500));
-        await page.keyboard.press('ArrowDown');
-      } else {
-        // Regular video: go back to search, pick next unwatched video
-        if (Math.random() < 0.3) await humanScroll(page, _randomDelay(50, 150), 'up');
-        await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
-        await page.waitForTimeout(_randomDelay(1500, 3000));
-        // Click next video from search results
-        const nextUrl = await page.evaluate((idx: number) => {
-          const links = Array.from(document.querySelectorAll('a#video-title, a[href*="/shorts/"], ytd-video-renderer a#thumbnail')) as HTMLAnchorElement[];
-          const valid = links.filter(a => a.href && (a.href.includes('/watch?') || a.href.includes('/shorts/')));
-          // Pick video at offset idx to avoid re-watching the same one
-          const pick = valid[idx % valid.length];
-          return pick ? pick.href : null;
-        }, i + 1);
-        if (nextUrl) {
-          await page.goto(nextUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
-          await page.waitForTimeout(_randomDelay(1000, 2000));
-        }
-      }
-    } else {
-      await humanScroll(page, _randomDelay(300, 600));
+    if (i < watchCount - 1) {
+      await _navigateToNextWarmupVideo(page, cursor, data, logger, i);
     }
-    await page.waitForTimeout(_randomDelay(1500, 3000));
 
     await job.updateProgress(Math.round((i / watchCount) * 100));
     logger.info(`  Просмотрено видео ${i + 1}/${watchCount} (${Math.round(watchTime / 1000)}с)`);
@@ -790,16 +871,6 @@ async function _lightEngagement(
   const commentAtIndex = _randomDelay(4, Math.max(4, watchCount - 2));
 
   for (let i = 0; i < watchCount; i++) {
-    // Navigate to niche hashtag content (30% chance)
-    if (data.hashtags.length > 0 && Math.random() < 0.3 && i > 0) {
-      const randomTag = data.hashtags[Math.floor(Math.random() * data.hashtags.length)];
-      if (data.platform === 'TIKTOK') {
-        await _navigateToHashtagSearch(page, cursor, randomTag, logger);
-      } else {
-        await _navigateToYoutubeSearch(page, cursor, randomTag, logger);
-      }
-    }
-
     // Watch video — longer durations (real users watch 15-45s)
     const watchTime = _randomDelay(15000, 45000);
     await page.waitForTimeout(watchTime);
@@ -885,33 +956,9 @@ async function _lightEngagement(
       await humanScroll(page, _randomDelay(100, 200), 'up');
     }
 
-    // Scroll to next (ArrowDown for YouTube Shorts, goBack for regular, scroll for TikTok)
-    // Human-like: move mouse before navigating
-    await humanIdleMove(page, cursor);
-    if (data.platform === 'YOUTUBE') {
-      const url = page.url();
-      if (url.includes('/shorts/')) {
-        await page.waitForTimeout(_randomDelay(200, 500));
-        await page.keyboard.press('ArrowDown');
-      } else {
-        if (Math.random() < 0.3) await humanScroll(page, _randomDelay(50, 150), 'up');
-        await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
-        await page.waitForTimeout(_randomDelay(1500, 3000));
-        const nextUrl = await page.evaluate((idx: number) => {
-          const links = Array.from(document.querySelectorAll('a#video-title, a[href*="/shorts/"], ytd-video-renderer a#thumbnail')) as HTMLAnchorElement[];
-          const valid = links.filter(a => a.href && (a.href.includes('/watch?') || a.href.includes('/shorts/')));
-          const pick = valid[idx % valid.length];
-          return pick ? pick.href : null;
-        }, i + 1);
-        if (nextUrl) {
-          await page.goto(nextUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
-          await page.waitForTimeout(_randomDelay(1000, 2000));
-        }
-      }
-    } else {
-      await humanScroll(page, _randomDelay(300, 600));
+    if (i < watchCount - 1) {
+      await _navigateToNextWarmupVideo(page, cursor, data, logger, i);
     }
-    await page.waitForTimeout(_randomDelay(1500, 3000));
 
     await job.updateProgress(Math.round((i / watchCount) * 100));
   }
@@ -949,16 +996,6 @@ async function _activeEngagement(
   logger.info(`Day ${data.warmupDay}: Активная активность (${watchCount} видео, like ~${Math.round(likeProb * 100)}%, max follows: ${maxFollows})`);;
 
   for (let i = 0; i < watchCount; i++) {
-    // Navigate to niche hashtag content more frequently (40%)
-    if (data.hashtags.length > 0 && Math.random() < 0.4 && i > 0) {
-      const randomTag = data.hashtags[Math.floor(Math.random() * data.hashtags.length)];
-      if (data.platform === 'TIKTOK') {
-        await _navigateToHashtagSearch(page, cursor, randomTag, logger);
-      } else {
-        await _navigateToYoutubeSearch(page, cursor, randomTag, logger);
-      }
-    }
-
     // Watch video — 15-45 seconds
     const watchTime = _randomDelay(15000, 45000);
     await page.waitForTimeout(watchTime);
@@ -1070,35 +1107,8 @@ async function _activeEngagement(
       await humanScroll(page, _randomDelay(100, 200), 'up');
     }
 
-    // Navigate to next video: depends on video type
-    // Human-like: move mouse before navigating
-    await humanIdleMove(page, cursor);
-    if (isYT) {
-      const url = page.url();
-      if (url.includes('/shorts/')) {
-        // YouTube Shorts: ArrowDown scrolls to next Short
-        await page.waitForTimeout(_randomDelay(200, 500));
-        await page.keyboard.press('ArrowDown');
-      } else {
-        // Regular YouTube video: go back to search and pick next
-        if (Math.random() < 0.3) await humanScroll(page, _randomDelay(50, 150), 'up');
-        await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
-        await page.waitForTimeout(_randomDelay(1500, 3000));
-        const nextUrl = await page.evaluate((idx: number) => {
-          const links = Array.from(document.querySelectorAll('a#video-title, a[href*="/shorts/"], ytd-video-renderer a#thumbnail')) as HTMLAnchorElement[];
-          const valid = links.filter(a => a.href && (a.href.includes('/watch?') || a.href.includes('/shorts/')));
-          const pick = valid[idx % valid.length];
-          return pick ? pick.href : null;
-        }, i + 1);
-        if (nextUrl) {
-          await page.goto(nextUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
-          await page.waitForTimeout(_randomDelay(1000, 2000));
-        }
-      }
-      await page.waitForTimeout(_randomDelay(1500, 3000));
-    } else {
-      await humanScroll(page, _randomDelay(300, 600));
-      await page.waitForTimeout(_randomDelay(1500, 3000));
+    if (i < watchCount - 1) {
+      await _navigateToNextWarmupVideo(page, cursor, data, logger, i);
     }
     await job.updateProgress(Math.round((i / watchCount) * 100));
     logger.info(`  📺 Видео ${i + 1}/${watchCount} (${Math.round(watchTime / 1000)}с)`);
@@ -1181,6 +1191,23 @@ async function _resilientClick(
 }
 
 // ── Utility ─────────────────────────────────────────────────
+
+function _errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function _trackNextWarmupJob(taskId: string | undefined, jobId: string | undefined): Promise<void> {
+  if (!taskId || !jobId) return;
+  await prisma.task.updateMany({
+    where: { id: taskId, status: { not: 'CANCELLED' } },
+    data: {
+      bullmqJobId: jobId,
+      status: 'RUNNING',
+      error: null,
+      completedAt: null,
+    },
+  });
+}
 
 function _randomDelay(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;

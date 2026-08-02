@@ -42,8 +42,8 @@ describe('worker self-scheduled jobs', () => {
       expect.objectContaining({
         delay: 1_000,
         jobId: 'warmup-account-1-day2-s0',
-        attempts: 2,
-        backoff: { type: 'exponential', delay: 30_000 },
+        attempts: 4,
+        backoff: { type: 'exponential', delay: 120_000 },
       }),
     );
   });

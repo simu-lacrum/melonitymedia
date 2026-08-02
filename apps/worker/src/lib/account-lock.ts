@@ -17,9 +17,16 @@
 // ─────────────────────────────────────────────────────────────
 
 import Redis from 'ioredis';
+import crypto from 'crypto';
 
 const LOCK_TTL_SECONDS = Number(process.env.ACCOUNT_LOCK_TTL_SECONDS ?? 4 * 60 * 60);
 const LOCK_PREFIX = 'account-browser-lock:';
+const PROXY_LOCK_PREFIX = 'proxy-browser-lock:';
+
+export interface ProxyLockLease {
+  key: string;
+  token: string;
+}
 
 let _redis: Redis | null = null;
 
@@ -109,4 +116,55 @@ export async function checkAccountLock(accountId: string): Promise<string | null
   } catch {
     return null;
   }
+}
+
+export function proxyLockKey(proxyUrl: string): string {
+  const url = new URL(proxyUrl);
+  const protocol = url.protocol.toLowerCase();
+  const port = url.port || (protocol === 'https:' ? '443' : '80');
+  const endpoint = `${protocol}//${url.hostname.toLowerCase()}:${port}`;
+  return `${PROXY_LOCK_PREFIX}${crypto.createHash('sha256').update(endpoint).digest('hex')}`;
+}
+
+export async function acquireProxyLock(
+  proxyUrl: string,
+  owner: string,
+  waitTimeoutMs = Number(process.env.PROXY_LOCK_WAIT_MS ?? 30 * 60 * 1000),
+): Promise<ProxyLockLease> {
+  const redis = getRedis();
+  const key = proxyLockKey(proxyUrl);
+  const token = `${owner}:${crypto.randomUUID()}`;
+  const startedAt = Date.now();
+  let waitingLogged = false;
+
+  while (true) {
+    const result = await redis.set(key, token, 'EX', LOCK_TTL_SECONDS, 'NX');
+    if (result === 'OK') return { key, token };
+
+    if (Date.now() - startedAt >= waitTimeoutMs) {
+      throw new Error('Pinned proxy is still busy with another browser session after the wait timeout.');
+    }
+
+    if (!waitingLogged) {
+      const url = new URL(proxyUrl);
+      console.log(
+        `[proxy-lock] ${url.protocol}//${url.hostname}:${url.port || 'default'} is busy; ` +
+        `waiting before launching ${owner}`,
+      );
+      waitingLogged = true;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 5_000 + Math.floor(Math.random() * 5_000)));
+  }
+}
+
+export async function releaseProxyLock(lease: ProxyLockLease | null): Promise<void> {
+  if (!lease) return;
+  const redis = getRedis();
+  await redis.eval(
+    `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`,
+    1,
+    lease.key,
+    lease.token,
+  );
 }
