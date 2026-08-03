@@ -100,11 +100,9 @@ export async function confirmBrowserSession(
 
   for (let attempt = 0; attempt < totalAttempts; attempt++) {
     if (attempt > 0) {
-      await page.waitForTimeout(2_000);
-      await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => {});
       // TikTok often paints its auth controls several seconds after
-      // domcontentloaded. Give the second independent observation time to
-      // settle so a late SPA render is not reported as inconclusive.
+      // domcontentloaded. Keep the same page alive for the second independent
+      // observation; reloading here restarts the SPA render clock.
       await page.waitForTimeout(6_000);
     }
 

@@ -37,6 +37,7 @@ describe('browser session confirmation', () => {
     ] });
     await expect(confirmBrowserSession(page, 'TIKTOK', 2)).resolves.toMatchObject({ state: 'logged_out' });
     expect(page.waitForTimeout).toHaveBeenCalledWith(6_000);
+    expect(page.reload).not.toHaveBeenCalled();
   });
 
   it('keeps mixed or inconclusive observations out of the expired state', async () => {
