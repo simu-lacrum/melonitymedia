@@ -44,6 +44,8 @@ describe('account interaction flow safety', () => {
     expect(COOKIES_SRC).toContain('confirmBrowserSession(page, ctxAcc.platform, 2)');
     expect(BROWSER_SESSION_SRC).toContain('ServiceLogin');
     expect(BROWSER_SESSION_SRC).toContain('top-login-button');
+    expect(BROWSER_SESSION_SRC).toContain('exactVisibleText');
+    expect(BROWSER_SESSION_SRC).toContain("['Log in', 'Sign in', 'Войти']");
     expect(BROWSER_SESSION_SRC).toContain("checks.every((check) => check.state === 'logged_out')");
     expect(COOKIES_SRC).toContain("status: 'ALIVE' as const");
   });

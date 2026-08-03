@@ -32,6 +32,14 @@ export async function detectBrowserSession(
       const anyVisible = (selectors: string[]): boolean => selectors.some((selector) =>
         Array.from(document.querySelectorAll(selector)).some(visible),
       );
+      const exactVisibleText = (selectors: string[], labels: string[]): boolean => {
+        const expected = new Set(labels.map((label) => label.toLowerCase()));
+        return selectors.some((selector) => Array.from(document.querySelectorAll(selector)).some((element) => {
+          if (!visible(element)) return false;
+          const text = (element.textContent ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+          return expected.has(text);
+        }));
+      };
 
       if (currentPlatform === 'YOUTUBE') {
         return {
@@ -60,7 +68,10 @@ export async function detectBrowserSession(
           'button[data-e2e="top-login-button"]',
           'button[data-e2e*="login"]',
           'a[href*="/login"]',
-        ]),
+        ]) || exactVisibleText(
+          ['button', 'a', '[role="button"]'],
+          ['Log in', 'Sign in', 'Войти'],
+        ),
       };
     }, platform);
 
