@@ -102,7 +102,10 @@ export async function confirmBrowserSession(
     if (attempt > 0) {
       await page.waitForTimeout(2_000);
       await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => {});
-      await page.waitForTimeout(2_000);
+      // TikTok often paints its auth controls several seconds after
+      // domcontentloaded. Give the second independent observation time to
+      // settle so a late SPA render is not reported as inconclusive.
+      await page.waitForTimeout(6_000);
     }
 
     const check = await detectBrowserSession(page, platform);
