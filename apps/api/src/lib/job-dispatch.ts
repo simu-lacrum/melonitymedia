@@ -108,6 +108,19 @@ export async function dispatchAccountJob(args: {
     return { accountId: args.accountId, jobId: null, error: `ACCOUNT_${account.status}` };
   }
 
+  const sessionRequiredQueues = ['upload', 'warmup', 'edit-profile', 'shadowban-check'];
+  const invalidSessionStatuses = ['AUTH_NEEDED', 'EXPIRED_COOKIES', 'VERIFYING'];
+  if (
+    sessionRequiredQueues.includes(args.queueName) &&
+    invalidSessionStatuses.includes(account.status)
+  ) {
+    return { accountId: args.accountId, jobId: null, error: `ACCOUNT_${account.status}` };
+  }
+
+  if (args.queueName === 'warmup' && account.status === 'WARMING_UP') {
+    return { accountId: args.accountId, jobId: null, error: 'ACCOUNT_WARMING_UP' };
+  }
+
   // Upload-specific guards
   if (args.queueName === "upload") {
     if (!account.warmupCompletedAt && !args.forceSkipWarmup) {

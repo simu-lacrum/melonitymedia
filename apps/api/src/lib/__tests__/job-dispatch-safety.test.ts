@@ -18,6 +18,12 @@ describe('job dispatch safety guards', () => {
     expect(JOB_DISPATCH_SRC).not.toContain('PROXY_NOT_LTE_FOR_YOUNG_ACCOUNT');
   });
 
+  it('does not launch browser work before session recovery or duplicate warmup', () => {
+    expect(JOB_DISPATCH_SRC).toContain("const invalidSessionStatuses = ['AUTH_NEEDED', 'EXPIRED_COOKIES', 'VERIFYING']");
+    expect(JOB_DISPATCH_SRC).toContain("args.queueName === 'warmup' && account.status === 'WARMING_UP'");
+    expect(JOB_DISPATCH_SRC).toContain("error: 'ACCOUNT_WARMING_UP'");
+  });
+
   it('keeps fingerprint and proxy resolved fresh in the worker', () => {
     expect(JOB_DISPATCH_SRC).toContain('intentionally NOT included');
     expect(JOB_DISPATCH_SRC).toContain('loadAccountContext(accountId)');
