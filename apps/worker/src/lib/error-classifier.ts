@@ -124,7 +124,13 @@ export function classifyError(
     };
   }
 
-  if (msg.includes('auth_needed') || msg.includes('no fingerprint') || msg.includes('no cookies')) {
+  if (
+    msg.includes('auth_needed') ||
+    msg.includes('auth failed') ||
+    msg.includes('not logged in') ||
+    msg.includes('no fingerprint') ||
+    msg.includes('no cookies')
+  ) {
     return {
       code: 'AUTH_NEEDED',
       title: 'Требуется авторизация',

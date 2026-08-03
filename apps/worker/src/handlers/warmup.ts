@@ -15,7 +15,7 @@
 // Each day runs as a separate BullMQ job — cron dispatches daily.
 // ─────────────────────────────────────────────────────────────────
 
-import { Job } from 'bullmq';
+import { Job, UnrecoverableError } from 'bullmq';
 import { launchStealthContext, closeBrowser } from '../core/browser/patchright-launcher.js';
 import { persistCookies } from '../core/auth/cookie-store.js';
 import { confirmBrowserSession } from '../core/auth/browser-session.js';
@@ -312,7 +312,7 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     if (authCheck.state === 'logged_out') {
       await page.screenshot({ path: `/tmp/warmup-screenshots/${data.accountId}_auth_fail.png` }).catch(() => {});
       logger.error('❌ Cookies устарели или невалидны — аккаунт не авторизован');
-      throw new Error(`Auth failed: Not logged in to ${ctxAcc.platform}. Re-import cookies.`);
+      throw new UnrecoverableError(`Auth failed: Not logged in to ${ctxAcc.platform}. Re-import cookies.`);
     }
     if (authCheck.state === 'unknown') {
       throw new Error(`SESSION_CHECK_INCONCLUSIVE: ${authCheck.reason}`);

@@ -77,6 +77,11 @@ describe('warmup handler source verification', () => {
   });
 
   describe('navigation recovery', () => {
+    it('does not retry a browser-confirmed logout as a transient warmup failure', () => {
+      expect(WARMUP_SRC).toContain("import { Job, UnrecoverableError } from 'bullmq'");
+      expect(WARMUP_SRC).toContain('throw new UnrecoverableError(`Auth failed: Not logged in');
+    });
+
     it('does not terminate a warmup on the first YouTube navigation timeout', () => {
       expect(WARMUP_SRC).toContain("import { navigateForWarmup }");
       expect(WARMUP_SRC).toContain("navigateForWarmup(page, 'https://www.youtube.com', logger)");

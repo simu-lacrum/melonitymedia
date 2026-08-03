@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { classifyError } from '../lib/error-classifier.js';
 
 describe('classifyError', () => {
+  it('classifies a browser-confirmed YouTube logout as authorization required', () => {
+    const result = classifyError(
+      'Auth failed: Not logged in to YOUTUBE. Re-import cookies.',
+      'warmup',
+    );
+
+    expect(result.code).toBe('AUTH_NEEDED');
+    expect(result.title).toBe('Требуется авторизация');
+  });
+
   it('explains a blocked YouTube Studio field instead of reporting an unknown error', () => {
     const result = classifyError(
       'Не удалось заполнить заголовок YouTube Studio: Не удалось найти видимое поле заголовка YouTube Studio',
