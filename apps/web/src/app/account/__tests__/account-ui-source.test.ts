@@ -105,6 +105,12 @@ describe('account UI safety copy', () => {
     expect(ACCOUNTS_PAGE_SRC).toContain('Прокси недоступен');
   });
 
+  it('explains that scheduled warmup remains active between browser sessions', () => {
+    expect(ACCOUNTS_PAGE_SRC).toContain('Прогрев по расписанию');
+    expect(ACCOUNTS_PAGE_SRC).toContain('активные browser-сессии чередуются с паузами');
+    expect(ACCOUNTS_PAGE_SRC).toContain('Во время паузы монитор скрыт');
+  });
+
   it('prevents upload selection for accounts whose warmup is incomplete', () => {
     expect(WORKSPACE_PAGE_SRC).toContain('isUploadReady');
     expect(WORKSPACE_PAGE_SRC).toContain('warmupCompletedAt');

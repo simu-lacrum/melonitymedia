@@ -497,7 +497,7 @@ export default function AccountsPage() {
     EXPIRED_COOKIES: "Браузер дважды подтвердил выход из аккаунта. Обновите cookies или выполните повторный вход.",
     BANNED: "Аккаунт заблокирован TikTok. Попробуйте другой аккаунт.",
     SHADOWBAN_SUSPECTED: "Подозрение на теневой бан. Снизьте активность и подождите 24-48ч.",
-    WARMING_UP: "Аккаунт сейчас прогревается. Заливы будут заблокированы до завершения полноценного прогрева.",
+    WARMING_UP: "Прогрев идёт по расписанию: активные browser-сессии чередуются с паузами. Во время паузы монитор скрыт, но следующая сессия уже запланирована.",
     PAUSED: "Аккаунт на паузе. Задачи не будут запускаться, пока вы не вернёте его в работу.",
   }
 
@@ -556,7 +556,7 @@ export default function AccountsPage() {
       BANNED: { label: "Бан", variant: "destructive" },
       EXPIRED_COOKIES: { label: "Сессия истекла", variant: "destructive" },
       SHADOWBAN_SUSPECTED: { label: "Теневой бан?", variant: "outline" },
-      WARMING_UP: { label: "Прогрев", variant: "secondary" },
+      WARMING_UP: { label: "Прогрев по расписанию", variant: "secondary" },
       PAUSED: { label: "Пауза", variant: "secondary" },
       VERIFYING: { label: "Проверка...", variant: "secondary" },
     }
