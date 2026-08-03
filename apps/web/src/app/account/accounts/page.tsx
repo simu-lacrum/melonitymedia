@@ -411,7 +411,7 @@ export default function AccountsPage() {
         delayMin: 0,
         delayMax: 0,
       })
-      toast.success("Сбор куки запущен")
+      toast.success("Проверка и продление сессии запущены")
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Ошибка запуска")
     }
@@ -492,8 +492,8 @@ export default function AccountsPage() {
   }
 
   const statusHints: Record<string, string> = {
-    AUTH_NEEDED: "Вход не завершён. Возможно, требуется код email/SMS, подтверждение Google на телефоне, или данные неверны.",
-    EXPIRED_COOKIES: "Срок действия cookies истёк. Обновите cookies или переимпортируйте аккаунт.",
+    AUTH_NEEDED: "Сессия не подтверждена. Возможно, требуется код email/SMS, подтверждение Google на телефоне или повторный вход.",
+    EXPIRED_COOKIES: "Браузер дважды подтвердил выход из аккаунта. Обновите cookies или выполните повторный вход.",
     BANNED: "Аккаунт заблокирован TikTok. Попробуйте другой аккаунт.",
     SHADOWBAN_SUSPECTED: "Подозрение на теневой бан. Снизьте активность и подождите 24-48ч.",
     WARMING_UP: "Аккаунт сейчас прогревается. Заливы будут заблокированы до завершения полноценного прогрева.",
@@ -501,8 +501,8 @@ export default function AccountsPage() {
   }
 
   const statusActions: Record<string, string> = {
-    AUTH_NEEDED: "Нажмите «Повторить». Если TikTok/Google просит код или подтверждение на телефоне — следуйте появившемуся окну.",
-    EXPIRED_COOKIES: "Импортируйте аккаунт заново с актуальными cookies.",
+    AUTH_NEEDED: "Нажмите «Повторить» и завершите запрос платформы. Прогрев заново запускать не нужно.",
+    EXPIRED_COOKIES: "Импортируйте актуальные cookies или повторите вход. Прогрев заново запускать не нужно.",
     BANNED: "Удалите аккаунт и используйте другой.",
     SHADOWBAN_SUSPECTED: "Приостановите публикации на 24-48ч, затем проверьте снова.",
     PAUSED: "Проверьте причину паузы и включайте аккаунт только осознанно.",
@@ -553,7 +553,7 @@ export default function AccountsPage() {
       ALIVE: { label: "Живой ✅", variant: "default" },
       AUTH_NEEDED: { label: "Ошибка входа", variant: "destructive" },
       BANNED: { label: "Бан", variant: "destructive" },
-      EXPIRED_COOKIES: { label: "Куки умерли", variant: "destructive" },
+      EXPIRED_COOKIES: { label: "Сессия истекла", variant: "destructive" },
       SHADOWBAN_SUSPECTED: { label: "Теневой бан?", variant: "outline" },
       WARMING_UP: { label: "Прогрев", variant: "secondary" },
       PAUSED: { label: "Пауза", variant: "secondary" },
@@ -766,7 +766,7 @@ export default function AccountsPage() {
                                 <Shield className="size-4 mr-2" />Привязать прокси
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleRefreshCookies(acc.id)}>
-                                <RefreshCw className="size-4 mr-2" />Обновить куки
+                                <RefreshCw className="size-4 mr-2" />Проверить сессию
                               </DropdownMenuItem>
                               {["AUTH_NEEDED", "EXPIRED_COOKIES", "BANNED"].includes(acc.status) && (
                                 <DropdownMenuItem onClick={() => handleRetryLogin(acc.id, acc.status)}>
@@ -803,18 +803,18 @@ export default function AccountsPage() {
                           type: "COOKIES",
                           accountIds: selectedIds,
                           applyToAll: false,
-                          config: { mode: "COOKIES", concurrency: 3, headless: true },
+                          config: { mode: "COOKIES", concurrency: 3, headless: false },
                           threads: 3,
                           delayMin: 2000,
                           delayMax: 5000,
                         })
-                        toast.success(`Сбор куки запущен для ${selectedIds.length} аккаунтов`)
+                        toast.success(`Проверка сессий запущена для ${selectedIds.length} аккаунтов`)
                       } catch (err) {
                         toast.error(err instanceof ApiError ? err.message : "Ошибка запуска")
                       }
                     }}>
                       <RefreshCw className="size-4 mr-2" />
-                      Обновить куки
+                      Проверить сессии
                     </Button>
                     <Button
                       variant="ghost"

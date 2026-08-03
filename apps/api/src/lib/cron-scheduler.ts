@@ -10,7 +10,7 @@
 // so calling this on every startup is safe.
 // ─────────────────────────────────────────────────────────────
 
-import { analyticsCronQueue, shadowbanCheckQueue } from './bullmq.js';
+import { analyticsCronQueue, cookiesQueue, shadowbanCheckQueue } from './bullmq.js';
 import { prisma } from './prisma.js';
 
 /**
@@ -44,7 +44,20 @@ export async function registerCronJobs(): Promise<void> {
     },
   );
 
-  console.log('[Cron] Registered repeatable jobs: analytics (6h), shadowban (12h)');
+  // Check every six hours, but only open accounts whose stored cookies have
+  // not been refreshed for at least SESSION_REFRESH_MAX_AGE_HOURS (72 by default).
+  await cookiesQueue.add(
+    'session-maintenance-dispatch',
+    { userId: 'system', _maintenanceDispatch: true },
+    {
+      repeat: {
+        pattern: '35 */6 * * *',
+      },
+      jobId: 'session-maintenance-dispatch-cron',
+    },
+  );
+
+  console.log('[Cron] Registered repeatable jobs: analytics (6h), shadowban (12h), session maintenance (6h)');
 }
 
 /**

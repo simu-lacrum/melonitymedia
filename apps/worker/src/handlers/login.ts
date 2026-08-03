@@ -7,7 +7,7 @@
 //
 // Modes:
 // A) login:password → Launch browser → Type credentials → Handle 2FA/captcha
-// B) cookies        → curl-impersonate validation (fast, ~200ms, no browser)
+// B) cookies        → HTTP pre-flight + authoritative Patchright verification
 //
 // 2FA Flow:
 // 1. Detect 2FA challenge in browser
@@ -22,13 +22,14 @@
 //   COOKIES_EXPIRED, NETWORK_ERROR, UNKNOWN_ERROR
 // ─────────────────────────────────────────────────────────────
 
-import { Job } from 'bullmq';
+import { Job, UnrecoverableError } from 'bullmq';
 import { launchStealthContext, closeBrowser } from '../core/browser/patchright-launcher.js';
 import { createPageCursor, humanClick, humanPreActionWander, humanScroll, humanIdleMove } from '../core/humanity/biomouse.js';
 import { humanType } from '../core/humanity/typing-emulator.js';
 import { handleTikTokCaptcha } from '../core/captcha/tiktok-captcha-handler.js';
 import { persistCookies, type BrowserCookie } from '../core/auth/cookie-store.js';
 import { validateCookies } from '../core/auth/session-validator.js';
+import { confirmBrowserSession } from '../core/auth/browser-session.js';
 import { waitForVerificationCode, waitForVerificationResult, type VerificationResult } from '../lib/redis-pubsub.js';
 import { SocketLogger } from '../lib/socket-logger.js';
 import { prisma } from '../lib/prisma.js';
@@ -44,6 +45,8 @@ interface LoginJobData {
   cookiesDir?: string;
   /** 'credentials' = login:pass flow, 'cookies' = cookie validation only */
   mode: 'credentials' | 'cookies';
+  /** Status to restore when a re-import cannot be conclusively verified. */
+  previousStatus?: string;
 }
 
 // ── Error codes ─────────────────────────────────────────────
@@ -394,45 +397,59 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
     const ctx = await loadAccountContext(data.accountId);
 
     // ════════════════════════════════════════════════════════
-    // MODE B: Cookie validation (curl-impersonate, no browser)
+    // MODE B: Cookie validation (browser is authoritative)
     // ════════════════════════════════════════════════════════
     if (mode === 'cookies') {
       logger.info(`🔍 Проверка cookies: ${ctx.platform}...`);
-      await job.updateProgress(20);
+      await job.updateProgress(10);
 
-      const status = await validateCookies(
+      const preflight = await validateCookies(
         data.accountId,
         ctx.fingerprint,
         ctx.platform,
         ctx.proxyUrl,
         data.cookiesDir ?? '/data/cookies',
       );
+      logger.info(`HTTP pre-flight: ${preflight}. Подтверждаю сессию в браузере...`);
 
-      if (status === 'alive') {
+      const stealth = await launchStealthContext({
+        accountId: data.accountId,
+        taskId: data.taskId,
+        jobId: job.id,
+        jobType: 'login',
+        proxyUrl: ctx.proxyUrl,
+        cookiesPath: data.cookiesDir ?? '/data/cookies',
+        fingerprint: ctx.fingerprint,
+      });
+      browser = stealth.browser;
+      const baseUrl = ctx.platform === 'TIKTOK'
+        ? 'https://www.tiktok.com/'
+        : 'https://www.youtube.com/';
+      await stealth.page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+      await stealth.page.waitForTimeout(3_000);
+      await job.updateProgress(60);
+
+      const browserCheck = await confirmBrowserSession(stealth.page, ctx.platform, 2);
+      if (browserCheck.state === 'authenticated') {
+        const cookies = await stealth.context.cookies() as BrowserCookie[];
+        await persistCookies(data.accountId, cookies, data.cookiesDir ?? '/data/cookies');
         await safeUpdateAccount(data.accountId, { status: 'ALIVE', lastError: null });
+        emitStatusChange(logger, data.accountId, 'ALIVE', null);
         await job.updateProgress(100);
-        logger.info(`✅ Cookies валидны, аккаунт активирован`);
-
-        // Emit success to frontend
+        logger.info(`✅ Сессия подтверждена браузером, cookies обновлены`);
         emitLoginEvent(logger, data.accountId, 'login:success', {
-          message: 'Cookies проверены, аккаунт активен',
+          message: 'Сессия подтверждена браузером, cookies обновлены',
         });
         return;
       }
 
-      if (status === 'banned') {
-        await safeUpdateAccount(data.accountId, { status: 'BANNED' });
-        emitLoginEvent(logger, data.accountId, 'login:failed', {
-          code: 'ACCOUNT_BANNED',
-          message: 'Аккаунт заблокирован платформой',
-        });
-        throw new LoginError('ACCOUNT_BANNED', 'Platform detected account ban');
-      }
-
-      if (status === 'unknown') {
-        const errMsg = 'Не удалось подтвердить cookies из-за сети, прокси или временной ошибки платформы. Проверьте прокси и повторите проверку.';
-        await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED', lastError: errMsg });
-        emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', errMsg);
+      if (browserCheck.state === 'unknown') {
+        const errMsg = `Не удалось достоверно проверить сессию из-за сети или неполной загрузки страницы. Сохранённые cookies не изменены. (${browserCheck.reason})`;
+        const fallbackStatus = data.previousStatus && data.previousStatus !== 'VERIFYING'
+          ? data.previousStatus
+          : 'AUTH_NEEDED';
+        await safeUpdateAccount(data.accountId, { status: fallbackStatus, lastError: errMsg });
+        emitStatusChange(logger, data.accountId, fallbackStatus, errMsg);
         emitLoginEvent(logger, data.accountId, 'login:failed', {
           code: 'NETWORK_ERROR',
           message: errMsg,
@@ -440,8 +457,7 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
         throw new LoginError('NETWORK_ERROR', errMsg);
       }
 
-      // expired
-      const expiredMsg = 'Cookies недействительны или истекли. Попробуйте импортировать свежие cookies или войти через login:password.';
+      const expiredMsg = 'Браузер дважды подтвердил выход из аккаунта. Импортируйте свежие cookies или войдите через login:password; повторно запускать прогрев не нужно.';
       await safeUpdateAccount(data.accountId, { status: 'AUTH_NEEDED', lastError: expiredMsg });
       emitStatusChange(logger, data.accountId, 'AUTH_NEEDED', expiredMsg);
       emitLoginEvent(logger, data.accountId, 'login:failed', {
@@ -1372,10 +1388,13 @@ export async function loginHandler(job: Job<LoginJobData>): Promise<void> {
       emitLoginEvent(logger, data.accountId, 'login:failed', { code, message });
     }
 
+    if (err instanceof LoginError && err.code !== 'NETWORK_ERROR' && err.code !== 'UNKNOWN_ERROR') {
+      throw new UnrecoverableError(err.message);
+    }
     throw err;
   } finally {
-    if (lockAcquired) await releaseAccountLock(data.accountId, 'login');
     await closeBrowser(browser);
+    if (lockAcquired) await releaseAccountLock(data.accountId, 'login');
     logger.disconnect();
   }
 }

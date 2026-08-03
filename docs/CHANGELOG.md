@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased] - 2026-08-03
+
+### Fixed / Changed
+- **Cookie Compatibility**: SameSite/expiry/boolean значения из browser extensions и Netscape приводятся к формату Patchright; `#HttpOnly_` cookies больше не теряются.
+- **Session Verification**: HTTP pre-flight стал диагностическим, финальное решение принимает Patchright после двух browser-проверок; неоднозначная загрузка не уничтожает рабочую сессию.
+- **Safe Persistence**: cookies записываются сначала в PostgreSQL, затем атомарно обновляют disk cache; handlers не сохраняют anonymous cookie jar после auth failure.
+- **Session Maintenance**: stale `ALIVE` сессии старше 72 часов автоматически и с задержками проверяются каждые 6 часов через закреплённые proxy/fingerprint.
+- **Account UX**: действия названы «Проверить сессию», ошибки объясняют следующий шаг и отдельно сообщают, что повторный прогрев не нужен.
+
 ## [0.4.0] - 2026-06-19
 
 ### Added

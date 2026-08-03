@@ -25,6 +25,7 @@ import { generateFingerprint, generateMobileFingerprint } from '../lib/fingerpri
 import { publishVerificationCode, publishResendCommand } from '../lib/redis-pubsub.js';
 import { dispatchAccountJob, type DispatchedJob } from '../lib/job-dispatch.js';
 import { hasCompletedWarmupMismatch, normalizeWarmupComments, normalizeWarmupDays } from '../lib/warmup-state.js';
+import { parseAndNormalizeCookies } from '../lib/cookie-normalizer.js';
 
 const router = Router();
 router.use(authMiddleware);
@@ -491,29 +492,11 @@ router.post('/import', async (req: Request, res: Response) => {
         // Encrypt cookies if present
         if (entry.cookies) {
           importMode = 'cookies';
-          // Validate cookies format (JSON or Netscape)
-          let cookieJson: string;
-          try {
-            JSON.parse(entry.cookies);
-            cookieJson = entry.cookies;
-          } catch {
-            // Try Netscape
-            const lines = entry.cookies.split('\n').filter(l => l.trim() && !l.startsWith('#'));
-            const parsedCookies = lines.map(line => {
-              const parts = line.split('\t');
-              if (parts.length >= 7) {
-                return {
-                  domain: parts[0], path: parts[2], secure: parts[3] === 'TRUE',
-                  expires: parseInt(parts[4]) || 0, name: parts[5], value: parts[6],
-                };
-              }
-              return null;
-            }).filter(Boolean);
-            if (parsedCookies.length === 0) {
-              throw new Error('Невалидный формат cookies');
-            }
-            cookieJson = JSON.stringify(parsedCookies);
+          const normalizedCookies = parseAndNormalizeCookies(entry.cookies);
+          if (normalizedCookies.length === 0) {
+            throw new Error('Невалидный формат cookies');
           }
+          const cookieJson = JSON.stringify(normalizedCookies);
 
           const { encrypted, iv, authTag } = encryptString(cookieJson);
           data_.cookiesEncrypted = encrypted as any;
@@ -766,27 +749,12 @@ router.post('/:id/cookies', async (req: Request, res: Response) => {
       return;
     }
 
-    // Parse cookies (Netscape or JSON)
-    let cookieJson: string;
-    try {
-      JSON.parse(cookies);
-      cookieJson = cookies;
-    } catch {
-      const lines = cookies.split('\n').filter((l: string) => l.trim() && !l.startsWith('#'));
-      const parsed = lines.map((line: string) => {
-        const parts = line.split('\t');
-        if (parts.length >= 7) {
-          return { domain: parts[0], path: parts[2], secure: parts[3] === 'TRUE', expires: parseInt(parts[4]) || 0, name: parts[5], value: parts[6] };
-        }
-        return null;
-      }).filter(Boolean);
-
-      if (parsed.length === 0) {
-        res.status(400).json({ error: 'Невалидный формат cookies' });
-        return;
-      }
-      cookieJson = JSON.stringify(parsed);
+    const normalizedCookies = parseAndNormalizeCookies(cookies);
+    if (normalizedCookies.length === 0) {
+      res.status(400).json({ error: 'Невалидный формат cookies' });
+      return;
     }
+    const cookieJson = JSON.stringify(normalizedCookies);
 
     const { encrypted, iv, authTag } = encryptCookies(cookieJson);
 
@@ -797,11 +765,52 @@ router.post('/:id/cookies', async (req: Request, res: Response) => {
         cookiesIv: iv as any,
         cookiesAuthTag: authTag as any,
         cookiesUpdatedAt: new Date(),
-        status: 'ALIVE', // reset from EXPIRED_COOKIES
+        status: 'VERIFYING',
+        lastError: null,
       },
     });
 
-    res.json({ success: true });
+    const loginTask = await createLoginMonitorTask(
+      req.user!.id,
+      existing.id,
+      'cookies',
+      'retry_login',
+    );
+    const result = await dispatchAccountJob({
+      queueName: 'login',
+      userId: req.user!.id,
+      accountId: existing.id,
+      extra: {
+        mode: 'cookies',
+        taskId: loginTask.id,
+        previousStatus: existing.status,
+      },
+    });
+    await finalizeLoginMonitorTask(
+      loginTask.id,
+      existing.id,
+      'cookies',
+      'retry_login',
+      result,
+    );
+
+    if (result.error) {
+      const message = loginDispatchErrorMessage(result.error);
+      await prisma.socialAccount.update({
+        where: { id: existing.id },
+        data: { status: existing.status, lastError: message },
+      });
+      res.status(409).json({ error: message });
+      return;
+    }
+
+    res.json({
+      success: true,
+      jobId: result.jobId,
+      taskId: loginTask.id,
+      workspaceUrl: '/account/workspace',
+      message: 'Cookies сохранены, запущена браузерная проверка сессии',
+    });
   } catch (err) {
     console.error('[Accounts] Cookie update error:', err);
     res.status(500).json({ error: 'Ошибка при обновлении cookies' });

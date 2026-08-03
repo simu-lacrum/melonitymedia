@@ -27,6 +27,11 @@ const SESSION_VALIDATOR_SRC = fs.readFileSync(
   'utf-8',
 );
 
+const BROWSER_SESSION_SRC = fs.readFileSync(
+  path.resolve(__dirname, '../core/auth/browser-session.ts'),
+  'utf-8',
+);
+
 const WORKER_INDEX_SRC = fs.readFileSync(
   path.resolve(__dirname, '../index.ts'),
   'utf-8',
@@ -36,9 +41,10 @@ describe('account interaction flow safety', () => {
   it('refreshes cookies without networkidle hangs or broad body-text logout checks', () => {
     expect(COOKIES_SRC).not.toContain("waitUntil: 'networkidle'");
     expect(COOKIES_SRC).not.toContain('page.textContent(\'body\')');
-    expect(COOKIES_SRC).toContain('_detectLoggedOut');
-    expect(COOKIES_SRC).toContain('ServiceLogin');
-    expect(COOKIES_SRC).toContain('top-login-button');
+    expect(COOKIES_SRC).toContain('confirmBrowserSession(page, ctxAcc.platform, 2)');
+    expect(BROWSER_SESSION_SRC).toContain('ServiceLogin');
+    expect(BROWSER_SESSION_SRC).toContain('top-login-button');
+    expect(BROWSER_SESSION_SRC).toContain("checks.every((check) => check.state === 'logged_out')");
     expect(COOKIES_SRC).toContain("status: 'ALIVE' as const");
   });
 
@@ -51,9 +57,16 @@ describe('account interaction flow safety', () => {
   it('does not verify cookie imports as ALIVE on inconclusive network checks', () => {
     expect(SESSION_VALIDATOR_SRC).toContain("export type CookieStatus = 'alive' | 'expired' | 'banned' | 'unknown'");
     expect(SESSION_VALIDATOR_SRC).toContain("return 'unknown'");
-    expect(LOGIN_SRC).toContain("status === 'unknown'");
+    expect(LOGIN_SRC).toContain("browserCheck.state === 'unknown'");
+    expect(LOGIN_SRC).toContain('Сохранённые cookies не изменены');
+    expect(LOGIN_SRC).toContain('data.previousStatus');
     expect(LOGIN_SRC).toContain("code: 'NETWORK_ERROR'");
     expect(UPLOAD_SRC).toContain("cookieStatus === 'unknown'");
+  });
+
+  it('does not retry a browser-confirmed logout', () => {
+    expect(COOKIES_SRC).toContain("throw new UnrecoverableError('COOKIES_EXPIRED')");
+    expect(LOGIN_SRC).toContain('throw new UnrecoverableError(err.message)');
   });
 
   it('requires positive platform confirmation before upload success is accepted', () => {

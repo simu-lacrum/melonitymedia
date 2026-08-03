@@ -138,6 +138,7 @@ export async function editProfileHandler(job: Job<EditProfileJobData>): Promise<
   let ctx: any = null;
   let avatarTmpPath: string | null = null;
   let lockAcquired = false;
+  let sessionAuthenticated = false;
 
   try {
     // Acquire per-account lock — prevent concurrent browser sessions
@@ -210,6 +211,7 @@ export async function editProfileHandler(job: Job<EditProfileJobData>): Promise<
     } else {
       await _editYouTubeProfile(page, cursor, data, avatarTmpPath, logger);
     }
+    sessionAuthenticated = true;
 
     await job.updateProgress(90);
 
@@ -220,9 +222,8 @@ export async function editProfileHandler(job: Job<EditProfileJobData>): Promise<
     emitWorkerError(logger, data.accountId, 'edit-profile', err);
     throw err;
   } finally {
-    if (lockAcquired) await releaseAccountLock(data.accountId, 'edit-profile');
     // Persist cookies to BOTH disk AND DB (BUG-H2 fix)
-    if (ctx?.context) {
+    if (ctx?.context && sessionAuthenticated) {
       try {
         const cookies = await ctx.context.cookies();
         const browserCookies: BrowserCookie[] = cookies.map((c: any) => ({
@@ -236,6 +237,7 @@ export async function editProfileHandler(job: Job<EditProfileJobData>): Promise<
       }
     }
     await closeBrowser(browser);
+    if (lockAcquired) await releaseAccountLock(data.accountId, 'edit-profile');
 
     // Cleanup temp avatar file (only downloaded ones, not user-provided local files)
     if (avatarTmpPath && avatarTmpPath.includes(`avatar_${data.accountId}_`)) {

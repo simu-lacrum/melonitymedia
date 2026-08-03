@@ -49,7 +49,7 @@
 | **Фильтр по платформе** | Вкладки: Все / TikTok / YouTube с бейджами количества |
 | DataTable | Чекбокс, Платформа (бейдж TT/YT), Никнейм, Статус (incl. SHADOWBAN_SUSPECTED, WARMING_UP с прогрессом X/Y), Прокси, Cookies |
 | Импорт (Dialog) | **Два метода**: cookies (JSON) и login:password (по одному на строку). Выбор платформы. Опциональная привязка прокси |
-| 3-dot меню | Привязка прокси, обновление куки (запуск cookie refresh), удаление аккаунта |
+| 3-dot меню | Привязка прокси, проверка/продление сессии в Patchright, удаление аккаунта |
 | Bulk Actions | Массовая привязка прокси (с Carrier Stability Rule: 409 при нарушении 14-day window), удаление, запуск прогрева, обновление статуса |
 | Warmup Status | Индикатор прогрева: Day X/10, прогресс-бар (passive → active) |
 | Shadowban Alert | ⚠️ При `SHADOWBAN_SUSPECTED` — красный бейдж + tooltip с рекомендацией 7-day cooldown |

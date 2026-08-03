@@ -53,7 +53,7 @@ MelonityMedia — закрытая платформа для арбитражн�
 | 🔑 **TikTok 2FA** | Поддержка двухфакторной аутентификации: SMS, Email, Authenticator + email verification detection |
 | 🔥 **Прогрев аккаунтов** | Niche-focused warmup v4: human-like search по хэштегам, progressive curriculum (passive → active), **multi-session self-rescheduling** |
 | 🍪 **Умный импорт** | Двойной формат: cookies (JSON) и login:password, привязка прокси при импорте, авто-создание профилей |
-| 🔄 **Cookie refresh** | Lightweight продление сессий через Patchright (5-10 мин FYP scrolling), обновляет `tt_webid` / `s_v_web_id` без переавторизации |
+| 🔄 **Session refresh** | Браузерная проверка и продление сессий через закреплённые proxy/fingerprint; старые форматы cookies нормализуются автоматически, stale-сессии проверяются cron каждые 6ч |
 | 📊 **Аналитика** | Real browser-based scraping + **автоматический cron каждые 6ч** с моделью DailySnapshot в БД |
 | 🛡️ **Browser profiles** | Patchright (patched Playwright) + ghost-cursor + per-account fingerprints + typing emulator |
 | 📱 **Auto Fingerprint** | Автоматический выбор mobile/desktop device class по типу прокси (LTE → mobile, Residential → desktop) |
@@ -393,7 +393,7 @@ graph TD
 | `/auth/sign-in` | JWT-авторизация через HttpOnly Cookie | Публичный |
 | `/auth/sign-up` | Регистрация нового вебмастера | Публичный |
 | `/account/dashboard` | KPI-карточки (6 метрик), **Recharts AreaChart**, активные задачи BullMQ | Авторизованный |
-| `/account/accounts` | DataGrid аккаунтов, **фильтр по платформе** (TikTok/YouTube вкладки), импорт cookies и login:password, привязка прокси при импорте, 3-dot меню (привязка прокси / обновление куки / удаление) | Авторизованный |
+| `/account/accounts` | DataGrid аккаунтов, **фильтр по платформе** (TikTok/YouTube вкладки), импорт cookies и login:password, привязка прокси при импорте, 3-dot меню (привязка прокси / проверка сессии / удаление) | Авторизованный |
 | `/account/workspace` | **4 вкладки** (Прогрев/Куки/Профиль/Залив), **мульти-селект аккаунтов** с чекбоксами, Upload, Live Terminal | Авторизованный |
 | `/account/proxies` | CRUD прокси, тест коннекта, ротация IP, carrier/ASN валидация, **кликабельная привязка аккаунтов**, привязка аккаунтов при добавлении прокси | Авторизованный |
 | `/account/admin` | PostgreSQL, Redis, BullMQ, CPU/RAM мониторинг | Администратор |

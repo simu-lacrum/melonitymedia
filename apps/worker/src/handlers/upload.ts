@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import { launchStealthContext, closeBrowser } from '../core/browser/patchright-launcher.js';
 import { validateCookies } from '../core/auth/session-validator.js';
 import { persistCookies, type BrowserCookie } from '../core/auth/cookie-store.js';
+import { confirmBrowserSession } from '../core/auth/browser-session.js';
 import { uniquifyVideo, cleanupUniquifiedVideo } from '../core/video/uniquifier.js';
 import { applyBannerOverlay, cleanupBanneredVideo } from '../core/video/banner-overlay.js';
 import { createPageCursor, humanClick, humanScroll, humanIdleMove, randomMouseWander } from '../core/humanity/biomouse.js';
@@ -163,6 +164,7 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
   let banneredPath: string | null = null;
   let ctx: any = null;
   let lockAcquired = false;
+  let sessionAuthenticated = false;
 
   try {
     // Acquire per-account lock — prevent concurrent browser sessions
@@ -356,6 +358,21 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
 
     const cursor = await createPageCursor(page);
 
+    const authLandingUrl = platform === 'TIKTOK'
+      ? 'https://www.tiktok.com/'
+      : 'https://www.youtube.com/';
+    await page.goto(authLandingUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+    await page.waitForTimeout(3_000);
+    const browserAuth = await confirmBrowserSession(page, platform as 'TIKTOK' | 'YOUTUBE', 2);
+    if (browserAuth.state === 'logged_out') {
+      throw new Error(`Auth failed: Not logged in to ${platform}. Re-import cookies.`);
+    }
+    if (browserAuth.state === 'unknown') {
+      throw new Error(`SESSION_CHECK_INCONCLUSIVE: ${browserAuth.reason}`);
+    }
+    sessionAuthenticated = true;
+    logger.info('✅ Браузерная сессия подтверждена');
+
     if (platform === 'TIKTOK') {
       await _uploadToTikTok(page, cursor, data, videoToUpload, logger, job, proxyUrl, fingerprint);
     } else if (platform === 'YOUTUBE') {
@@ -476,11 +493,10 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
     emitWorkerError(logger, data.accountId, 'upload', err);
     throw err;
   } finally {
-    if (lockAcquired) await releaseAccountLock(data.accountId, 'upload');
     // Save updated session cookies BEFORE closing browser (M-1 fix)
     // Cookies like tt_webid, s_v_web_id get refreshed during sessions.
     // Without saving them, accounts get logged out frequently.
-    if (ctx?.context) {
+    if (ctx?.context && sessionAuthenticated) {
       try {
         const cookies = await ctx.context.cookies() as BrowserCookie[];
         if (cookies.length > 0) {
@@ -495,6 +511,7 @@ export async function uploadHandler(job: Job<UploadJobData>): Promise<void> {
 
     // ALWAYS close browser and cleanup temp files
     await closeBrowser(browser);
+    if (lockAcquired) await releaseAccountLock(data.accountId, 'upload');
 
     // Clean up uniquified video (original stays)
     if (uniquifiedPath) {

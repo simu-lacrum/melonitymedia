@@ -309,22 +309,25 @@ Canvas noise — детерминированный (на основе canvas.se
 
 ```
 persistCookies(accountId, cookies):
-  1. JSON serialize cookies
+  1. Normalize and deduplicate cookies
   2. Encrypt: AES-256-GCM
-  3. Promise.all([
-       saveCookiesToDiskCache(accountId, cookies),  // Fast path
-       prisma.socialAccount.update({                 // Source of truth
-         cookiesEncrypted: new Uint8Array(encrypted),
-         cookiesIv: new Uint8Array(iv),
-         cookiesAuthTag: new Uint8Array(authTag),
-         cookiesUpdatedAt: new Date(),
-       })
-     ])
+  3. Commit encrypted cookies to PostgreSQL (source of truth)
+  4. Atomically replace the encrypted disk cache
 ```
 
 **Ранее** handlers сохраняли cookies только на диск (`saveCookiesToDiskCache`), что приводило к потере cookies при перезапуске контейнера.
 
-### 4.3. Безопасность
+### 4.3. Session Integrity
+
+- Browser-extension значения SameSite (`no_restriction`, `unspecified`, `null`) приводятся к формату Patchright до `context.addCookies()`.
+- `#HttpOnly_` строки Netscape не отбрасываются как комментарии.
+- Статус `EXPIRED_COOKIES` выставляется только после двух последовательных browser-проверок с явным logout-сигналом.
+- Неоднозначная загрузка страницы не перезаписывает cookies анонимной сессией и не сбрасывает прежний рабочий статус.
+- `upload`, `warmup` и `edit-profile` сохраняют cookies только после положительно подтверждённой авторизации.
+- Каждые 6 часов dispatcher выбирает `ALIVE` аккаунты с cookies старше 72 часов; проверки распределяются по времени и используют закреплённые proxy/fingerprint.
+- Повторный прогрев после обновления cookies не требуется: warmup-прогресс хранится отдельно от состояния авторизации.
+
+### 4.4. Безопасность
 
 - `cookiesEncrypted`, `cookiesIv`, `cookiesAuthTag` **НИКОГДА** не отправляются на фронтенд
 - Вместо них API отдаёт `hasCookies: boolean`
@@ -333,7 +336,7 @@ persistCookies(accountId, cookies):
   - < 32 байт после base64-декодирования → `process.exit(1)`
   - Нет fallback'а на дефолтный ключ
 
-### 4.4. Ротация ключа
+### 4.5. Ротация ключа
 
 Скрипт `scripts/rotate-master-key.mjs`:
 1. Считывает все записи с encrypted cookies

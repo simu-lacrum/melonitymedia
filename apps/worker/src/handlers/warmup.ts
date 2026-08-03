@@ -18,6 +18,7 @@
 import { Job } from 'bullmq';
 import { launchStealthContext, closeBrowser } from '../core/browser/patchright-launcher.js';
 import { persistCookies } from '../core/auth/cookie-store.js';
+import { confirmBrowserSession } from '../core/auth/browser-session.js';
 import { createPageCursor, humanClick, humanScroll, humanIdleMove, randomMouseWander } from '../core/humanity/biomouse.js';
 import { humanType, humanPressEnter } from '../core/humanity/typing-emulator.js';
 import { SocketLogger } from '../lib/socket-logger.js';
@@ -176,6 +177,7 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
   const logger = new SocketLogger(data.userId);
   let browser: Browser | null = null;
   let lockAcquired = false;
+  let sessionAuthenticated = false;
 
   try {
     // Ensure screenshots directory exists
@@ -304,27 +306,19 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
       }
     }
 
-    // Auth check — verify we're not redirected to login and actually logged in
+    // Auth check — only a positive account control allows cookie persistence.
     await page.waitForTimeout(3000);
-    const currentUrl = page.url();
-    
-    let isGuest = false;
-    if (ctxAcc.platform === 'YOUTUBE') {
-      isGuest = await page.evaluate(() => {
-        return !!document.querySelector('a[href*="ServiceLogin"], a[aria-label*="Sign in" i], a[aria-label*="Войти" i]');
-      });
-    } else {
-      isGuest = await page.evaluate(() => {
-        return !!document.querySelector('button[data-e2e="top-login-button"]') || window.location.href.includes('/login');
-      });
-    }
-
-    if (isGuest) {
+    const authCheck = await confirmBrowserSession(page, ctxAcc.platform, 2);
+    if (authCheck.state === 'logged_out') {
       await page.screenshot({ path: `/tmp/warmup-screenshots/${data.accountId}_auth_fail.png` }).catch(() => {});
       logger.error('❌ Cookies устарели или невалидны — аккаунт не авторизован');
       throw new Error(`Auth failed: Not logged in to ${ctxAcc.platform}. Re-import cookies.`);
     }
+    if (authCheck.state === 'unknown') {
+      throw new Error(`SESSION_CHECK_INCONCLUSIVE: ${authCheck.reason}`);
+    }
     
+    sessionAuthenticated = true;
     logger.info('✅ Авторизация подтверждена');
     await page.screenshot({ path: `/tmp/warmup-screenshots/${data.accountId}_auth_ok.png` }).catch(() => {});
 
@@ -501,9 +495,8 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     }).catch(() => {});
     throw err;
   } finally {
-    if (lockAcquired) await releaseAccountLock(data.accountId, 'warmup');
     // Persist cookies to BOTH disk AND DB before closing browser (BUG-C5 fix)
-    if (browser) {
+    if (browser && sessionAuthenticated) {
       try {
         const contexts = browser.contexts();
         if (contexts.length > 0) {
@@ -521,6 +514,7 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
       }
     }
     await closeBrowser(browser);
+    if (lockAcquired) await releaseAccountLock(data.accountId, 'warmup');
     logger.disconnect();
   }
 }

@@ -17,19 +17,14 @@ import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import { prisma } from '../../lib/prisma.js';
+import {
+  normalizeBrowserCookies,
+  type NormalizedBrowserCookie,
+} from './cookie-normalizer.js';
 
 // ── Types ───────────────────────────────────────────────────
 
-export interface BrowserCookie {
-  name: string;
-  value: string;
-  domain: string;
-  path: string;
-  expires?: number;
-  httpOnly?: boolean;
-  secure?: boolean;
-  sameSite?: 'Strict' | 'Lax' | 'None';
-}
+export interface BrowserCookie extends NormalizedBrowserCookie {}
 
 interface EncryptedData {
   encrypted: Buffer;
@@ -82,7 +77,7 @@ export function encryptCookies(cookies: BrowserCookie[]): EncryptedData {
   const iv = crypto.randomBytes(12); // 96-bit IV for GCM
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
 
-  const json = JSON.stringify(cookies);
+  const json = JSON.stringify(normalizeBrowserCookies(cookies));
   const encrypted = Buffer.concat([
     cipher.update(json, 'utf8'),
     cipher.final(),
@@ -111,7 +106,7 @@ export function decryptCookies(
     decipher.final(),
   ]);
 
-  return JSON.parse(decrypted.toString('utf8'));
+  return normalizeBrowserCookies(JSON.parse(decrypted.toString('utf8')));
 }
 
 // ── Cookie File Parsers ─────────────────────────────────────
@@ -123,28 +118,35 @@ export function decryptCookies(
 export function parseNetscapeCookies(content: string): BrowserCookie[] {
   const cookies: BrowserCookie[] = [];
 
-  for (const line of content.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
+  for (const sourceLine of content.split(/\r?\n/)) {
+    let trimmed = sourceLine.trim();
+    if (!trimmed) continue;
+
+    let httpOnly = false;
+    if (/^#HttpOnly_/i.test(trimmed)) {
+      trimmed = trimmed.replace(/^#HttpOnly_/i, '');
+      httpOnly = true;
+    } else if (trimmed.startsWith('#')) {
+      continue;
+    }
 
     const parts = trimmed.split('\t');
     if (parts.length < 7) continue;
 
-    const [domain, , cookiePath, secure, expires, name, value] = parts;
+    const [domain, , cookiePath, secure, expires, name] = parts;
 
     cookies.push({
       name,
-      value,
+      value: parts.slice(6).join('\t'),
       domain: domain.startsWith('.') ? domain : `.${domain}`,
       path: cookiePath || '/',
       expires: expires === '0' ? undefined : parseInt(expires),
-      httpOnly: parts[1]?.toUpperCase() === 'TRUE',
+      httpOnly,
       secure: secure?.toUpperCase() === 'TRUE',
-      sameSite: 'Lax',
     });
   }
 
-  return cookies;
+  return normalizeBrowserCookies(cookies);
 }
 
 /**
@@ -153,25 +155,7 @@ export function parseNetscapeCookies(content: string): BrowserCookie[] {
  */
 export function parseJsonCookies(content: string): BrowserCookie[] {
   const parsed = JSON.parse(content);
-  const rawCookies = Array.isArray(parsed) ? parsed : parsed.cookies ?? [];
-
-  return rawCookies.map((c: Record<string, unknown>) => ({
-    name: String(c.name ?? ''),
-    value: String(c.value ?? ''),
-    domain: String(c.domain ?? ''),
-    path: String(c.path ?? '/'),
-    expires: c.expires ? Number(c.expires) : c.expirationDate ? Number(c.expirationDate) : undefined,
-    httpOnly: Boolean(c.httpOnly),
-    secure: Boolean(c.secure),
-    sameSite: normalizeSameSite(c.sameSite),
-  }));
-}
-
-function normalizeSameSite(val: unknown): 'Strict' | 'Lax' | 'None' {
-  const s = String(val ?? '').toLowerCase();
-  if (s === 'strict') return 'Strict';
-  if (s === 'none') return 'None';
-  return 'Lax';
+  return normalizeBrowserCookies(parsed);
 }
 
 /**
@@ -252,19 +236,28 @@ export async function saveCookiesToDiskCache(
   cookies: BrowserCookie[],
   cookiesDir: string = '/data/cookies',
 ): Promise<void> {
-  const { encrypted, iv, authTag } = encryptCookies(cookies);
+  const normalizedCookies = normalizeBrowserCookies(cookies);
+  if (normalizedCookies.length === 0) return;
+  const { encrypted, iv, authTag } = encryptCookies(normalizedCookies);
 
   const cachePath = path.join(cookiesDir, `${accountId}.enc.json`);
+  const tempPath = `${cachePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
 
   // Ensure directory exists
   await fs.mkdir(cookiesDir, { recursive: true });
 
-  await fs.writeFile(cachePath, JSON.stringify({
-    encrypted: encrypted.toString('base64'),
-    iv: iv.toString('base64'),
-    authTag: authTag.toString('base64'),
-    updatedAt: new Date().toISOString(),
-  }));
+  try {
+    await fs.writeFile(tempPath, JSON.stringify({
+      encrypted: encrypted.toString('base64'),
+      iv: iv.toString('base64'),
+      authTag: authTag.toString('base64'),
+      updatedAt: new Date().toISOString(),
+    }), { mode: 0o600 });
+    await fs.rename(tempPath, cachePath);
+  } catch (error) {
+    await fs.unlink(tempPath).catch(() => {});
+    throw error;
+  }
 }
 
 // ── Dual-persist: Disk + DB ─────────────────────────────────
@@ -284,26 +277,32 @@ export async function persistCookies(
   cookies: BrowserCookie[],
   cookiesDir: string = '/data/cookies',
 ): Promise<void> {
-  if (cookies.length === 0) return;
+  const normalizedCookies = normalizeBrowserCookies(cookies);
+  if (normalizedCookies.length === 0) return;
 
-  const { encrypted, iv, authTag } = encryptCookies(cookies);
+  const { encrypted, iv, authTag } = encryptCookies(normalizedCookies);
+  const updatedAt = new Date();
 
-  // Write to both stores in parallel for speed
-  await Promise.all([
-    // Disk cache (fast path for next launch)
-    saveCookiesToDiskCache(accountId, cookies, cookiesDir),
-    // DB (source of truth, survives container restarts)
-    // Prisma Bytes fields expect Uint8Array, not Buffer
-    prisma.socialAccount.update({
-      where: { id: accountId },
-      data: {
-        cookiesEncrypted: new Uint8Array(encrypted),
-        cookiesIv: new Uint8Array(iv),
-        cookiesAuthTag: new Uint8Array(authTag),
-        cookiesUpdatedAt: new Date(),
-      },
-    }),
-  ]);
+  // Commit the source of truth first. A cache failure must never make a stale
+  // disk entry look newer than a DB write that did not actually succeed.
+  await prisma.socialAccount.update({
+    where: { id: accountId },
+    data: {
+      cookiesEncrypted: new Uint8Array(encrypted),
+      cookiesIv: new Uint8Array(iv),
+      cookiesAuthTag: new Uint8Array(authTag),
+      cookiesUpdatedAt: updatedAt,
+    },
+  });
+
+  try {
+    await saveCookiesToDiskCache(accountId, normalizedCookies, cookiesDir);
+  } catch (error) {
+    console.warn(
+      `[CookieStore] DB cookies persisted for ${accountId}, but disk cache refresh failed:`,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
 }
 
 // ── DB-backed Cookie Loader ─────────────────────────────────

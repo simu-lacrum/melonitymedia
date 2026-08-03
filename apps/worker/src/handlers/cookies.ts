@@ -10,23 +10,27 @@
 // Cookie IMPORT is handled by the API (accounts.ts POST endpoint).
 // ─────────────────────────────────────────────────────────────
 
-import { Job } from 'bullmq';
+import { Job, UnrecoverableError } from 'bullmq';
 import { launchStealthContext, closeBrowser } from '../core/browser/patchright-launcher.js';
 import { persistCookies, type BrowserCookie } from '../core/auth/cookie-store.js';
+import { confirmBrowserSession } from '../core/auth/browser-session.js';
 import { SocketLogger } from '../lib/socket-logger.js';
 import { emitWorkerError } from '../lib/error-classifier.js';
 import { loadAccountContext } from '../lib/account-context.js';
 import { acquireAccountLock, releaseAccountLock } from '../lib/account-lock.js';
+import { addJob } from '../lib/bullmq.js';
 import { prisma } from '../lib/prisma.js';
-import type { Browser, Page } from 'patchright';
+import type { Browser } from 'patchright';
 
 // ── Types ───────────────────────────────────────────────────
 
 interface CookiesJobData {
   userId: string;
   taskId?: string;
-  accountId: string;
+  accountId?: string;
   cookiesDir?: string;
+  maintenance?: boolean;
+  _maintenanceDispatch?: boolean;
   // platform, fingerprint, proxyUrl are resolved from DB via loadAccountContext()
 }
 
@@ -39,9 +43,19 @@ export async function cookiesHandler(job: Job<CookiesJobData>): Promise<string> 
   let lockAcquired = false;
 
   try {
+    if (data._maintenanceDispatch) {
+      const dispatched = await dispatchSessionMaintenance();
+      return JSON.stringify({ dispatched });
+    }
+    if (!data.accountId) throw new Error('Cookies job is missing accountId');
+
     // Acquire per-account lock — prevent concurrent browser sessions
     const holder = await acquireAccountLock(data.accountId, 'cookies');
     if (holder) {
+      if (data.maintenance) {
+        logger.info(`Session maintenance skipped because account is already active: ${holder}`);
+        return JSON.stringify({ skipped: true, reason: 'ACCOUNT_BUSY' });
+      }
       logger.warn(`⏭️ Пропускаю cookies — для аккаунта уже запущен: ${holder}`);
       throw new Error(`Account ${data.accountId} is busy: ${holder}`);
     }
@@ -73,18 +87,20 @@ export async function cookiesHandler(job: Job<CookiesJobData>): Promise<string> 
     await page.goto(baseUrl, { waitUntil, timeout: 45_000 });
     await page.waitForTimeout(_randomDelay(3000, 5000));
 
-    // Check auth status with platform-specific positive logout signals.
-    // Full body text is too noisy: logged-in pages can contain "Sign in" strings
-    // inside scripts, comments, or guest-only prompts.
-    const authCheck = await _detectLoggedOut(page, ctxAcc.platform);
+    // Two independent DOM checks prevent an incomplete SPA render from being
+    // treated as a lost account session.
+    const authCheck = await confirmBrowserSession(page, ctxAcc.platform, 2);
 
-    if (authCheck.loggedOut) {
+    if (authCheck.state === 'logged_out') {
       logger.warn(`Cookies истекли — требуется импорт новых cookies через UI (${authCheck.reason})`);
       await prisma.socialAccount.update({
         where: { id: data.accountId },
         data: { status: 'EXPIRED_COOKIES', lastError: authCheck.reason },
       });
-      throw new Error('COOKIES_EXPIRED');
+      throw new UnrecoverableError('COOKIES_EXPIRED');
+    }
+    if (authCheck.state === 'unknown') {
+      throw new Error(`SESSION_CHECK_INCONCLUSIVE: ${authCheck.reason}`);
     }
 
     // Export updated cookies from browser session
@@ -117,11 +133,11 @@ export async function cookiesHandler(job: Job<CookiesJobData>): Promise<string> 
     return JSON.stringify({ count: browserCookies.length, updatedAt: new Date().toISOString() });
 
   } catch (err: unknown) {
-    emitWorkerError(logger, data.accountId, 'cookies', err);
+    emitWorkerError(logger, data.accountId ?? 'maintenance-dispatch', 'cookies', err);
     throw err;
   } finally {
-    if (lockAcquired) await releaseAccountLock(data.accountId, 'cookies');
     await closeBrowser(browser);
+    if (lockAcquired && data.accountId) await releaseAccountLock(data.accountId, 'cookies');
     logger.disconnect();
   }
 }
@@ -132,61 +148,41 @@ function _randomDelay(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-async function _detectLoggedOut(
-  page: Page,
-  platform: 'TIKTOK' | 'YOUTUBE',
-): Promise<{ loggedOut: boolean; reason: string }> {
-  const url = page.url();
+async function dispatchSessionMaintenance(): Promise<number> {
+  const maxAgeHours = Math.max(24, Number(process.env.SESSION_REFRESH_MAX_AGE_HOURS ?? 72));
+  const staleBefore = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
+  const accounts = await prisma.socialAccount.findMany({
+    where: {
+      status: 'ALIVE',
+      cookiesEncrypted: { not: null },
+      pinnedProxyId: { not: null },
+      OR: [
+        { cookiesUpdatedAt: null },
+        { cookiesUpdatedAt: { lt: staleBefore } },
+      ],
+    },
+    select: { id: true, userId: true, fingerprint: true },
+    orderBy: { cookiesUpdatedAt: 'asc' },
+    take: 50,
+  });
 
-  if (platform === 'YOUTUBE') {
-    if (/accounts\.google\.com|ServiceLogin/i.test(url)) {
-      return { loggedOut: true, reason: 'redirected to Google login' };
-    }
-
-    const signInVisible = await page.evaluate(() => {
-      const elements = Array.from(document.querySelectorAll('a, button, ytd-button-renderer, tp-yt-paper-button'));
-      return elements.some((el) => {
-        const href = (el as HTMLAnchorElement).href || el.getAttribute('href') || '';
-        const label = `${el.getAttribute('aria-label') || ''} ${el.textContent || ''}`.toLowerCase();
-        const rect = (el as HTMLElement).getBoundingClientRect?.();
-        const visible = rect ? rect.width > 0 && rect.height > 0 : true;
-        return visible && (href.includes('ServiceLogin') || /\bsign in\b/.test(label));
-      });
-    }).catch(() => true);
-
-    return {
-      loggedOut: signInVisible,
-      reason: signInVisible ? 'YouTube sign-in control is visible' : 'session is authenticated',
-    };
-  }
-
-  if (/\/login|accounts\.tiktok\.com/i.test(url)) {
-    return { loggedOut: true, reason: 'redirected to TikTok login' };
-  }
-
-  const loginVisible = await page.evaluate(() => {
-    const selectors = [
-      'button[data-e2e="top-login-button"]',
-      'button[data-e2e*="login"]',
-      'a[href*="/login"]',
-    ];
-
-    for (const selector of selectors) {
-      const el = document.querySelector(selector) as HTMLElement | null;
-      if (!el) continue;
-      const rect = el.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) return true;
-    }
-
-    return Array.from(document.querySelectorAll('button')).some((button) => {
-      const text = (button.textContent || '').trim().toLowerCase();
-      const rect = button.getBoundingClientRect();
-      return rect.width > 0 && rect.height > 0 && (text === 'log in' || text === 'войти');
+  const bucket = Math.floor(Date.now() / (6 * 60 * 60 * 1000));
+  let dispatched = 0;
+  for (const account of accounts) {
+    if (!account.fingerprint) continue;
+    await addJob('cookies', {
+      userId: account.userId,
+      accountId: account.id,
+      maintenance: true,
+    }, {
+      jobId: `session-maintenance-${account.id}-${bucket}`,
+      delay: dispatched * 2 * 60 * 1000,
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 15 * 60 * 1000 },
     });
-  }).catch(() => true);
+    dispatched++;
+  }
 
-  return {
-    loggedOut: loginVisible,
-    reason: loginVisible ? 'TikTok login control is visible' : 'session is authenticated',
-  };
+  console.log(`[SessionMaintenance] Dispatched ${dispatched} stale session refresh jobs`);
+  return dispatched;
 }

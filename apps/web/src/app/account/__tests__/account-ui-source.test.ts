@@ -56,7 +56,8 @@ describe('account UI safety copy', () => {
     expect(ACCOUNTS_PAGE_SRC).toContain('phone_prompt');
     expect(ACCOUNTS_PAGE_SRC).toContain('number_match');
     expect(ACCOUNTS_PAGE_SRC).toContain('challengeNumber');
-    expect(ACCOUNTS_PAGE_SRC).toContain('TikTok/Google');
+    expect(ACCOUNTS_PAGE_SRC).toContain('currentTwoFA.platform === "TIKTOK" ? "TikTok" : "YouTube"');
+    expect(ACCOUNTS_PAGE_SRC).toContain('уведомление Google');
   });
 
   it('exposes VNC monitor controls for active workspace jobs', () => {
@@ -72,6 +73,12 @@ describe('account UI safety copy', () => {
     expect(ACCOUNTS_PAGE_SRC).toContain('renderAccountMonitorLink');
     expect(ACCOUNTS_PAGE_SRC).toContain('Открыть монитор');
     expect(ACCOUNTS_PAGE_SRC).toContain('window.setTimeout(fetchAccountMonitors, 2500)');
+  });
+
+  it('describes cookie jobs as visible browser session checks', () => {
+    expect(ACCOUNTS_PAGE_SRC).toContain('Проверить сессии');
+    expect(ACCOUNTS_PAGE_SRC).toContain('Проверка сессий запущена');
+    expect(ACCOUNTS_PAGE_SRC).toContain('headless: false');
   });
 
   it('keeps proxy add form focused on protocol/type instead of manual carrier for static proxies', () => {
