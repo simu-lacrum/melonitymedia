@@ -57,6 +57,25 @@ describe('loadAccountContext', () => {
     expect(ctx.proxyUrl).toBe('socks5://u:p@1.2.3.4:1080');
   });
 
+  it('rejects a pinned proxy marked dead without exposing credentials', async () => {
+    (prismaMock.socialAccount.findUniqueOrThrow as any).mockResolvedValue({
+      id: 'a1', userId: 'u1', platform: 'YOUTUBE',
+      fingerprint: {} as any,
+      pinnedProxy: {
+        host: '1.2.3.4', port: 8000,
+        protocol: 'HTTP', status: 'DEAD',
+        username: 'secret-user', password: 'secret-pass',
+        carrier: null, country: 'US',
+      },
+      warmupCompletedAt: new Date(), warmupStartedAt: new Date(), warmupDays: 10,
+      status: 'ALIVE',
+    });
+
+    const result = loadAccountContext('a1');
+    await expect(result).rejects.toThrow(/Pinned proxy is unavailable/);
+    await expect(result).rejects.not.toThrow(/secret-user|secret-pass/);
+  });
+
   it('returns proxyUrl=undefined when no proxy pinned', async () => {
     (prismaMock.socialAccount.findUniqueOrThrow as any).mockResolvedValue({
       id: 'a1', userId: 'u1', platform: 'TIKTOK',

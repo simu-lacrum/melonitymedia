@@ -156,6 +156,7 @@ async function dispatchSessionMaintenance(): Promise<number> {
       status: 'ALIVE',
       cookiesEncrypted: { not: null },
       pinnedProxyId: { not: null },
+      pinnedProxy: { is: { status: 'ACTIVE' } },
       OR: [
         { cookiesUpdatedAt: null },
         { cookiesUpdatedAt: { lt: staleBefore } },

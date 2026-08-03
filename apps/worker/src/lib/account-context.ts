@@ -35,6 +35,7 @@ export async function loadAccountContext(accountId: string): Promise<AccountCont
           protocol: true,
           username: true,
           password: true,
+          status: true,
           carrier: true,
           country: true,
         },
@@ -46,6 +47,13 @@ export async function loadAccountContext(accountId: string): Promise<AccountCont
     throw new Error(
       `[account-context] Account ${accountId} has no fingerprint. ` +
       `Re-import the account via POST /api/accounts/import.`,
+    );
+  }
+
+  if (acc.pinnedProxy?.status === 'DEAD') {
+    throw new Error(
+      `[account-context] Pinned proxy is unavailable for account ${accountId}. ` +
+      `Bind a working proxy from the same country before retrying.`,
     );
   }
 

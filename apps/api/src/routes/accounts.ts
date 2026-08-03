@@ -60,6 +60,9 @@ function loginDispatchErrorMessage(error?: string) {
   if (error === 'NO_PROXY') {
     return 'Не удалось запустить проверку входа: к аккаунту должен быть привязан рабочий прокси.';
   }
+  if (error === 'PROXY_UNAVAILABLE') {
+    return 'Не удалось запустить проверку входа: закреплённый прокси недоступен. Проверьте его или привяжите рабочий прокси той же страны.';
+  }
   return `Не удалось запустить верификацию входа: ${error || 'unknown error'}`;
 }
 
@@ -226,7 +229,7 @@ router.get('/', async (req: Request, res: Response) => {
       where: { userId: req.user!.id },
       include: {
         pinnedProxy: {
-          select: { id: true, host: true, port: true, label: true, type: true, carrier: true, country: true },
+          select: { id: true, host: true, port: true, label: true, type: true, carrier: true, country: true, status: true },
         },
         _count: { select: { videoPublications: { where: { status: 'UPLOADED' } } } },
       },
@@ -1282,6 +1285,8 @@ router.post('/warmup', async (req: Request, res: Response) => {
       let error = 'Не удалось запустить прогрев: аккаунты не прошли pre-flight проверки';
       if (failures.some(f => f.error === 'NO_PROXY')) {
         error = 'Не удалось запустить прогрев: у аккаунтов нет привязанного рабочего прокси.';
+      } else if (failures.some(f => f.error === 'PROXY_UNAVAILABLE')) {
+        error = 'Не удалось запустить прогрев: закреплённый прокси недоступен. Проверьте его или привяжите рабочий прокси той же страны.';
       } else if (failures.some(f => f.error === 'NO_COOKIES')) {
         error = 'Не удалось запустить прогрев: нет валидных cookies. Сначала выполните авторизацию или импорт cookies.';
       } else if (failures.some(f => f.error === 'NO_FINGERPRINT')) {
@@ -1373,6 +1378,8 @@ router.post('/cookies', async (req: Request, res: Response) => {
       let error = 'Не удалось запустить обновление cookies: аккаунты не прошли pre-flight проверки';
       if (failures.some(f => f.error === 'NO_PROXY')) {
         error = 'Не удалось запустить обновление cookies: к аккаунту должен быть привязан рабочий прокси.';
+      } else if (failures.some(f => f.error === 'PROXY_UNAVAILABLE')) {
+        error = 'Не удалось запустить обновление cookies: закреплённый прокси недоступен. Проверьте его или привяжите рабочий прокси той же страны.';
       } else if (failures.some(f => f.error === 'NO_FINGERPRINT')) {
         error = 'Не удалось запустить обновление cookies: не сгенерирован fingerprint аккаунта.';
       } else if (failures.some(f => f.error?.startsWith('ACCOUNT_BUSY'))) {

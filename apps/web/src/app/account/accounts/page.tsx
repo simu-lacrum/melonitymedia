@@ -39,6 +39,7 @@ interface SocialAccount {
     host: string
     port: number
     carrier?: string
+    status: "ACTIVE" | "DEAD"
   } | null
   pinnedProxyId?: string | null
 }
@@ -743,11 +744,16 @@ export default function AccountsPage() {
                         </TableCell>
                         <TableCell className="max-w-[280px] overflow-hidden">{renderStatus(acc)}</TableCell>
                         <TableCell>
-                          <code className="text-xs bg-accent px-2 py-1 rounded">
-                            {acc.pinnedProxy
-                              ? `${acc.pinnedProxy.host}:${acc.pinnedProxy.port}`
-                              : "—"}
-                          </code>
+                          <div className="flex flex-col items-start gap-1.5">
+                            <code className="text-xs bg-accent px-2 py-1 rounded">
+                              {acc.pinnedProxy
+                                ? `${acc.pinnedProxy.host}:${acc.pinnedProxy.port}`
+                                : "—"}
+                            </code>
+                            {acc.pinnedProxy?.status === "DEAD" && (
+                              <Badge variant="destructive" className="text-[10px]">Прокси недоступен</Badge>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell>{(acc.followers ?? 0).toLocaleString()}</TableCell>
                         <TableCell className="text-muted-foreground text-sm">{timeAgo(acc.updatedAt)}</TableCell>

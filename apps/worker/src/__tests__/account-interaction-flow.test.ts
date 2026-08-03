@@ -27,6 +27,11 @@ const SESSION_VALIDATOR_SRC = fs.readFileSync(
   'utf-8',
 );
 
+const CURL_CLIENT_SRC = fs.readFileSync(
+  path.resolve(__dirname, '../core/tls/curl-impersonate-client.ts'),
+  'utf-8',
+);
+
 const BROWSER_SESSION_SRC = fs.readFileSync(
   path.resolve(__dirname, '../core/auth/browser-session.ts'),
   'utf-8',
@@ -64,6 +69,13 @@ describe('account interaction flow safety', () => {
     expect(LOGIN_SRC).toContain('data.previousStatus');
     expect(LOGIN_SRC).toContain("code: 'NETWORK_ERROR'");
     expect(UPLOAD_SRC).toContain("cookieStatus === 'unknown'");
+  });
+
+  it('never propagates curl arguments containing cookies or proxy credentials', () => {
+    expect(CURL_CLIENT_SRC).toContain('execFile errors include the full argv');
+    expect(CURL_CLIENT_SRC).toContain('curl-impersonate request failed');
+    expect(CURL_CLIENT_SRC).not.toContain('throw err;');
+    expect(SESSION_VALIDATOR_SRC).not.toContain('(err as Error).message');
   });
 
   it('does not retry a browser-confirmed logout', () => {

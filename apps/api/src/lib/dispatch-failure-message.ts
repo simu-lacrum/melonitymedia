@@ -25,6 +25,8 @@ export function describeDispatchFailure(error?: string): string {
       return 'Прогрев аккаунта не завершён. Завершите прогрев или выберите аккаунт со статусом «Готов».';
     case 'NO_PROXY':
       return 'К аккаунту не привязан рабочий прокси.';
+    case 'PROXY_UNAVAILABLE':
+      return 'Закреплённый прокси недоступен. Проверьте его или привяжите рабочий прокси той же страны.';
     case 'NO_COOKIES':
       return 'У аккаунта нет валидных cookies. Выполните вход или импорт cookies.';
     case 'NO_FINGERPRINT':

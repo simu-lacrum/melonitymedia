@@ -100,6 +100,11 @@ describe('account UI safety copy', () => {
     expect(ACCOUNTS_PAGE_SRC).not.toContain('Привязать прокси (опционально)');
   });
 
+  it('shows a dead pinned proxy directly in the account table', () => {
+    expect(ACCOUNTS_PAGE_SRC).toContain('acc.pinnedProxy?.status === "DEAD"');
+    expect(ACCOUNTS_PAGE_SRC).toContain('Прокси недоступен');
+  });
+
   it('prevents upload selection for accounts whose warmup is incomplete', () => {
     expect(WORKSPACE_PAGE_SRC).toContain('isUploadReady');
     expect(WORKSPACE_PAGE_SRC).toContain('warmupCompletedAt');

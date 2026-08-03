@@ -65,6 +65,7 @@ export interface DispatchedJob {
  * Returns the new BullMQ job id or an error message (one of):
  *   - "NO_ACCOUNT"       — account not found or doesn't belong to user
  *   - "NO_PROXY"         — account has no pinned proxy
+ *   - "PROXY_UNAVAILABLE"— pinned proxy is marked DEAD
  *   - "NO_FINGERPRINT"   — fingerprint not generated (bad import)
  *   - "NO_COOKIES"       — no encrypted cookies on file
  *   - "WARMUP_REQUIRED"  — upload requested but warmupCompletedAt is null
@@ -116,6 +117,10 @@ export async function dispatchAccountJob(args: {
 
   if (!account.pinnedProxy) {
     return { accountId: args.accountId, jobId: null, error: "NO_PROXY" };
+  }
+
+  if (account.pinnedProxy.status !== 'ACTIVE') {
+    return { accountId: args.accountId, jobId: null, error: "PROXY_UNAVAILABLE" };
   }
 
   if (!account.fingerprint && args.queueName !== 'login') {

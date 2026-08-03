@@ -104,14 +104,25 @@ export async function impersonatedFetch(
 
     return parseRawResponse(stdout);
   } catch (err: unknown) {
-    const error = err as Error & { code?: string };
+    const error = err as Error & { code?: string | number; killed?: boolean; signal?: string };
     if (error.code === 'ENOENT') {
       throw new Error(
         `curl-impersonate binary "${binary}" not found. ` +
         `Install from: https://github.com/lexiforest/curl-impersonate`,
       );
     }
-    throw err;
+
+    // execFile errors include the full argv in `message`. Those arguments may
+    // contain proxy credentials, Cookie headers, and request bodies, so never
+    // propagate the original error beyond this boundary.
+    const reason = error.killed
+      ? 'timeout'
+      : error.signal
+        ? `signal ${error.signal}`
+        : error.code !== undefined
+          ? `exit ${String(error.code)}`
+          : 'unknown failure';
+    throw new Error(`curl-impersonate request failed (${reason})`);
   }
 }
 

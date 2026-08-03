@@ -17,6 +17,11 @@ describe('dispatch failure messages', () => {
     expect(describeDispatchFailure('ACCOUNT_BUSY:warmup')).toContain('выполняется прогрев');
   });
 
+  it('explains that a dead pinned proxy must be replaced in the same country', () => {
+    expect(describeDispatchFailure('PROXY_UNAVAILABLE')).toContain('прокси недоступен');
+    expect(describeDispatchFailure('PROXY_UNAVAILABLE')).toContain('той же страны');
+  });
+
   it('keeps unknown backend reasons visible for diagnostics', () => {
     expect(describeDispatchFailure('NEW_GUARD')).toContain('NEW_GUARD');
   });

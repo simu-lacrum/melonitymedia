@@ -107,11 +107,11 @@ export async function validateCookies(
     }
 
     return 'expired';
-  } catch (err) {
+  } catch {
     // Network errors (proxy timeout, DNS, connection refused) should NOT
     // mark cookies as expired — the problem is connectivity, not auth.
     // Return unknown so strict callers do not accept the account as verified.
-    console.warn(`[SessionValidator] Network error for ${accountId} — cookie status unknown:`, (err as Error).message);
+    console.warn(`[SessionValidator] Network error for ${accountId} — cookie status unknown`);
     return 'unknown';
   }
 }
