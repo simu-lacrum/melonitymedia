@@ -117,4 +117,14 @@ describe('account interaction flow safety', () => {
     expect(WORKER_INDEX_SRC).toContain("status: 'RUNNING'");
     expect(WORKER_INDEX_SRC).toContain("...(error ? { error } : {})");
   });
+
+  it('does not let a newer account warmup resurrect an older failed task', () => {
+    const warmupBranch = WORKER_INDEX_SRC.indexOf("if (task.type === 'WARMUP')");
+    const failedGuard = WORKER_INDEX_SRC.indexOf('if (hasFailed) {', warmupBranch);
+    const globalWarmingCheck = WORKER_INDEX_SRC.indexOf('warmingAccounts > 0', warmupBranch);
+
+    expect(failedGuard).toBeGreaterThan(warmupBranch);
+    expect(globalWarmingCheck).toBeGreaterThan(failedGuard);
+    expect(WORKER_INDEX_SRC).toContain("task.error ?? 'One or more warmup jobs failed'");
+  });
 });

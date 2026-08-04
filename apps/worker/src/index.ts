@@ -281,6 +281,21 @@ async function refreshTaskAfterTerminalJob(job: Job<any>, error?: string) {
       return;
     }
 
+    // Tracked BullMQ jobs are the source of truth for this task. Another
+    // warmup task may set the same account back to WARMING_UP later; that must
+    // not resurrect an older task whose own jobs are already terminal.
+    if (hasFailed) {
+      await prisma.task.update({
+        where: { id: task.id },
+        data: {
+          status: 'FAILED',
+          error: error ?? task.error ?? 'One or more warmup jobs failed',
+          completedAt: new Date(),
+        },
+      });
+      return;
+    }
+
     const warmingAccounts = accountIds.length === 0
       ? 0
       : await prisma.socialAccount.count({
