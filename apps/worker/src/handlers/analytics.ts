@@ -61,13 +61,15 @@ export interface ProfileStats {
 
 interface AnalyticsDeferredResult {
   deferred: true;
-  reason: 'ACCOUNT_BUSY' | 'PROXY_BUSY';
+  reason: 'ACCOUNT_BUSY' | 'PROXY_BUSY' | 'TRANSIENT_PLATFORM';
   retryAt: string;
   coordinationAttempt: number;
 }
 
 const ANALYTICS_RETRY_DELAY_MS = 30 * 60 * 1000;
 const MAX_COORDINATION_ATTEMPTS = 48;
+const TRANSIENT_RETRY_DELAY_MS = 2 * 60 * 60 * 1000;
+const MAX_TRANSIENT_ATTEMPTS = 12;
 
 // ── Main ────────────────────────────────────────────────────
 
@@ -186,10 +188,18 @@ export async function analyticsHandler(job: Job<any>): Promise<ProfileStats | An
 
     let stats: ProfileStats;
 
-    if (platform === 'TIKTOK') {
-      stats = await _scrapeTikTokProfile(page, data, logger);
-    } else {
-      stats = await _scrapeYouTubeProfile(page, data, logger);
+    try {
+      if (platform === 'TIKTOK') {
+        stats = await _scrapeTikTokProfile(page, data, logger);
+      } else {
+        stats = await _scrapeYouTubeProfile(page, data, logger);
+      }
+    } catch (err) {
+      if (_isTransientPlatformError(err)) {
+        logger.warn(`Analytics platform request failed temporarily: ${err instanceof Error ? err.message : err}`);
+        return await _deferAnalytics(job, data, 'TRANSIENT_PLATFORM', logger);
+      }
+      throw err;
     }
 
     // Persist to DB
@@ -394,6 +404,18 @@ function _isProxyBusyError(err: unknown): boolean {
   return err instanceof Error && err.message.includes('Pinned proxy is still busy');
 }
 
+function _isTransientPlatformError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return [
+    'ERR_HTTP_RESPONSE_CODE_FAILURE',
+    'ERR_PROXY_CONNECTION_FAILED',
+    'ERR_TIMED_OUT',
+    'page.goto: Timeout',
+    'YouTube Studio did not expose a channel ID',
+    'YouTube Studio Shorts table did not render',
+  ].some(fragment => err.message.includes(fragment));
+}
+
 async function _deferAnalytics(
   job: Job<any>,
   data: AnalyticsJobData,
@@ -401,20 +423,23 @@ async function _deferAnalytics(
   logger: SocketLogger,
 ): Promise<AnalyticsDeferredResult> {
   const coordinationAttempt = (data.coordinationAttempt ?? 0) + 1;
-  if (coordinationAttempt > MAX_COORDINATION_ATTEMPTS) {
+  const isTransientPlatform = reason === 'TRANSIENT_PLATFORM';
+  const maxAttempts = isTransientPlatform ? MAX_TRANSIENT_ATTEMPTS : MAX_COORDINATION_ATTEMPTS;
+  const retryDelayMs = isTransientPlatform ? TRANSIENT_RETRY_DELAY_MS : ANALYTICS_RETRY_DELAY_MS;
+  if (coordinationAttempt > maxAttempts) {
     throw new Error(
-      `Analytics could not acquire account resources after ${MAX_COORDINATION_ATTEMPTS} deferred attempts`,
+      `Analytics could not complete after ${maxAttempts} deferred attempts (${reason})`,
     );
   }
 
   const collectionKey = data.collectionKey ?? _analyticsCollectionKey(new Date(job.timestamp));
-  const retryAt = new Date(Date.now() + ANALYTICS_RETRY_DELAY_MS);
+  const retryAt = new Date(Date.now() + retryDelayMs);
   await addJob('analytics-cron', {
     ...data,
     collectionKey,
     coordinationAttempt,
   }, {
-    delay: ANALYTICS_RETRY_DELAY_MS,
+    delay: retryDelayMs,
     jobId: `analytics-${data.accountId}-${collectionKey}-deferred-${coordinationAttempt}`,
   });
 

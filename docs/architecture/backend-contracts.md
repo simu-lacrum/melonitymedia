@@ -509,7 +509,8 @@ interface AnalyticsJobPayload {
   //          (.tablecell-views), updates VideoPublication and DailySnapshot.
   // TikTok: reads visible profile counters and updates the same daily model.
   // Missing counters fail closed; no synthetic zero snapshot is written.
-  // Busy account/proxy locks produce a delayed retry under the same daily key.
+  // Busy account/proxy locks produce a 30-minute delayed retry. Temporary
+  // Studio/network failures retry every 2 hours under the same daily key.
 }
 
 // Cron scheduling (registered by apps/api/src/lib/cron-scheduler.ts):

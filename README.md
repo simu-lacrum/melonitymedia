@@ -439,7 +439,7 @@ graph LR
 | `warmup` | `warmup.ts` | Кнопка (auto-continues) | Niche-focused warmup v4: human-like search по хэштегам, progressive curriculum (passive → active), **multi-session self-rescheduling** |
 | `cookies` | `cookies.ts` | Кнопка / Cron | Refresh сессии: Patchright session → platform auth check → re-export cookies → re-encrypt → save |
 | `edit-profile` | `edit-profile.ts` | Кнопка | Смена **баннера**, **аватара** (upload по URL/файлу), никнейма, био через ghost-cursor (TikTok + YouTube Studio), session warmup для YT |
-| `analytics-cron` | `analytics.ts` | Cron (раз в сутки, 03:15 UTC) | Fan-out по подключённым `ALIVE`/`WARMING_UP` аккаунтам; YouTube Studio Shorts views → `VideoPublication` + `DailySnapshot`; занятые аккаунты/прокси переносятся без конфликта с другими worker jobs |
+| `analytics-cron` | `analytics.ts` | Cron (раз в сутки, 03:15 UTC) | Fan-out по подключённым `ALIVE`/`WARMING_UP` аккаунтам; YouTube Studio Shorts views → `VideoPublication` + `DailySnapshot`; занятые ресурсы и временные Studio/network ошибки переносятся под тем же дневным ключом |
 | `cleanup` | `cleanup.ts` | Автоматически | Удаление файлов после загрузки |
 | `shadowban-check` | `shadowban-detector.ts` | Cron (каждые 12ч) | 3+ видео <100 views → SHADOWBAN_SUSPECTED |
 | `login` | `login.ts` | Кнопка | Авторизация через login:password (TikTok + Google/YouTube) с 2FA, email verification, CAPTCHA detection |

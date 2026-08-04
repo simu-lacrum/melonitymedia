@@ -22,6 +22,7 @@ describe('analytics collection safety', () => {
   it('defers around account and proxy locks instead of returning fake zero stats', () => {
     expect(ANALYTICS_SOURCE).toContain("_deferAnalytics(job, data, 'ACCOUNT_BUSY'");
     expect(ANALYTICS_SOURCE).toContain("_deferAnalytics(job, data, 'PROXY_BUSY'");
+    expect(ANALYTICS_SOURCE).toContain("_deferAnalytics(job, data, 'TRANSIENT_PLATFORM'");
     expect(ANALYTICS_SOURCE).toContain('proxyLockWaitMs: 0');
     expect(ANALYTICS_SOURCE).not.toContain('return _emptyStats()');
     expect(LAUNCHER_SOURCE).toContain('opts.proxyLockWaitMs');
@@ -34,5 +35,6 @@ describe('analytics collection safety', () => {
     expect(ANALYTICS_SOURCE).not.toContain('youtube.com/@me/videos');
     expect(ANALYTICS_SOURCE).toContain('throw new UnrecoverableError');
     expect(ANALYTICS_SOURCE).toContain('refusing to write a false daily snapshot');
+    expect(ANALYTICS_SOURCE).toContain('TRANSIENT_RETRY_DELAY_MS = 2 * 60 * 60 * 1000');
   });
 });
