@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   extractTikTokViewCounts,
+  extractYouTubeStudioViewCounts,
   extractYouTubeViewCounts,
   parseShortNumber,
   sumViewCounts,
@@ -23,5 +24,16 @@ describe('view stats parsing', () => {
   it('extracts YouTube views only from metadata that says views', () => {
     const counts = extractYouTubeViewCounts(['1.2K views', '3 days ago', '456 \u043f\u0440\u043e\u0441\u043c\u043e\u0442\u0440\u043e\u0432']);
     expect(counts).toEqual([1200, 456]);
+  });
+
+  it('extracts bare YouTube Studio counters and skips draft rows', () => {
+    const counts = extractYouTubeStudioViewCounts([
+      { title: 'Newest published Short', viewsText: '0' },
+      { title: 'Draft', viewsText: '' },
+      { title: 'Published Short', viewsText: '1,234' },
+      { title: 'Published Short', viewsText: '1.2K' },
+    ]);
+
+    expect(counts).toEqual([0, 1234, 1200]);
   });
 });

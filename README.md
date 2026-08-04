@@ -54,7 +54,7 @@ MelonityMedia — закрытая платформа для арбитражн�
 | 🔥 **Прогрев аккаунтов** | Niche-focused warmup v4: human-like search по хэштегам, progressive curriculum (passive → active), **multi-session self-rescheduling** |
 | 🍪 **Умный импорт** | Двойной формат: cookies (JSON) и login:password, привязка прокси при импорте, авто-создание профилей |
 | 🔄 **Session refresh** | Браузерная проверка и продление сессий через закреплённые proxy/fingerprint; старые форматы cookies нормализуются автоматически, stale-сессии проверяются cron каждые 6ч |
-| 📊 **Аналитика** | Real browser-based scraping + **автоматический cron каждые 6ч** с моделью DailySnapshot в БД |
+| 📊 **Аналитика** | Суточный browser-based сбор по всем подключённым аккаунтам; YouTube views читаются из Studio Content → Shorts и сохраняются в DailySnapshot |
 | 🛡️ **Browser profiles** | Patchright (patched Playwright) + ghost-cursor + per-account fingerprints + typing emulator |
 | 📱 **Auto Fingerprint** | Автоматический выбор mobile/desktop device class по типу прокси (LTE → mobile, Residential → desktop) |
 | 🔍 **Shadowban detection** | Автоматическая проверка каждые 12 часов (3+ видео <100 views = алерт) |
@@ -413,7 +413,7 @@ graph LR
         Q2["warmup<br/>10-day curriculum"]
         Q3["cookies<br/>Export cookies"]
         Q4["edit-profile<br/>Редактирование"]
-        Q5["analytics-cron<br/>JSON API stats"]
+        Q5["analytics-cron<br/>Daily browser stats"]
         Q6["cleanup<br/>Очистка файлов"]
         Q7["shadowban-check<br/>Детекция шэдоубана"]
         Q8["login<br/>Авторизация login:pass"]
@@ -439,7 +439,7 @@ graph LR
 | `warmup` | `warmup.ts` | Кнопка (auto-continues) | Niche-focused warmup v4: human-like search по хэштегам, progressive curriculum (passive → active), **multi-session self-rescheduling** |
 | `cookies` | `cookies.ts` | Кнопка / Cron | Refresh сессии: Patchright session → platform auth check → re-export cookies → re-encrypt → save |
 | `edit-profile` | `edit-profile.ts` | Кнопка | Смена **баннера**, **аватара** (upload по URL/файлу), никнейма, био через ghost-cursor (TikTok + YouTube Studio), session warmup для YT |
-| `analytics-cron` | `analytics.ts` | Cron (каждые 6ч) | Browser-based scraping (~1.5s/профиль) + **persist followers/views в БД через DailySnapshot** + fan-out per account |
+| `analytics-cron` | `analytics.ts` | Cron (раз в сутки, 03:15 UTC) | Fan-out по подключённым `ALIVE`/`WARMING_UP` аккаунтам; YouTube Studio Shorts views → `VideoPublication` + `DailySnapshot`; занятые аккаунты/прокси переносятся без конфликта с другими worker jobs |
 | `cleanup` | `cleanup.ts` | Автоматически | Удаление файлов после загрузки |
 | `shadowban-check` | `shadowban-detector.ts` | Cron (каждые 12ч) | 3+ видео <100 views → SHADOWBAN_SUSPECTED |
 | `login` | `login.ts` | Кнопка | Авторизация через login:password (TikTok + Google/YouTube) с 2FA, email verification, CAPTCHA detection |

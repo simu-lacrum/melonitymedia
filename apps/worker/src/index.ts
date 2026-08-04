@@ -17,7 +17,7 @@
 //   warmup         → warmupHandler          (10-day progressive curriculum)
 //   cookies        → cookiesHandler         (export/refresh session cookies)
 //   edit-profile   → editProfileHandler     (update profile bio/name)
-//   analytics-cron → analyticsHandler       (curl-impersonate JSON API stats)
+//   analytics-cron → analyticsHandler       (daily browser-based platform stats)
 //   cleanup        → cleanupHandler         (delete videos after upload)
 //   shadowban-check→ shadowbanDetectorHandler (12h cron shadowban detection)
 //

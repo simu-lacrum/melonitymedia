@@ -3,7 +3,7 @@
 //
 // Runs on API startup. Uses BullMQ's built-in repeatable jobs
 // (Redis-backed, survives restarts). Schedules:
-//   1. analytics-cron: Collect stats for ALL user accounts every 6 hours
+//   1. analytics-cron: Collect stats for connected accounts once per day
 //   2. shadowban-check: Check for shadowbans every 12 hours
 //
 // Idempotent: BullMQ deduplicates repeatables by (name + pattern),
@@ -13,20 +13,36 @@
 import { analyticsCronQueue, cookiesQueue, shadowbanCheckQueue } from './bullmq.js';
 import { prisma } from './prisma.js';
 
+export const ANALYTICS_CRON_PATTERN = '15 3 * * *';
+
+function analyticsCollectionKey(date = new Date()): string {
+  return date.toISOString().slice(0, 10);
+}
+
 /**
  * Register all repeatable cron jobs.
  * Call once on server startup.
  */
 export async function registerCronJobs(): Promise<void> {
-  // ── Analytics Cron (every 6 hours) ─────────────────────────
-  // Enqueues one job per active account to collect stats.
+  // BullMQ identifies repeatables by name + pattern. Remove obsolete analytics
+  // patterns explicitly so a previous six-hour schedule cannot survive deploy.
+  const analyticsRepeatables = await analyticsCronQueue.getRepeatableJobs();
+  for (const repeatable of analyticsRepeatables) {
+    if (repeatable.name === 'analytics-dispatch' && repeatable.pattern !== ANALYTICS_CRON_PATTERN) {
+      await analyticsCronQueue.removeRepeatableByKey(repeatable.key);
+    }
+  }
+
+  // ── Analytics Cron (daily at 03:15 UTC) ────────────────────
+  // Enqueues one job per connected account to collect stats.
   // Uses a BullMQ repeatable to trigger a dispatcher that fans out.
   await analyticsCronQueue.add(
     'analytics-dispatch',
     { _cron: true },
     {
       repeat: {
-        pattern: '0 */6 * * *', // every 6 hours: 00:00, 06:00, 12:00, 18:00
+        pattern: ANALYTICS_CRON_PATTERN,
+        tz: 'UTC',
       },
       jobId: 'analytics-dispatch-cron', // fixed ID for deduplication
     },
@@ -57,22 +73,27 @@ export async function registerCronJobs(): Promise<void> {
     },
   );
 
-  console.log('[Cron] Registered repeatable jobs: analytics (6h), shadowban (12h), session maintenance (6h)');
+  console.log('[Cron] Registered repeatable jobs: analytics (daily 03:15 UTC), shadowban (12h), session maintenance (6h)');
 }
 
 /**
- * Fan out analytics jobs for all active accounts.
+ * Fan out analytics jobs for all connected accounts.
  * Called by the analytics-cron worker when the repeatable fires.
  * Can also be triggered manually from an admin endpoint.
  */
 export async function fanOutAnalyticsJobs(): Promise<number> {
   const accounts = await prisma.socialAccount.findMany({
-    where: { status: 'ALIVE' },
+    where: {
+      status: { in: ['ALIVE', 'WARMING_UP'] },
+      cookiesEncrypted: { not: null },
+      pinnedProxy: { is: { status: 'ACTIVE' } },
+    },
     select: { id: true, userId: true, secUid: true, nickname: true },
   });
 
   let dispatched = 0;
 
+  const collectionKey = analyticsCollectionKey();
   for (const acc of accounts) {
     await analyticsCronQueue.add(
       `analytics-${acc.id}`,
@@ -81,10 +102,13 @@ export async function fanOutAnalyticsJobs(): Promise<number> {
         accountId: acc.id,
         secUid: acc.secUid,
         nickname: acc.nickname,
+        collectionKey,
+        coordinationAttempt: 0,
       },
       {
         // Stagger jobs by 5 seconds to avoid rate-limiting
         delay: dispatched * 5_000,
+        jobId: `analytics-${acc.id}-${collectionKey}`,
       },
     );
     dispatched++;

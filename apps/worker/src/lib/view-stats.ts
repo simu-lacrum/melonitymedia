@@ -1,4 +1,9 @@
-export type ViewsSource = 'studio_total' | 'video_cards' | 'unavailable';
+export type ViewsSource = 'studio_content' | 'studio_total' | 'video_cards' | 'unavailable';
+
+export interface YouTubeStudioRow {
+  title: string;
+  viewsText: string;
+}
 
 const VIEW_WORD_RE = /(views?|\u043f\u0440\u043e\u0441\u043c\u043e\u0442\u0440(?:\u043e\u0432|\u0430)?|\u043f\u0435\u0440\u0435\u0433\u043b\u044f\u0434(?:\u0456\u0432|\u0438)?)/i;
 
@@ -59,6 +64,17 @@ export function extractTikTokViewCounts(texts: string[]): number[] {
 export function extractYouTubeViewCounts(texts: string[]): number[] {
   return texts
     .map(text => parseViewCountText(text, false))
+    .filter((value): value is number => value !== null);
+}
+
+/**
+ * Studio renders published view counters as bare values (for example "0" or
+ * "1.2K"). Draft rows have an empty views cell and must not be mapped to an
+ * uploaded VideoPublication.
+ */
+export function extractYouTubeStudioViewCounts(rows: YouTubeStudioRow[]): number[] {
+  return rows
+    .map(row => parseViewCountText(row.viewsText, true))
     .filter((value): value is number => value !== null);
 }
 

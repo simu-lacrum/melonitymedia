@@ -41,7 +41,7 @@ MelonityMedia/
 | `src/lib/prisma.ts` | Singleton Prisma Client |
 | `src/lib/redis.ts` | Singleton Redis/ioredis |
 | `src/lib/bullmq.ts` | Фабрика BullMQ очередей |
-| `src/lib/cron-scheduler.ts` | **Cron планировщик** — регистрирует BullMQ repeatable jobs при старте API: analytics-cron (6ч), shadowban-check (12ч) |
+| `src/lib/cron-scheduler.ts` | **Cron планировщик** — регистрирует BullMQ repeatable jobs при старте API: analytics-cron (раз в сутки, 03:15 UTC), shadowban-check (12ч) |
 | `prisma/schema.prisma` | Схема БД v3: User, SocialAccount (cookie-auth + fingerprint + pinnedProxyId), Proxy (type/carrier/ASN), Video, Task, Preset, AuditLog |
 | `src/lib/proxy-pin-rules.ts` | **Carrier Stability Rule** — валидация смены прокси: PIN_WINDOW_ACTIVE, CARRIER_CHANGE_BLOCKED, COUNTRY_CHANGE_BLOCKED; тип прокси не блокирует старт job |
 

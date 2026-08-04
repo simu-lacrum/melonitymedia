@@ -45,6 +45,8 @@ export interface LaunchOptions {
   jobType?: string;
   /** Proxy URL: http://user:pass@host:port */
   proxyUrl?: string;
+  /** Maximum time to wait for a shared proxy. Defaults to PROXY_LOCK_WAIT_MS. */
+  proxyLockWaitMs?: number;
   /** Path to encrypted cookie store */
   cookiesPath: string;
   /** Per-account stable fingerprint */
@@ -334,6 +336,7 @@ export async function launchStealthContext(opts: LaunchOptions): Promise<Stealth
   proxyLease = await acquireProxyLock(
     opts.proxyUrl,
     `${opts.jobType ?? 'browser'}:${opts.accountId}`,
+    opts.proxyLockWaitMs,
   );
 
   // Trigger rotation if proxy is configured for per-session mode

@@ -500,21 +500,23 @@ interface EditProfileJobPayload {
 ```typescript
 interface AnalyticsJobPayload {
   accountId: string;
-  platform: "TIKTOK" | "YOUTUBE";
+  collectionKey: string;       // UTC calendar date, YYYY-MM-DD
+  coordinationAttempt: number;
 
-  // Worker uses curl-impersonate (no browser!):
-  // 1. Fetches /api/user/detail/?secUid=... with Chrome TLS fingerprint
-  // 2. Parses JSON response (~200ms per profile)
-  // 3. Persists followers/views to SocialAccount in DB via prisma.socialAccount.update()
-  // 4. (v0.4.0) Creates a DailySnapshot record to track historical metrics over time (real analytics model).
-  // 5. Emits Socket.io event for real-time dashboard updates
+  // Worker uses the account's existing Patchright context, pinned proxy,
+  // fingerprint and encrypted cookie session.
+  // YouTube: reads published rows from Studio Content → Shorts
+  //          (.tablecell-views), updates VideoPublication and DailySnapshot.
+  // TikTok: reads visible profile counters and updates the same daily model.
+  // Missing counters fail closed; no synthetic zero snapshot is written.
+  // Busy account/proxy locks produce a delayed retry under the same daily key.
 }
 
 // Cron scheduling (registered by apps/api/src/lib/cron-scheduler.ts):
-//   analytics-cron: every 6 hours (BullMQ repeatable)
+//   analytics-cron: daily at 03:15 UTC (BullMQ repeatable)
 //   shadowban-check: every 12 hours (BullMQ repeatable)
-// Fan-out: cron job iterates all user accounts and dispatches
-// individual per-account jobs with staggered delays (2-5s) to prevent rate limits.
+// Fan-out: connected ALIVE/WARMING_UP accounts with encrypted cookies and an
+// active pinned proxy receive individual jobs with staggered delays.
 ```
 
 ### Queue: `cleanup`
