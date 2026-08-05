@@ -1,0 +1,112 @@
+name: VPS Read-only Audit
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect production queues and warmup state
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: 22
+          command_timeout: 5m
+          script: |
+            set -e
+            cd /opt/melonitymedia
+
+            echo "══════ Revision and containers ══════"
+            git rev-parse --short HEAD
+            docker compose ps
+
+            echo "══════ Active BullMQ jobs (safe fields only) ══════"
+            docker compose exec -T api node --input-type=module <<'NODE'
+            import { Queue } from 'bullmq';
+
+            const redisUrl = new URL(process.env.REDIS_URL);
+            const connection = {
+              host: redisUrl.hostname,
+              port: Number(redisUrl.port || 6379),
+              username: redisUrl.username || undefined,
+              password: redisUrl.password || undefined,
+            };
+            const names = ['upload', 'warmup', 'cookies', 'edit-profile', 'login', 'analytics-cron', 'shadowban-check', 'cleanup'];
+            const queues = names.map((name) => new Queue(name, { connection }));
+            const now = Date.now();
+
+            for (const queue of queues) {
+              const jobs = await queue.getActive(0, 20);
+              console.log(JSON.stringify({
+                queue: queue.name,
+                paused: await queue.isPaused(),
+                active: jobs.map((job) => ({
+                  id: job.id,
+                  name: job.name,
+                  accountId: job.data?.accountId ?? null,
+                  taskId: job.data?.taskId ?? null,
+                  warmupDay: job.data?.warmupDay ?? null,
+                  sessionInDay: job.data?.sessionInDay ?? null,
+                  processedMinutes: job.processedOn ? Math.round((now - job.processedOn) / 60000) : null,
+                  attemptsMade: job.attemptsMade,
+                })),
+              }));
+            }
+
+            await Promise.allSettled(queues.map((queue) => queue.close()));
+            process.exit(0);
+            NODE
+
+            echo "══════ Affected account state ══════"
+            docker compose exec -T api node --input-type=module <<'NODE'
+            import { PrismaClient } from '@prisma/client';
+
+            const prisma = new PrismaClient();
+            const prefixes = ['067e7c16', '37ced14c', '9ffb02aa'];
+            const accounts = await prisma.socialAccount.findMany({
+              where: { OR: prefixes.map((prefix) => ({ id: { startsWith: prefix } })) },
+              select: {
+                id: true,
+                userId: true,
+                username: true,
+                status: true,
+                warmupDays: true,
+                lastWarmupDay: true,
+                warmupStartedAt: true,
+                warmupCompletedAt: true,
+                lastError: true,
+                updatedAt: true,
+              },
+              orderBy: { id: 'asc' },
+            });
+            console.log(JSON.stringify(accounts, null, 2));
+
+            const userIds = [...new Set(accounts.map((account) => account.userId))];
+            const tasks = await prisma.task.findMany({
+              where: {
+                type: 'WARMUP',
+                userId: { in: userIds },
+              },
+              select: {
+                id: true,
+                userId: true,
+                accountId: true,
+                status: true,
+                bullmqJobId: true,
+                createdAt: true,
+                startedAt: true,
+                completedAt: true,
+                error: true,
+              },
+              orderBy: { createdAt: 'desc' },
+              take: 30,
+            });
+            console.log(JSON.stringify({ tasks }, null, 2));
+            await prisma.$disconnect();
+            NODE
+
+            echo "══════ Worker logs (last 200) ══════"
+            docker compose logs worker --tail=200 --no-color 2>&1
