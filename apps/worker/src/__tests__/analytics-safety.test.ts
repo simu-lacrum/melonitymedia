@@ -3,11 +3,11 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const ANALYTICS_SOURCE = fs.readFileSync(
-  path.resolve(process.cwd(), 'apps/worker/src/handlers/analytics.ts'),
+  path.resolve(__dirname, '../handlers/analytics.ts'),
   'utf8',
 );
 const LAUNCHER_SOURCE = fs.readFileSync(
-  path.resolve(process.cwd(), 'apps/worker/src/core/browser/patchright-launcher.ts'),
+  path.resolve(__dirname, '../core/browser/patchright-launcher.ts'),
   'utf8',
 );
 

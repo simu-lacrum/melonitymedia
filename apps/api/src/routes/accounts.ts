@@ -9,7 +9,7 @@
 //    before storing in DB (MASTER_KEY required)
 // 3. Per-account fingerprint auto-generated on import
 // 4. New status values: EXPIRED_COOKIES, SHADOWBAN_SUSPECTED, WARMING_UP
-// 5. POST /warmup calculates warmupDay from warmupStartedAt
+// 5. Warmup progress is based on completed worker days, never wall-clock time
 // 6. POST /:id/cookies for single account cookie re-import
 //
 // ALL queries are userId-scoped — strict tenant isolation.
@@ -24,7 +24,13 @@ import crypto from 'crypto';
 import { generateFingerprint, generateMobileFingerprint } from '../lib/fingerprint.js';
 import { publishVerificationCode, publishResendCommand } from '../lib/redis-pubsub.js';
 import { dispatchAccountJob, type DispatchedJob } from '../lib/job-dispatch.js';
-import { hasCompletedWarmupMismatch, normalizeWarmupComments, normalizeWarmupDays } from '../lib/warmup-state.js';
+import {
+  getWarmupDisplayDay,
+  hasCompletedWarmupMismatch,
+  normalizeWarmupComments,
+  normalizeWarmupDays,
+} from '../lib/warmup-state.js';
+import { reconcileUserWarmupProgress } from '../lib/warmup-progress.js';
 import { parseAndNormalizeCookies } from '../lib/cookie-normalizer.js';
 
 const router = Router();
@@ -208,17 +214,7 @@ function encryptCookies(jsonStr: string): { encrypted: Buffer; iv: Buffer; authT
 // ── GET / — list all accounts for current user ──────────────
 router.get('/', async (req: Request, res: Response) => {
   try {
-    await prisma.socialAccount.updateMany({
-      where: {
-        userId: req.user!.id,
-        status: 'WARMING_UP',
-        warmupCompletedAt: { not: null },
-      },
-      data: {
-        status: 'ALIVE',
-        lastError: null,
-      },
-    });
+    await reconcileUserWarmupProgress(req.user!.id);
 
     // Optional pagination (backwards-compatible: frontend can omit these)
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
@@ -240,14 +236,7 @@ router.get('/', async (req: Request, res: Response) => {
 
     // Strip encrypted cookie data from response (never send to frontend)
     const sanitized = accounts.map((a: typeof accounts[number]) => {
-      const warmupDay = a.warmupCompletedAt
-        ? a.warmupDays ?? 10
-        : a.warmupStartedAt
-        ? Math.min(
-            a.warmupDays ?? 10,
-            Math.ceil((Date.now() - new Date(a.warmupStartedAt).getTime()) / 86_400_000),
-          )
-        : null;
+      const warmupDay = getWarmupDisplayDay(a);
 
       // Compute remaining days in the 14-day pin window (frontend uses this for badge)
       const pinDaysRemaining = a.proxyPinnedAt
@@ -1282,6 +1271,21 @@ router.post('/warmup', async (req: Request, res: Response) => {
     const failures = results.filter(r => !r.jobId);
 
     if (dispatched === 0) {
+      const alreadyWarmed = failures.filter(f => f.error === 'WARMUP_ALREADY_COMPLETED').length;
+      if (alreadyWarmed === failures.length) {
+        const completedTask = await prisma.task.update({
+          where: { id: task.id },
+          data: {
+            status: 'COMPLETED',
+            progress: 100,
+            completedAt: new Date(),
+            config: { accountIds: ids, threads: 3, warmupDays: days, hashtags, comments, dispatchedJobs: results } as any,
+          },
+        });
+        res.status(200).json({ task: completedTask, dispatched: 0, skipped: alreadyWarmed, alreadyWarmed });
+        return;
+      }
+
       let error = 'Не удалось запустить прогрев: аккаунты не прошли pre-flight проверки';
       if (failures.some(f => f.error === 'NO_PROXY')) {
         error = 'Не удалось запустить прогрев: у аккаунтов нет привязанного рабочего прокси.';
@@ -1312,17 +1316,25 @@ router.post('/warmup', async (req: Request, res: Response) => {
     }
 
     if (dispatchedAccountIds.length > 0) {
-      await prisma.socialAccount.updateMany({
-        where: { id: { in: dispatchedAccountIds }, userId: req.user!.id },
-        data: {
-          status: 'WARMING_UP',
-          warmupDays: days,
-          warmupStartedAt: new Date(),
-          warmupCompletedAt: null,
-          lastWarmupDay: null,
-          lastError: null,
-        },
-      });
+      const startedAt = new Date();
+      await prisma.$transaction([
+        prisma.socialAccount.updateMany({
+          where: {
+            id: { in: dispatchedAccountIds },
+            userId: req.user!.id,
+            warmupStartedAt: null,
+          },
+          data: { warmupStartedAt: startedAt },
+        }),
+        prisma.socialAccount.updateMany({
+          where: { id: { in: dispatchedAccountIds }, userId: req.user!.id },
+          data: {
+            status: 'WARMING_UP',
+            warmupDays: days,
+            lastError: null,
+          },
+        }),
+      ]);
     }
 
     await prisma.task.update({

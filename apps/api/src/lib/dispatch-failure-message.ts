@@ -21,6 +21,8 @@ export function describeDispatchFailure(error?: string): string {
   }
 
   switch (error) {
+    case 'WARMUP_ALREADY_COMPLETED':
+      return 'Прогрев уже завершён: аккаунт готов к заливу, повторная задача не нужна.';
     case 'WARMUP_REQUIRED':
       return 'Прогрев аккаунта не завершён. Завершите прогрев или выберите аккаунт со статусом «Готов».';
     case 'NO_PROXY':

@@ -114,9 +114,11 @@ describe('account UI safety copy', () => {
   it('prevents upload selection for accounts whose warmup is incomplete', () => {
     expect(WORKSPACE_PAGE_SRC).toContain('isUploadReady');
     expect(WORKSPACE_PAGE_SRC).toContain('warmupCompletedAt');
-    expect(WORKSPACE_PAGE_SRC).toContain('disabled={uploadUnavailable}');
-    expect(WORKSPACE_PAGE_SRC).toContain('Прогрев идёт');
+    expect(WORKSPACE_PAGE_SRC).toContain('disabled={accountUnavailable}');
+    expect(WORKSPACE_PAGE_SRC).toContain('Прогрев ${warmupProgress');
     expect(WORKSPACE_PAGE_SRC).toContain('Нужен прогрев');
+    expect(WORKSPACE_PAGE_SRC).toContain('Готов к заливу');
+    expect(WORKSPACE_PAGE_SRC).toContain('account.warmupCompletedAt');
   });
 
   it('surfaces partial launch failures and duplicate-safe skips', () => {

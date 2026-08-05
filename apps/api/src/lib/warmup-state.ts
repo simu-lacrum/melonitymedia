@@ -50,3 +50,91 @@ export function hasCompletedWarmupMismatch(account: {
 }): boolean {
   return account.status === 'WARMING_UP' && account.warmupCompletedAt !== null;
 }
+
+export interface WarmupTaskEvidence {
+  accountId?: string | null;
+  bullmqJobId?: string | null;
+  completedAt?: Date | string | null;
+  createdAt: Date | string;
+  config: unknown;
+  status: string;
+}
+
+export interface RecoveredWarmupProgress {
+  completedAt: Date | null;
+  completedDays: number;
+  startedAt: Date | null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function taskContainsAccount(task: WarmupTaskEvidence, accountId: string): boolean {
+  if (task.accountId === accountId) return true;
+  const accountIds = asRecord(task.config).accountIds;
+  return Array.isArray(accountIds) && accountIds.includes(accountId);
+}
+
+function completedDaysBeforeTrackedJob(jobId: string | null | undefined, accountId: string): number {
+  if (!jobId || !jobId.includes(`-${accountId}-day`)) return 0;
+  const match = jobId.match(/-day(\d+)-s\d+$/);
+  if (!match) return 0;
+
+  // A day-N job is only scheduled after every session from day N-1 completed.
+  return Math.max(0, Number(match[1]) - 1);
+}
+
+/**
+ * Recover durable progress from task history after legacy API versions reset
+ * lastWarmupDay. Only completed tasks or a follow-up job scheduled by the
+ * worker count as evidence; elapsed wall-clock time is intentionally ignored.
+ */
+export function recoverWarmupProgress(
+  accountId: string,
+  tasks: WarmupTaskEvidence[],
+): RecoveredWarmupProgress {
+  let completedAt: Date | null = null;
+  let completedDays = 0;
+  let startedAt: Date | null = null;
+
+  for (const task of tasks) {
+    if (!taskContainsAccount(task, accountId)) continue;
+
+    const taskStartedAt = new Date(task.createdAt);
+    if (!Number.isNaN(taskStartedAt.getTime()) && (!startedAt || taskStartedAt < startedAt)) {
+      startedAt = taskStartedAt;
+    }
+
+    const config = asRecord(task.config);
+    const taskDays = normalizeWarmupDays(config.warmupDays);
+    if (task.status === 'COMPLETED') {
+      completedDays = Math.max(completedDays, taskDays);
+      const taskCompletedAt = task.completedAt ? new Date(task.completedAt) : taskStartedAt;
+      if (!Number.isNaN(taskCompletedAt.getTime()) && (!completedAt || taskCompletedAt > completedAt)) {
+        completedAt = taskCompletedAt;
+      }
+      continue;
+    }
+
+    completedDays = Math.max(
+      completedDays,
+      Math.min(taskDays, completedDaysBeforeTrackedJob(task.bullmqJobId, accountId)),
+    );
+  }
+
+  return { completedAt, completedDays, startedAt };
+}
+
+export function getWarmupDisplayDay(account: {
+  lastWarmupDay: number | null;
+  warmupCompletedAt: Date | string | null;
+  warmupDays: number;
+}): number | null {
+  const totalDays = normalizeWarmupDays(account.warmupDays);
+  if (account.warmupCompletedAt) return totalDays;
+  if (account.lastWarmupDay === null) return null;
+  return Math.max(0, Math.min(totalDays, account.lastWarmupDay));
+}

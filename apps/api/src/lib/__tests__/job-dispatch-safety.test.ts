@@ -22,6 +22,8 @@ describe('job dispatch safety guards', () => {
     expect(JOB_DISPATCH_SRC).toContain("const invalidSessionStatuses = ['AUTH_NEEDED', 'EXPIRED_COOKIES', 'VERIFYING']");
     expect(JOB_DISPATCH_SRC).toContain("args.queueName === 'warmup' && account.status === 'WARMING_UP'");
     expect(JOB_DISPATCH_SRC).toContain("error: 'ACCOUNT_WARMING_UP'");
+    expect(JOB_DISPATCH_SRC).toContain('reconcileUserWarmupProgress');
+    expect(JOB_DISPATCH_SRC).toContain("error: 'WARMUP_ALREADY_COMPLETED'");
   });
 
   it('keeps fingerprint and proxy resolved fresh in the worker', () => {

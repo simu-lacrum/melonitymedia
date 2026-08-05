@@ -1,8 +1,9 @@
 # Changelog
 
-## [Unreleased] - 2026-08-03
+## [Unreleased] - 2026-08-05
 
 ### Fixed / Changed
+- **Warmup Progress Persistence**: повторный запуск и отмена больше не обнуляют завершённые дни; legacy-прогресс восстанавливается из WARMUP task history, UI показывает worker-confirmed X/Y, а завершённые аккаунты сразу доступны для залива без повторного полного прогрева.
 - **Dead Proxy Handling**: tasks now stop before browser launch when the pinned proxy is unavailable; the account keeps its YouTube session/warmup state and the account table shows a dedicated proxy warning.
 - **Sensitive Error Redaction**: curl failures no longer propagate command arguments that may contain cookies, request bodies, or proxy credentials.
 - **Cookie Compatibility**: SameSite/expiry/boolean значения из browser extensions и Netscape приводятся к формату Patchright; `#HttpOnly_` cookies больше не теряются.

@@ -228,8 +228,10 @@ JWT передаётся через **HttpOnly Cookie** (`token`). Middleware `j
 ```typescript
 // Request — start warmup curriculum (1-21 days, default 10)
 { ids: string[], warmupDays?: number }
-// warmupDays clamped to [3, 21], default 10 if omitted.
-// Sets status = WARMING_UP, warmupDays = days, warmupStartedAt = now()
+// warmupDays clamped to [1, 21], default 10 if omitted.
+// Sets status = WARMING_UP and initializes warmupStartedAt only on first start.
+// Existing lastWarmupDay/warmupStartedAt are preserved on resume or cancellation.
+// A completed account is skipped as already ready; no duplicate warmup is queued.
 // Phase boundaries scale proportionally:
 //   Phase 1 (passive): first 30% of total days
 //   Phase 2 (light):   next 30%
@@ -430,6 +432,9 @@ interface WarmupJobPayload {
   //   after the last session, the next day is scheduled after a 6-8h sleep.
   //   User only needs to start warmup once — all subsequent days are automatic.
   //   On the final day: status → ALIVE, warmupCompletedAt → now().
+  //   Cancellation/retry preserves lastWarmupDay. Legacy reset damage is
+  //   recovered from completed tasks or worker-created next-day job IDs only;
+  //   elapsed wall-clock days never count as completed warmup.
   //
   // FAST HOURS MODE:
   //   warmupMode="HOURS" runs an expedited active session loop for the selected

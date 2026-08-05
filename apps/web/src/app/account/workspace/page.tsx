@@ -118,6 +118,8 @@ interface WorkspaceAccount {
   username: string
   platform: string
   status: string
+  warmupDay?: number | null
+  warmupDays?: number | null
   warmupCompletedAt?: string | null
 }
 
@@ -125,6 +127,7 @@ interface WorkspaceLaunchResponse {
   dispatched: number
   skipped: number
   alreadyUploaded?: number
+  alreadyWarmed?: number
   warning?: string | null
 }
 
@@ -211,7 +214,11 @@ export default function WorkspacePage() {
   } | null>(null)
 
   const selectableAccounts = React.useMemo(
-    () => mode === "UPLOAD" ? accounts.filter(isUploadReady) : accounts,
+    () => mode === "UPLOAD"
+      ? accounts.filter(isUploadReady)
+      : mode === "WARMUP"
+        ? accounts.filter((account) => !account.warmupCompletedAt)
+        : accounts,
     [accounts, mode],
   )
   const allSelectableAccountsSelected = selectableAccounts.length > 0
@@ -295,11 +302,12 @@ export default function WorkspacePage() {
   }, [mode])
 
   React.useEffect(() => {
-    if (mode !== "UPLOAD") return
+    if (mode !== "UPLOAD" && mode !== "WARMUP") return
     setSelectedAccountIds((selected) => new Set(
       [...selected].filter((accountId) => {
         const account = accounts.find((candidate) => candidate.id === accountId)
-        return account ? isUploadReady(account) : false
+        if (!account) return false
+        return mode === "UPLOAD" ? isUploadReady(account) : !account.warmupCompletedAt
       }),
     ))
   }, [accounts, mode])
@@ -394,6 +402,10 @@ export default function WorkspacePage() {
       setLaunchStatus("success")
       if (result.dispatched === 0 && (result.alreadyUploaded || 0) > 0) {
         const msg = "Ролик уже загружен на выбранные аккаунты. Повторный залив не создан."
+        toast.info(msg)
+        setStatusMsg(msg)
+      } else if (result.dispatched === 0 && (result.alreadyWarmed || 0) > 0) {
+        const msg = "Выбранные аккаунты уже прошли прогрев и готовы к заливу."
         toast.info(msg)
         setStatusMsg(msg)
       } else if (result.warning) {
@@ -1030,17 +1042,26 @@ export default function WorkspacePage() {
                   ) : (
                     accounts.map(acc => {
                       const uploadUnavailable = mode === "UPLOAD" && !isUploadReady(acc)
+                      const warmupComplete = mode === "WARMUP" && Boolean(acc.warmupCompletedAt)
+                      const accountUnavailable = uploadUnavailable || warmupComplete
+                      const warmupProgress = acc.warmupDays
+                        ? `${acc.warmupDay ?? 0}/${acc.warmupDays}`
+                        : null
                       return (
                         <label
                           key={acc.id}
                           className={`flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors duration-150 ${
-                            uploadUnavailable ? "cursor-not-allowed opacity-60" : "hover:bg-accent/50 cursor-pointer"
+                            accountUnavailable ? "cursor-not-allowed opacity-60" : "hover:bg-accent/50 cursor-pointer"
                           }`}
-                          title={uploadUnavailable ? "Сначала завершите прогрев аккаунта" : undefined}
+                          title={uploadUnavailable
+                            ? "Сначала завершите оставшиеся дни прогрева аккаунта"
+                            : warmupComplete
+                              ? "Прогрев уже завершён; аккаунт доступен во вкладке «Залив»"
+                              : undefined}
                         >
                           <Checkbox
                             checked={selectedAccountIds.has(acc.id)}
-                            disabled={uploadUnavailable}
+                            disabled={accountUnavailable}
                             onCheckedChange={(checked) => {
                               const next = new Set(selectedAccountIds)
                               if (checked) next.add(acc.id)
@@ -1051,7 +1072,14 @@ export default function WorkspacePage() {
                           <span className="text-sm truncate flex-1">{acc.username || acc.id.slice(0, 8)}</span>
                           {uploadUnavailable && (
                             <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                              {acc.status === "WARMING_UP" ? "Прогрев идёт" : "Нужен прогрев"}
+                              {acc.status === "WARMING_UP"
+                                ? `Прогрев ${warmupProgress ?? "идёт"}`
+                                : `Нужен прогрев${warmupProgress ? ` ${warmupProgress}` : ""}`}
+                            </Badge>
+                          )}
+                          {warmupComplete && (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                              Готов к заливу
                             </Badge>
                           )}
                           <Badge variant="secondary" className="text-[10px] px-1.5 py-0">

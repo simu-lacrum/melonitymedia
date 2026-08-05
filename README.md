@@ -51,7 +51,7 @@ MelonityMedia — закрытая платформа для арбитражн�
 | 🎥 **YouTube Shorts** | Полноценная поддержка загрузки коротких видео на YouTube |
 | 🔐 **Google/YouTube Login** | Автоматическая авторизация через Google с resilient-селекторами, rate-limit detection и CAPTCHA-обнаружением |
 | 🔑 **TikTok 2FA** | Поддержка двухфакторной аутентификации: SMS, Email, Authenticator + email verification detection |
-| 🔥 **Прогрев аккаунтов** | Niche-focused warmup v4: human-like search по хэштегам, progressive curriculum (passive → active), **multi-session self-rescheduling** |
+| 🔥 **Прогрев аккаунтов** | Niche-focused warmup v4: progressive curriculum, **multi-session self-rescheduling**, сохранение и восстановление реально завершённых дней без повторного прогрева |
 | 🍪 **Умный импорт** | Двойной формат: cookies (JSON) и login:password, привязка прокси при импорте, авто-создание профилей |
 | 🔄 **Session refresh** | Браузерная проверка и продление сессий через закреплённые proxy/fingerprint; старые форматы cookies нормализуются автоматически, stale-сессии проверяются cron каждые 6ч |
 | 📊 **Аналитика** | Суточный browser-based сбор по всем подключённым аккаунтам; YouTube views читаются из Studio Content → Shorts и сохраняются в DailySnapshot |
@@ -436,7 +436,7 @@ graph LR
 | Очередь | Хэндлер | Триггер | Описание |
 |---------|---------|---------|----------|
 | `upload` | `upload.ts` | Кнопка «Запустить» | Patchright upload + per-account video uniquification + optional banner overlay; success is accepted only after platform confirmation |
-| `warmup` | `warmup.ts` | Кнопка (auto-continues) | Niche-focused warmup v4: human-like search по хэштегам, progressive curriculum (passive → active), **multi-session self-rescheduling** |
+| `warmup` | `warmup.ts` | Кнопка (auto-continues) | Niche-focused progressive curriculum с multi-session self-rescheduling; повторный запуск/отмена сохраняют `lastWarmupDay`, завершённый прогрев повторно не ставится в очередь |
 | `cookies` | `cookies.ts` | Кнопка / Cron | Refresh сессии: Patchright session → platform auth check → re-export cookies → re-encrypt → save |
 | `edit-profile` | `edit-profile.ts` | Кнопка | Смена **баннера**, **аватара** (upload по URL/файлу), никнейма, био через ghost-cursor (TikTok + YouTube Studio), session warmup для YT |
 | `analytics-cron` | `analytics.ts` | Cron (раз в сутки, 03:15 UTC) | Fan-out по подключённым `ALIVE`/`WARMING_UP` аккаунтам; YouTube Studio Shorts views → `VideoPublication` + `DailySnapshot`; занятые ресурсы и временные Studio/network ошибки переносятся под тем же дневным ключом |

@@ -130,6 +130,17 @@ describe('humanized content flows', () => {
 });
 
 describe('task state truthfulness', () => {
+  it('does not reopen a completed warmup when a stale delayed job arrives', () => {
+    expect(WARMUP_HANDLER).toContain('if (ctxAcc.warmupCompletedAt)');
+    expect(WARMUP_HANDLER).toContain('повторная browser-сессия не требуется');
+    const initialization = WARMUP_HANDLER.slice(
+      WARMUP_HANDLER.indexOf('if (!ctxAcc.warmupStartedAt)'),
+      WARMUP_HANDLER.indexOf('// BUG-M7 fix'),
+    );
+    expect(initialization).not.toContain('warmupCompletedAt: null');
+    expect(initialization).not.toContain('lastWarmupDay: null');
+  });
+
   it('does not leave a failed warmup account visually stuck in WARMING_UP', () => {
     expect(WORKER_INDEX).toContain('function getJobAccountId');
     expect(WORKER_INDEX).toContain("task.type === 'WARMUP'");

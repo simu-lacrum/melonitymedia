@@ -36,6 +36,7 @@ import videosRoutes from './routes/videos.js';
 import analyticsRoutes from './routes/analytics.js';
 import adminRoutes from './routes/admin.js';
 import { registerCronJobs } from './lib/cron-scheduler.js';
+import { reconcileAllWarmupProgress } from './lib/warmup-progress.js';
 
 // ── Fail-fast: Validate critical secrets at startup ────────
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -185,6 +186,20 @@ httpServer.listen(PORT, () => {
   // Register cron jobs (analytics, shadowban checks)
   registerCronJobs().catch(err => {
     console.error('[Server] Failed to register cron jobs:', err);
+  });
+
+  reconcileAllWarmupProgress().then((result) => {
+    if (result.repaired.length === 0) {
+      console.log(`[Warmup] Progress audit complete: ${result.scanned} account(s), no repairs needed`);
+      return;
+    }
+
+    const details = result.repaired.map((item) =>
+      `${item.accountId.slice(0, 8)}=${item.recoveredDay}/${item.totalDays}:${item.completed ? 'ready' : 'warming'}`,
+    );
+    console.log(`[Warmup] Repaired ${result.repaired.length}/${result.scanned} account(s): ${details.join(', ')}`);
+  }).catch((err) => {
+    console.error('[Warmup] Progress audit failed:', err);
   });
 });
 

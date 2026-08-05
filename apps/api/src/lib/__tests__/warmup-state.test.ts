@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_WARMUP_DAYS,
   DEFAULT_WARMUP_HOURS,
+  getWarmupDisplayDay,
   hasCompletedWarmupMismatch,
   MAX_WARMUP_COMMENT_LENGTH,
   MAX_WARMUP_COMMENTS,
@@ -9,6 +10,7 @@ import {
   normalizeWarmupDays,
   normalizeWarmupHours,
   normalizeWarmupMode,
+  recoverWarmupProgress,
 } from '../warmup-state.js';
 
 describe('warmup-state', () => {
@@ -65,5 +67,80 @@ describe('warmup-state', () => {
       status: 'ALIVE',
       warmupCompletedAt: new Date('2026-06-18T17:40:56.094Z'),
     })).toBe(false);
+  });
+
+  it('reports worker-completed days instead of elapsed calendar days', () => {
+    expect(getWarmupDisplayDay({
+      lastWarmupDay: 4,
+      warmupCompletedAt: null,
+      warmupDays: 5,
+    })).toBe(4);
+    expect(getWarmupDisplayDay({
+      lastWarmupDay: null,
+      warmupCompletedAt: null,
+      warmupDays: 5,
+    })).toBeNull();
+    expect(getWarmupDisplayDay({
+      lastWarmupDay: 2,
+      warmupCompletedAt: new Date('2026-06-18T17:40:56.094Z'),
+      warmupDays: 5,
+    })).toBe(5);
+  });
+
+  it('recovers completed days from worker-created next-day jobs', () => {
+    const progress = recoverWarmupProgress('account-1', [{
+      accountId: 'account-1',
+      bullmqJobId: 'warmup-task-account-1-day5-s0',
+      completedAt: null,
+      createdAt: new Date('2026-08-01T08:00:00.000Z'),
+      config: { accountIds: ['account-1'], warmupDays: 5 },
+      status: 'FAILED',
+    }]);
+
+    expect(progress.completedDays).toBe(4);
+    expect(progress.completedAt).toBeNull();
+    expect(progress.startedAt).toEqual(new Date('2026-08-01T08:00:00.000Z'));
+  });
+
+  it('restores permanent readiness from a completed warmup task', () => {
+    const progress = recoverWarmupProgress('account-1', [{
+      accountId: null,
+      bullmqJobId: 'warmup-task-account-1-day5-s2',
+      completedAt: new Date('2026-08-05T08:00:00.000Z'),
+      createdAt: new Date('2026-08-01T08:00:00.000Z'),
+      config: { accountIds: ['account-1', 'account-2'], warmupDays: 5 },
+      status: 'COMPLETED',
+    }]);
+
+    expect(progress.completedDays).toBe(5);
+    expect(progress.completedAt).toEqual(new Date('2026-08-05T08:00:00.000Z'));
+  });
+
+  it('does not credit unrelated, initial, or same-day jobs', () => {
+    const progress = recoverWarmupProgress('account-1', [
+      {
+        accountId: 'account-2',
+        bullmqJobId: 'warmup-task-account-2-day8-s0',
+        createdAt: new Date(),
+        config: { warmupDays: 10 },
+        status: 'FAILED',
+      },
+      {
+        accountId: 'account-1',
+        bullmqJobId: '319',
+        createdAt: new Date(),
+        config: { warmupDays: 5 },
+        status: 'FAILED',
+      },
+      {
+        accountId: 'account-1',
+        bullmqJobId: 'warmup-task-account-1-day1-s3',
+        createdAt: new Date(),
+        config: { warmupDays: 5 },
+        status: 'FAILED',
+      },
+    ]);
+
+    expect(progress.completedDays).toBe(0);
   });
 });

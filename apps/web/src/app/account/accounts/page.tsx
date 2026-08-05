@@ -563,7 +563,9 @@ export default function AccountsPage() {
     const cfg = warmupStopped
       ? { label: "Прогрев остановлен", variant: "destructive" as const }
       : map[status] || { label: status, variant: "secondary" as const }
-    const warmupProgress = (status === "WARMING_UP" || warmupStopped) && acc.warmupDay
+    const warmupProgress = (status === "WARMING_UP" || warmupStopped)
+      && acc.warmupDay !== null
+      && acc.warmupDay !== undefined
       ? ` ${acc.warmupDay}/${acc.warmupDays || "?"}`
       : ""
 

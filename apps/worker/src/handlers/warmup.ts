@@ -205,6 +205,16 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
     const ctxAcc = await loadAccountContext(data.accountId);
     const totalDays = _normalizeWarmupDays(data.warmupDays, ctxAcc.warmupDays || 10);
 
+    if (ctxAcc.warmupCompletedAt) {
+      await prisma.socialAccount.updateMany({
+        where: { id: data.accountId, status: 'WARMING_UP' },
+        data: { status: 'ALIVE', lastError: null },
+      });
+      logger.info(`Прогрев уже завершён для ${data.accountId}; повторная browser-сессия не требуется.`);
+      await job.updateProgress(100);
+      return;
+    }
+
     await prisma.socialAccount.updateMany({
       where: {
         id: data.accountId,
@@ -220,8 +230,6 @@ export async function warmupHandler(job: Job<WarmupJobData>): Promise<void> {
         where: { id: data.accountId },
         data: {
           warmupStartedAt: new Date(),
-          warmupCompletedAt: null,
-          lastWarmupDay: null,
           warmupDays: totalDays,
           status: 'WARMING_UP',
           lastError: null,

@@ -26,13 +26,28 @@ describe('account route safety guards', () => {
     expect(WORKSPACE_SRC).toContain('forceSkipWarmup: force');
   });
 
-  it('rolls back unfinished warmup status when a warmup task is cancelled', () => {
+  it('stops a cancelled warmup without erasing completed-day progress', () => {
     expect(WORKSPACE_SRC).toContain("task.type === 'WARMUP'");
     expect(WORKSPACE_SRC).toContain('collectTaskAccountIds');
     expect(WORKSPACE_SRC).toContain("status: 'WARMING_UP'");
     expect(WORKSPACE_SRC).toContain("status: 'ALIVE'");
+    const cancelBlock = WORKSPACE_SRC.slice(
+      WORKSPACE_SRC.indexOf("if (task.type === 'WARMUP')", WORKSPACE_SRC.indexOf("router.post('/jobs/:taskId/cancel'")),
+      WORKSPACE_SRC.indexOf('const cancelled = await prisma.task.update'),
+    );
+    expect(cancelBlock).not.toContain('warmupStartedAt: null');
+    expect(cancelBlock).not.toContain('lastWarmupDay: null');
+  });
+
+  it('resumes warmup launches without resetting lastWarmupDay', () => {
     expect(WORKSPACE_SRC).toContain('warmupStartedAt: null');
-    expect(WORKSPACE_SRC).toContain('lastWarmupDay: null');
+    expect(WORKSPACE_SRC).toContain('data: { warmupStartedAt: startedAt }');
+    const launchPersistence = WORKSPACE_SRC.slice(
+      WORKSPACE_SRC.indexOf("if (type === 'WARMUP' && successfulAccountIds.length > 0)"),
+      WORKSPACE_SRC.indexOf('await prisma.task.update', WORKSPACE_SRC.indexOf("if (type === 'WARMUP' && successfulAccountIds.length > 0)")),
+    );
+    expect(launchPersistence).not.toContain('lastWarmupDay: null');
+    expect(launchPersistence).not.toContain('warmupCompletedAt: null');
   });
 
   it('does not mark multi-session warmup tasks completed while accounts are still warming', () => {

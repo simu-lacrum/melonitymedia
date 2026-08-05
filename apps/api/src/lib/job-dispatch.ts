@@ -17,6 +17,8 @@ import { prisma } from "./prisma.js";
 import { addJob } from "./bullmq.js";
 import { redis } from "./redis.js";
 import type { QueueName } from "./bullmq.js";
+import { reconcileUserWarmupProgress } from './warmup-progress.js';
+import { normalizeWarmupDays } from './warmup-state.js';
 
 const LOCK_PREFIX = 'account-browser-lock:';
 
@@ -81,12 +83,26 @@ export async function dispatchAccountJob(args: {
   /** BullMQ delay in ms before the job becomes processable */
   delay?: number;
 }): Promise<DispatchedJob> {
-  const account = await prisma.socialAccount.findFirst({
+  let account = await prisma.socialAccount.findFirst({
     where: { id: args.accountId, userId: args.userId },
     include: { pinnedProxy: true },
   });
 
   if (!account) return { accountId: args.accountId, jobId: null, error: "NO_ACCOUNT" };
+
+  if (
+    (args.queueName === 'upload' || args.queueName === 'warmup')
+    && (!account.warmupCompletedAt || account.status === 'WARMING_UP')
+  ) {
+    const reconciliation = await reconcileUserWarmupProgress(args.userId, [args.accountId]);
+    if (reconciliation.repaired.length > 0) {
+      account = await prisma.socialAccount.findFirst({
+        where: { id: args.accountId, userId: args.userId },
+        include: { pinnedProxy: true },
+      });
+      if (!account) return { accountId: args.accountId, jobId: null, error: "NO_ACCOUNT" };
+    }
+  }
 
   // ── Check if account is already running a task ────────────
   // Uses the same Redis lock that workers acquire when they start a browser session.
@@ -119,6 +135,26 @@ export async function dispatchAccountJob(args: {
 
   if (args.queueName === 'warmup' && account.status === 'WARMING_UP') {
     return { accountId: args.accountId, jobId: null, error: 'ACCOUNT_WARMING_UP' };
+  }
+
+  if (args.queueName === 'warmup') {
+    const requestedDays = normalizeWarmupDays(args.extra.warmupDays);
+    if (!account.warmupCompletedAt && (account.lastWarmupDay ?? 0) >= requestedDays) {
+      await prisma.socialAccount.update({
+        where: { id: account.id },
+        data: {
+          status: account.status === 'ACTIVE' ? 'ACTIVE' : 'ALIVE',
+          warmupDays: requestedDays,
+          warmupCompletedAt: new Date(),
+          lastWarmupDay: requestedDays,
+          lastError: null,
+        },
+      });
+      return { accountId: args.accountId, jobId: null, error: 'WARMUP_ALREADY_COMPLETED' };
+    }
+    if (account.warmupCompletedAt) {
+      return { accountId: args.accountId, jobId: null, error: 'WARMUP_ALREADY_COMPLETED' };
+    }
   }
 
   // Upload-specific guards

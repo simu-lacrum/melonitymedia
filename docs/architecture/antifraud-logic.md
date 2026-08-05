@@ -380,7 +380,7 @@ model SocialAccount {
 
 Гард:
 - Аккаунт с `warmupCompletedAt === null` НЕ допускается в очередь `upload`
-- Статус `WARMING_UP` → `ALIVE` автоматически при `warmupDay >= 10`
+- Статус `WARMING_UP` → `ALIVE` автоматически при `lastWarmupDay >= warmupDays`
 - Режим `warmupMode="HOURS"` является ускоренным пользовательским прогревом: после выбранного количества часов выставляется `warmupCompletedAt`, статус становится `ALIVE`, upload-gate открывается. Это осознанный компромисс скорости против антифрод-риска; UI обязан показывать предупреждение.
 
 ### 6.1. Sequential Day Tracking (v3.2)
@@ -391,6 +391,9 @@ model SocialAccount {
 - Ранее `warmupDay` вычислялся как `Math.min(ageDays, totalDays)`, что пропускало дни.
 - Теперь каждый вызов warmup handler делает `lastWarmupDay + 1` → гарантирует прохождение всех фаз.
 - Если сервер был offline 5 дней, аккаунт продолжит с того же дня, а не перескочит.
+- Повторный запуск и отмена задачи не обнуляют `lastWarmupDay`/`warmupStartedAt`; запуск продолжает оставшиеся дни.
+- API показывает завершённые worker-дни, а не календарный возраст `warmupStartedAt`. Для legacy-записей прогресс восстанавливается только из подтверждённой истории WARMUP-задач.
+- `warmupCompletedAt` является постоянным допуском к upload. Завершённый curriculum нельзя случайно перезапустить из Workspace.
 
 ### 6.2. Self-Rescheduling (Автопродолжение, v3.3)
 

@@ -610,6 +610,28 @@ router.post('/launch', async (req: Request, res: Response) => {
 
     // If everything failed pre-flight, no point in keeping the task record.
     if (successCount === 0) {
+      const alreadyWarmed = failures.filter(failure => failure.error === 'WARMUP_ALREADY_COMPLETED').length;
+      if (type === 'WARMUP' && alreadyWarmed === failures.length) {
+        const completedTask = await prisma.task.update({
+          where: { id: task.id },
+          data: {
+            status: 'COMPLETED',
+            progress: 100,
+            completedAt: new Date(),
+            config: { ...normalizedConfig, accountIds: targetAccountIds, threads, dispatchedJobs: results },
+          },
+        });
+        res.status(200).json({
+          task: completedTask,
+          dispatched: 0,
+          skipped: alreadyWarmed,
+          alreadyWarmed,
+          failures: [],
+          warning: null,
+        });
+        return;
+      }
+
       const errorMsg = describeDispatchFailures(failures);
       const failedTask = await prisma.task.update({
         where: { id: task.id },
@@ -627,17 +649,25 @@ router.post('/launch', async (req: Request, res: Response) => {
     // Persist BullMQ job ids on the task (use first as primary, full list in config)
     if (type === 'WARMUP' && successfulAccountIds.length > 0) {
       const cfg = normalizedConfig as Record<string, unknown>;
-      await prisma.socialAccount.updateMany({
-        where: { id: { in: successfulAccountIds }, userId: req.user!.id },
-        data: {
-          status: 'WARMING_UP',
-          warmupDays: normalizeWarmupDays(cfg.warmupDays),
-          warmupStartedAt: new Date(),
-          warmupCompletedAt: null,
-          lastWarmupDay: null,
-          lastError: null,
-        },
-      });
+      const startedAt = new Date();
+      await prisma.$transaction([
+        prisma.socialAccount.updateMany({
+          where: {
+            id: { in: successfulAccountIds },
+            userId: req.user!.id,
+            warmupStartedAt: null,
+          },
+          data: { warmupStartedAt: startedAt },
+        }),
+        prisma.socialAccount.updateMany({
+          where: { id: { in: successfulAccountIds }, userId: req.user!.id },
+          data: {
+            status: 'WARMING_UP',
+            warmupDays: normalizeWarmupDays(cfg.warmupDays),
+            lastError: null,
+          },
+        }),
+      ]);
     }
 
     await prisma.task.update({
@@ -874,8 +904,6 @@ router.delete('/jobs/:id', async (req: Request, res: Response) => {
           },
           data: {
             status: 'ALIVE',
-            warmupStartedAt: null,
-            lastWarmupDay: null,
             lastError: null,
           },
         });
