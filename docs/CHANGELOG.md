@@ -3,6 +3,7 @@
 ## [Unreleased] - 2026-08-05
 
 ### Fixed / Changed
+- **Obsolete Warmup Jobs**: deployment waiting ignores only active jobs whose parent task is terminal or whose warmup is already complete; valid browser sessions still receive the full grace window.
 - **Warmup Progress Persistence**: повторный запуск и отмена больше не обнуляют завершённые дни; legacy-прогресс восстанавливается из WARMUP task history, UI показывает worker-confirmed X/Y, а завершённые аккаунты сразу доступны для залива без повторного полного прогрева.
 - **Worker Deploy Coordination**: CI временно ставит очереди на паузу, ждёт завершения уже активных browser-сессий, обновляет worker и гарантированно возобновляет очереди через EXIT trap.
 - **Dead Proxy Handling**: tasks now stop before browser launch when the pinned proxy is unavailable; the account keeps its YouTube session/warmup state and the account table shows a dedicated proxy warning.

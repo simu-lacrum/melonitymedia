@@ -109,4 +109,32 @@ describe('warmup progress reconciliation', () => {
     expect(result.repaired).toEqual([]);
     expect(prismaMock.socialAccount.update).not.toHaveBeenCalled();
   });
+
+  it('keeps the strongest completed curriculum after a shorter accidental restart', async () => {
+    prismaMock.socialAccount.findMany.mockResolvedValue([{
+      ...resetAccount,
+      status: 'ALIVE',
+      warmupDays: 2,
+      warmupCompletedAt: new Date('2026-08-04T18:00:00.000Z'),
+      lastWarmupDay: 5,
+    }]);
+    prismaMock.task.findMany.mockResolvedValue([]);
+
+    const result = await reconcileUserWarmupProgress('user-1');
+
+    expect(result.repaired).toEqual([{
+      accountId: 'account-1',
+      completed: true,
+      recoveredDay: 5,
+      totalDays: 5,
+    }]);
+    expect(prismaMock.socialAccount.update).toHaveBeenCalledWith({
+      where: { id: 'account-1' },
+      data: expect.objectContaining({
+        warmupDays: 5,
+        lastWarmupDay: 5,
+        warmupCompletedAt: new Date('2026-08-04T18:00:00.000Z'),
+      }),
+    });
+  });
 });

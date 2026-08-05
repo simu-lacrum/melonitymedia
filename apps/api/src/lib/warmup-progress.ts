@@ -74,7 +74,11 @@ export async function reconcileUserWarmupProgress(
       completedDay = totalDays;
       completedAt = new Date();
     } else if (completedAt) {
-      completedDay = Math.max(completedDay, totalDays);
+      // A completed curriculum can be followed by an accidental shorter
+      // restart (for example 5 completed days overwritten with a 2-hour run).
+      // Keep the strongest durable evidence and restore a canonical X/X state.
+      totalDays = Math.max(totalDays, completedDay);
+      completedDay = totalDays;
     }
 
     const startedAt = account.warmupStartedAt ?? evidence.startedAt;

@@ -57,24 +57,33 @@ jobs:
             docker compose exec -T api node dist/scripts/deploy-queue-control.js pause
 
             ACTIVE_JOBS=0
+            BLOCKING_JOBS=0
             for ATTEMPT in $(seq 1 60); do
               ACTIVE_JOBS=0
               for QUEUE in upload warmup cookies edit-profile login analytics-cron shadowban-check cleanup; do
                 COUNT=$(docker compose exec -T redis redis-cli -a "${REDIS_PASS}" --no-auth-warning LLEN "bull:${QUEUE}:active" | tr -d '\r')
                 ACTIVE_JOBS=$((ACTIVE_JOBS + COUNT))
               done
-              if [ "$ACTIVE_JOBS" -eq 0 ]; then break; fi
-              echo "${ACTIVE_JOBS} active job(s); waiting 20s before worker update"
+              BLOCKING_JOBS=$(docker compose exec -T api node dist/scripts/deploy-queue-control.js blocking-count | tail -n 1 | tr -d '\r')
+              if [ "$BLOCKING_JOBS" -eq 0 ]; then break; fi
+              echo "${ACTIVE_JOBS} active job(s), ${BLOCKING_JOBS} still doing valid work; waiting 20s before worker update"
               sleep 20
             done
 
-            if [ "$ACTIVE_JOBS" -ne 0 ]; then
-              echo "Worker update deferred: ${ACTIVE_JOBS} job(s) are still active. Existing work was not interrupted."
+            if [ "$BLOCKING_JOBS" -ne 0 ]; then
+              echo "Worker update deferred: ${BLOCKING_JOBS} valid job(s) are still active. Existing work was not interrupted."
               exit 1
             fi
 
-            # SIGTERM + stop_grace_period lets a race-window job finish safely.
-            docker compose stop worker
+            # Obsolete jobs belong to terminal tasks or already-completed warmups.
+            # They must not keep a deployment blocked forever. No valid browser
+            # session is active here, so a bounded stop is safe.
+            if [ "$ACTIVE_JOBS" -gt 0 ]; then
+              echo "Stopping worker with ${ACTIVE_JOBS} obsolete active job(s)"
+              docker compose stop -t 60 worker
+            else
+              docker compose stop worker
+            fi
             docker compose up -d --no-deps worker
 
             docker compose exec -T api node dist/scripts/deploy-queue-control.js resume

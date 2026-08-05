@@ -17,6 +17,11 @@ describe('worker deployment queue coordination', () => {
     expect(controlScript).toContain('warmupQueue');
     expect(controlScript).toContain('analyticsCronQueue');
     expect(controlScript).toContain("queue.pause() : queue.resume()");
+    expect(controlScript).toContain("action === 'blocking-count'");
+    expect(controlScript).toContain('TERMINAL_TASK_STATUSES');
+    expect(controlScript).toContain('warmupCompletedAt');
+    expect(workflow).toContain('deploy-queue-control.js blocking-count');
+    expect(workflow).toContain('docker compose stop -t 60 worker');
   });
 
   it('resumes queues both after success and through an EXIT trap', () => {
